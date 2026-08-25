@@ -79,6 +79,10 @@ def iter_chunks(
     pos = 0
     while True:
         yield pos, wav[pos : pos + size]
-        if pos + hop >= n:
+        # Stop as soon as this chunk reaches the end. Because the previous
+        # position satisfied pos + size < n, the final chunk is longer than
+        # (size - hop) == overlap_s — i.e. always at least one full analysis
+        # window, never a zero-padded stub.
+        if pos + size >= n:
             return
         pos += hop

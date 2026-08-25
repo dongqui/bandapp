@@ -20,11 +20,21 @@ def test_resample_is_identity_when_rates_match():
 def test_iter_chunks_covers_whole_signal_with_overlap():
     wav = np.arange(10 * 100, dtype=np.float32)  # 10 s at sr=100
     chunks = list(iter_chunks(wav, sr=100, chunk_s=4.0, overlap_s=1.0))
-    # hop = 3 s = 300 samples
-    assert [start for start, _ in chunks] == [0, 300, 600, 900]
+    # hop = 3 s = 300 samples. The chunk at 600 already spans 600..1000, so no
+    # fourth chunk is emitted — a chunk at 900 would be fully redundant.
+    assert [start for start, _ in chunks] == [0, 300, 600]
     assert len(chunks[0][1]) == 400
-    # last chunk is short and reaches the end
+    # last chunk reaches the end
     assert chunks[-1][0] + len(chunks[-1][1]) == len(wav)
+
+
+def test_iter_chunks_final_chunk_is_longer_than_the_overlap():
+    # Detectors pass overlap_s = their analysis window, so a final chunk shorter
+    # than the overlap would get zero-padded and score a spurious tail.
+    wav = np.zeros(1000, dtype=np.float32)
+    for chunk_s, overlap_s in [(4.0, 1.0), (3.0, 0.5), (2.5, 1.2)]:
+        chunks = list(iter_chunks(wav, sr=100, chunk_s=chunk_s, overlap_s=overlap_s))
+        assert len(chunks[-1][1]) > overlap_s * 100
 
 
 def test_iter_chunks_single_chunk_when_signal_shorter_than_chunk():

@@ -65,6 +65,8 @@ class Detector(ABC):
 
 리샘플링·모노 변환·정규화는 각 어댑터가 자기 요구 사양에 맞춰 내부에서 처리한다. 호출자는 원본 오디오만 넘긴다.
 
+**긴 오디오는 청크 단위로 처리한다.** 60분 오디오를 통째로 GPU에 올리면 모델에 따라 VRAM이 터진다. 어댑터는 내부에서 고정 길이(기본 60초, 윈도우 크기만큼 겹침) 청크로 잘라 추론하고 점수 곡선을 이어붙인다. 이렇게 하면 메모리 사용량이 오디오 길이와 무관해지고, § 4.3의 RTF 외삽도 정당해진다.
+
 모델마다 프레임 간격이 다르므로(YAMNet 0.48s, AST 10.24s 윈도우 등), 평가 단계에서 모든 점수 곡선을 **100ms 공통 격자**로 선형 보간해 정렬한다.
 
 ### 3.2 라인업 (7종)
@@ -124,9 +126,9 @@ data/scenes/<id>.wav  +  data/scenes/<id>.labels.json
     - {label: speech, pool: conversation, dur: 90s}
     - {label: speech_with_noodling, pool: conversation, dur: 120s,
        overlay: {pool: guitar_noodle, snr_db: 6}}
-    - {label: music,  pool: band_full, dur: 210s}
+    - {label: music,  pool: band_full, dur: 210s, take: 1}
     - {label: tuning, pool: tuning,    dur: 45s}
-    - {label: music,  pool: band_full, dur: 180s}
+    - {label: music,  pool: band_full, dur: 180s, take: 2}
 ```
 
 **`label`과 `pool`은 다른 개념이다.** `label`은 정답 라벨(§ 4.4의 6종 중 하나)이고, `pool`은 어느 클립 폴더에서 재료를 꺼낼지다. 하나의 라벨이 여러 풀에서 나올 수 있다 — `music` 라벨은 `band_full`·`drums_only`·`guitar_only` 어디서든 나올 수 있고, 이게 `partial_practice` 씬을 표현하는 방법이다.
@@ -134,6 +136,16 @@ data/scenes/<id>.wav  +  data/scenes/<id>.labels.json
 `sources.yaml`의 역할 태그가 곧 풀 이름이 된다. 초기 풀: `band_full`, `drums_only`, `guitar_only`, `conversation`, `guitar_noodle`, `tuning`, `room_tone`.
 
 `overlay`는 두 재료를 지정 SNR로 믹싱한다. `seed`로 재료 선택과 크로스페이드 길이를 고정해 재현성을 보장한다.
+
+**`take` 필드가 정답 Take 경계를 선언한다.** 같은 `take` 번호를 가진 블록들은 중간에 다른 라벨의 블록이 끼어 있어도 **하나의 Take**로 취급된다. 이것이 "곡 중간에 멈췄다 다시 시작"을 표현하는 방법이다.
+
+```yaml
+- {label: music,  pool: band_full,   dur: 40s, take: 3}
+- {label: speech, pool: conversation, dur: 8s,  take: 3}   # "야 다시 가자"
+- {label: music,  pool: band_full,   dur: 60s, take: 3}
+```
+
+Take 경계를 후처리 룰에서 유도하지 않고 레시피에서 직접 선언하는 이유는, 정답이 튜닝 파라미터에 의존하면 모델 비교가 무너지기 때문이다. `gap ≤ 10초면 병합`은 검증 대상인 가설이지 정답의 정의가 아니다.
 
 ### 4.3 씬 세트
 
@@ -143,7 +155,12 @@ data/scenes/<id>.wav  +  data/scenes/<id>.labels.json
 | `hard_noodling` | 15분 | 대화 중 기타 튕김 (Risk 1-①) |
 | `tuning_setup` | 15분 | 튜닝·세팅 소음 (Risk 1-③) |
 | `partial_practice` | 15분 | 드럼만/기타만 파트 연습 (Risk 1-②④) |
+| `restart_stop` | 15분 | 곡 중간에 멈췄다 다시 시작. gap-merge 룰 검증 |
 | `realistic_long` | 60분 | 전 요소 혼합. 실전 시뮬레이션 및 RTF 측정 |
+
+**`restart_stop`은 gap-merge 파라미터를 겨냥한 씬이다.** 연주 중단 후 재시작하는 패턴을 gap 길이를 바꿔가며 배치한다 — 3초 / 8초 / 15초 / 30초. 앞의 둘은 같은 Take(`take` 번호 공유), 뒤의 둘은 별개 Take로 선언한다. 이렇게 하면 `merge_gap` 값이 실제로 어디쯤이어야 하는지가 Take Count Error로 직접 드러난다.
+
+**`realistic_long`은 60분으로 고정한다.** PRD 기준은 1~3시간이지만 RTF는 오디오 길이에 대해 선형이므로 60분에서 측정한 값을 외삽한다. 2시간짜리를 만들면 디스크와 실험 반복 시간이 두 배가 되는데 얻는 정보는 거의 같다. 다만 메모리 사용량은 선형이 아닐 수 있으므로, 어댑터는 전체를 한 번에 올리지 않고 **청크 단위 스트리밍 추론**으로 구현한다 (§ 3.1).
 
 ### 4.4 라벨 정책 (결정됨)
 
@@ -156,6 +173,15 @@ music | speech | silence | tuning | ambient | speech_with_noodling
 **`speech_with_noodling`은 음악이 아니다.** 사용자가 다시 듣고 싶은 것은 연주이지 잡담이 아니므로, 이 구간이 Take로 뽑히면 제품 가치가 훼손된다. 모델 입장에서 가장 어려운 조건이지만, 이걸 구분하지 못하는 모델은 실제로 쓸 수 없다.
 
 평가용 이진 정답은 `is_music = (label == "music")`으로 파생된다.
+
+### 4.5 don't-care 구간
+
+`take` 그룹 안에 들어있지만 `label != "music"`인 프레임(위 예시의 "야 다시 가자" 8초)은 **don't-care**로 표시한다.
+
+- Recall 계산의 분모에 넣지 않는다 (음악이 아니므로)
+- **False Music 계산에서도 제외한다** — 제품이 원하는 동작은 이 구간을 Take 안에 포함시키는 것이므로, 음악으로 잡았다고 벌점을 주면 안 된다
+
+이 처리가 없으면 gap-merge 룰을 올바르게 적용한 모델이 오히려 손해를 본다.
 
 ---
 
@@ -186,7 +212,7 @@ PRD § 38을 그대로 구현하되 프레임 레벨과 구간 레벨을 분리�
 ### 6.1 프레임 레벨 (100ms 격자)
 
 - **Music Recall** = (검출 구간에 포함된 실제 음악 프레임) / (전체 실제 음악 프레임). **목표 90%+. 최우선 지표.**
-- **False Music Duration** = 실제 음악이 아닌데 검출 구간에 포함된 시간. 절대 초 + 전체 대비 %.
+- **False Music Duration** = 실제 음악이 아닌데 검출 구간에 포함된 시간. 절대 초 + 전체 대비 %. § 4.5의 don't-care 프레임은 분자·분모 모두에서 제외한다.
 - **케이스별 오검출 분해** — `speech_with_noodling`, `tuning`, `speech`, `ambient` 각 라벨 구간에서의 오검출률. **모델 순위를 실제로 가르는 지점이므로 리포트의 1급 시민으로 취급한다.**
 
 ### 6.2 구간 레벨
@@ -194,12 +220,13 @@ PRD § 38을 그대로 구현하되 프레임 레벨과 구간 레벨을 분리�
 - **Boundary Error** — IoU > 0.5로 매칭된 구간 쌍에 대해 `|Δstart|`, `|Δend|`의 중앙값과 p90. **목표 ±5~10초.**
 - **Take Count Error** — 검출 Take 수 − 정답 Take 수. 하나의 연주가 여러 개로 쪼개지거나 여러 연주가 하나로 뭉치는 현상을 잡는다.
 
-**정답 Take의 정의:** `labels.json`에서 `label == "music"`인 블록들 중, 시간상 맞닿아 있는 것들을 하나로 합친 구간. 후처리 룰(gap-merge, min-duration)은 여기에 적용하지 않는다 — 정답은 후처리 파라미터와 무관하게 고정되어야 공정한 비교가 된다.
+**정답 Take의 정의:** 같은 `take` 번호를 공유하는 블록들의 시간 범위 (§ 4.2). 레시피에서 직접 선언되며, 후처리 룰(gap-merge, min-duration)로부터 유도하지 않는다 — 정답이 후처리 파라미터에 의존하면 모델 비교가 무너진다.
 
 ### 6.3 운영 지표
 
-- **RTF (Realtime Factor)** = 처리 시간 / 오디오 길이. GPU·CPU 각각 측정. 2시간 녹음 처리 시간과 백엔드 비용에 직결되며 PRD § 36의 처리 상태 UX 설계 근거가 된다.
-- **모델 크기 / 최대 VRAM**
+- **RTF (Realtime Factor)** = 처리 시간 / 오디오 길이. GPU·CPU 각각 측정. `realistic_long`(60분)에서 측정한 뒤 1~3시간 구간으로 선형 외삽한다. 청크 스트리밍 추론(§ 3.1) 덕분에 이 외삽이 성립한다. 백엔드 비용과 PRD § 36의 처리 상태 UX 설계 근거가 된다.
+- **최대 VRAM / RSS** — 청크 처리가 실제로 오디오 길이와 무관한 메모리를 쓰는지 확인하는 용도이기도 하다. 10분 씬과 60분 씬에서의 값을 비교해 리포트한다.
+- **모델 크기** (디스크상 체크포인트 용량)
 
 ### 6.4 모델 선택 규칙
 
@@ -217,7 +244,7 @@ PRD § 38을 그대로 구현하되 프레임 레벨과 구간 레벨을 분리�
 
 1. **요약 테이블** — 모델 × (최적 파라미터, Recall, False Music, Boundary p50/p90, Take Count Error, RTF). Recall 90% 달성 여부를 색으로 표시.
 2. **케이스별 오검출 히트맵** — 모델 × 라벨 종류. 어떤 모델이 어떤 상황에 약한지 한눈에.
-3. **씬별 타임라인** — 정답 구간 띠를 맨 위에 두고, 그 아래 각 모델의 점수 곡선과 threshold 적용 결과 구간을 동일 x축에 정렬. 어디서 왜 틀렸는지를 눈으로 확인하는 용도.
+3. **씬별 타임라인** — 정답 구간 띠를 맨 위에 두고, 그 아래 각 모델의 점수 곡선과 threshold 적용 결과 구간을 동일 x축에 정렬. 어디서 왜 틀렸는지를 눈으로 확인하는 용도. 정답 띠는 라벨별로 색을 달리하고 **don't-care 구간은 빗금으로 구분**해, 감점되지 않는 영역이 어디인지 보이게 한다.
 4. **스윕 곡선** — threshold를 따라 그린 Recall vs False-Music 트레이드오프 곡선. 모델별로 겹쳐 그린다.
 5. **실행 메타** — 씬 해시, 모델 버전, 커밋 SHA. 재현성 확보.
 
@@ -273,8 +300,8 @@ bandpoc report                             # 스윕 + 메트릭 + HTML
 실험 코드라도 **정답이 확정적인 부분은 테스트한다.** 여기서 버그가 나면 모델 성능 차이로 오독되기 때문이다.
 
 - `postproc` — 합성 점수 배열로 병합·필터 경계 조건 검증 (정확히 gap 10초, 정확히 20초 구간 등)
-- `metrics` — 손으로 계산 가능한 작은 케이스로 Recall/False-Music/Boundary 검증
-- `synth` — 생성된 wav 길이와 labels.json이 일치하는지, seed 고정 시 재현되는지
+- `metrics` — 손으로 계산 가능한 작은 케이스로 Recall/False-Music/Boundary 검증. **don't-care 프레임이 실제로 양쪽 계산에서 빠지는지 반드시 검증한다** (§ 4.5) — 여기가 틀리면 gap-merge를 올바르게 한 모델이 조용히 벌점을 받고, 결과만 봐서는 알아챌 수 없다
+- `synth` — 생성된 wav 길이와 labels.json이 일치하는지, seed 고정 시 재현되는지, `take` 그룹이 중간 블록을 건너뛰어 올바르게 묶이는지
 - `detectors` — 각 어댑터가 `[0,1]` 범위, 올바른 길이의 배열을 반환하는지 (스모크 테스트, 짧은 합성 신호)
 
 ---

@@ -30,3 +30,26 @@ bandpoc build-scenes   # data/clips/ → data/scenes/
 bandpoc run            # 추론 → data/cache/
 bandpoc report         # 스윕 + 메트릭 → reports/<timestamp>/index.html
 ```
+
+### fetch 이후 반드시 할 일
+
+`sources.yaml`은 고정 URL이 아니라 **검색 쿼리**로 클립을 모은다. 검색 결과는
+검증되지 않았으므로, `bandpoc build-scenes` 전에 `data/clips/` 각 폴더를 직접
+들어보고 풀 의도와 다른 클립을 삭제한다. 재료가 오염되면 리포트의 모든 수치가
+조용히 틀어진다.
+
+### 새 모델 추가하기
+
+`bandpoc.detectors.base.Detector`를 상속해 `music_score`를 구현하고,
+`bandpoc/detectors/__init__.py`의 `_register_all`에 팩토리를 등록한다. 무거운
+임포트는 팩토리 안에 두어야 미설치 환경에서도 레지스트리가 뜬다.
+
+### 결과 읽는 법
+
+요약 테이블은 **Recall 90% 하한 제약 아래 False Music이 최소인 지점**을 모델별로
+보여준다. 제약을 만족하는 조합이 없으면 최대 Recall 지점에 `90% recall not
+reached` 경고가 붙는다. `ina_segmenter`와 `silero_vad`는 하드 라벨만 내놓으므로
+점수 곡선이 이진값이고 threshold 스윕이 무의미하다 — 이 두 모델의 threshold
+칼럼은 최적화 결과가 아니다.
+
+수치는 모두 **합성 씬** 기준이므로 모델 간 상대 비교로만 읽는다.

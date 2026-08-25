@@ -20,7 +20,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-torch = ["torch>=2.1", "panns-inference>=0.1.1"]
+# torchaudio: the silero-vad hub repo imports it unconditionally.
+torch = ["torch>=2.1", "torchaudio>=2.1", "panns-inference>=0.1.1"]
 hf = ["torch>=2.1", "transformers>=4.40"]
 tf = ["tensorflow-cpu>=2.13,<2.17", "tensorflow-hub>=0.15", "inaSpeechSegmenter>=0.7.7"]
 

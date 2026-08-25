@@ -46,8 +46,15 @@ def _runs_to_segments(mask: np.ndarray, hop: float) -> list[Segment]:
     edges = np.diff(padded.astype(np.int8))
     starts = np.flatnonzero(edges == 1)
     ends = np.flatnonzero(edges == -1)
-    # Round to 10 decimal places to avoid floating-point errors from frame index * hop
-    return [Segment(round(float(s) * hop, 10), round(float(e) * hop, 10)) for s, e in zip(starts, ends)]
+    # Round the returned times: frame_index * hop is not exact in binary
+    # floating point (701 * 0.1 == 70.10000000000001), so callers comparing a
+    # Segment against a literal boundary would miss. 1e-10 is far below the
+    # 0.1 s hop and inside the +/-1e-9 tolerances used by the comparisons
+    # below, so it cannot move a boundary decision.
+    return [
+        Segment(round(float(s) * hop, 10), round(float(e) * hop, 10))
+        for s, e in zip(starts, ends)
+    ]
 
 
 def _merge_gaps(segments: list[Segment], merge_gap: float) -> list[Segment]:

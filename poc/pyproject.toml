@@ -26,7 +26,14 @@ torch = ["torch>=2.1", "torchaudio>=2.1", "panns-inference>=0.1.1"]
 # transformers 5 renamed the CLAP processor audio kwarg and wrapped the
 # feature getters in output objects; the adapters use that API.
 hf = ["torch>=2.1", "transformers>=5.0"]
-tf = ["tensorflow-cpu>=2.13,<2.17", "tensorflow-hub>=0.15", "inaSpeechSegmenter>=0.7.7"]
+# setuptools<81: tensorflow-hub still imports pkg_resources, which setuptools
+# removed in 81. inaSpeechSegmenter also shells out to ffmpeg on PATH.
+tf = [
+    "tensorflow-cpu>=2.13,<2.17",
+    "tensorflow-hub>=0.15",
+    "inaSpeechSegmenter>=0.7.7",
+    "setuptools<81",
+]
 
 [project.scripts]
 bandpoc = "bandpoc.cli:main"

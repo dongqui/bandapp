@@ -21,6 +21,9 @@ python -m venv .venv
 설치하지 않은 백엔드의 어댑터는 리포트에 `unavailable`로 표시되고 나머지는 정상 동작한다.
 
 `ffmpeg`이 PATH에 있어야 한다. 없으면: `winget install Gyan.FFmpeg`
+winget으로 설치했다면 **터미널을 새로 열어야** PATH 갱신이 반영된다.
+`inaSpeechSegmenter`는 실행 중에 `ffmpeg`을 직접 호출하므로 이게 없으면 이
+어댑터만 실패한다.
 
 ## 사용
 

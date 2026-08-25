@@ -1,0 +1,114 @@
+# Test scene recipes (spec § 4.2, § 4.3).
+#
+#   label   — ground-truth label, one of the six in bandpoc.labels.LABELS
+#   pool    — which clip folder to draw material from (independent of label)
+#   take    — Take group id; blocks sharing one id form a single ground-truth
+#             Take even across an intervening block. Every music block needs one.
+#   overlay — mix a second pool in at the given SNR
+
+scenes:
+  # Sanity check: unambiguous alternation.
+  - id: clean_basic
+    seed: 11
+    blocks:
+      - {label: speech,  pool: conversation, dur: 45}
+      - {label: music,   pool: band_full,    dur: 190, take: 1}
+      - {label: speech,  pool: conversation, dur: 60}
+      - {label: music,   pool: band_full,    dur: 220, take: 2}
+      - {label: ambient, pool: room_tone,    dur: 40}
+      - {label: music,   pool: band_full,    dur: 175, take: 3}
+      - {label: speech,  pool: conversation, dur: 70}
+
+  # Risk 1-①: members chatting while someone keeps noodling on guitar.
+  - id: hard_noodling
+    seed: 22
+    blocks:
+      - {label: speech, pool: conversation, dur: 90}
+      - {label: speech_with_noodling, pool: conversation, dur: 120,
+         overlay: {pool: guitar_noodle, snr_db: 6}}
+      - {label: music,  pool: band_full,    dur: 210, take: 1}
+      - {label: speech_with_noodling, pool: conversation, dur: 150,
+         overlay: {pool: guitar_noodle, snr_db: 3}}
+      - {label: music,  pool: band_full,    dur: 180, take: 2}
+      - {label: speech_with_noodling, pool: conversation, dur: 100,
+         overlay: {pool: guitar_noodle, snr_db: 9}}
+      - {label: speech, pool: conversation, dur: 50}
+
+  # Risk 1-③: tuning and gear setup.
+  - id: tuning_setup
+    seed: 33
+    blocks:
+      - {label: ambient, pool: room_tone,    dur: 40}
+      - {label: tuning,  pool: tuning,       dur: 120}
+      - {label: speech,  pool: conversation, dur: 45}
+      - {label: tuning,  pool: tuning,       dur: 90}
+      - {label: music,   pool: band_full,    dur: 200, take: 1}
+      - {label: tuning,  pool: tuning,       dur: 75}
+      - {label: music,   pool: band_full,    dur: 185, take: 2}
+      - {label: ambient, pool: room_tone,    dur: 45}
+
+  # Risk 1-②④: one instrument practising alone. Still music, still a Take.
+  - id: partial_practice
+    seed: 44
+    blocks:
+      - {label: speech, pool: conversation, dur: 50}
+      - {label: music,  pool: drums_only,   dur: 165, take: 1}
+      - {label: speech, pool: conversation, dur: 55}
+      - {label: music,  pool: guitar_only,  dur: 150, take: 2}
+      - {label: speech, pool: conversation, dur: 40}
+      - {label: music,  pool: drums_only,   dur: 130, take: 3}
+      - {label: music,  pool: band_full,    dur: 160, take: 4}
+      - {label: speech, pool: conversation, dur: 50}
+
+  # Stopping mid-song and restarting. Gaps of 3/8 s stay inside one Take;
+  # gaps of 15/30 s start a new one. This is what pins down merge_gap.
+  - id: restart_stop
+    seed: 55
+    blocks:
+      - {label: speech, pool: conversation, dur: 40}
+      - {label: music,  pool: band_full,    dur: 75,  take: 1}
+      - {label: speech, pool: conversation, dur: 3,   take: 1}
+      - {label: music,  pool: band_full,    dur: 90,  take: 1}
+      - {label: speech, pool: conversation, dur: 8,   take: 1}
+      - {label: music,  pool: band_full,    dur: 110, take: 1}
+      - {label: speech, pool: conversation, dur: 15}
+      - {label: music,  pool: band_full,    dur: 95,  take: 2}
+      - {label: speech, pool: conversation, dur: 30}
+      - {label: music,  pool: band_full,    dur: 120, take: 3}
+      - {label: speech, pool: conversation, dur: 8,   take: 3}
+      - {label: music,  pool: band_full,    dur: 85,  take: 3}
+      - {label: speech, pool: conversation, dur: 45}
+
+  # Everything mixed, 60 min. Also the RTF and memory measurement scene.
+  - id: realistic_long
+    seed: 66
+    blocks:
+      - {label: ambient, pool: room_tone,    dur: 60}
+      - {label: speech,  pool: conversation, dur: 120}
+      - {label: tuning,  pool: tuning,       dur: 90}
+      - {label: music,   pool: band_full,    dur: 240, take: 1}
+      - {label: speech,  pool: conversation, dur: 10,  take: 1}
+      - {label: music,   pool: band_full,    dur: 200, take: 1}
+      - {label: speech_with_noodling, pool: conversation, dur: 140,
+         overlay: {pool: guitar_noodle, snr_db: 6}}
+      - {label: music,   pool: guitar_only,  dur: 170, take: 2}
+      - {label: speech,  pool: conversation, dur: 95}
+      - {label: music,   pool: band_full,    dur: 265, take: 3}
+      - {label: tuning,  pool: tuning,       dur: 70}
+      - {label: music,   pool: drums_only,   dur: 155, take: 4}
+      - {label: speech_with_noodling, pool: conversation, dur: 110,
+         overlay: {pool: guitar_noodle, snr_db: 3}}
+      - {label: music,   pool: band_full,    dur: 285, take: 5}
+      - {label: speech,  pool: conversation, dur: 5,   take: 5}
+      - {label: music,   pool: band_full,    dur: 190, take: 5}
+      - {label: ambient, pool: room_tone,    dur: 150}
+      - {label: speech,  pool: conversation, dur: 105}
+      - {label: music,   pool: band_full,    dur: 230, take: 6}
+      - {label: tuning,  pool: tuning,       dur: 55}
+      - {label: music,   pool: band_full,    dur: 245, take: 7}
+      - {label: speech_with_noodling, pool: conversation, dur: 100,
+         overlay: {pool: guitar_noodle, snr_db: 6}}
+      - {label: music,   pool: band_full,    dur: 250, take: 8}
+      - {label: tuning,  pool: tuning,       dur: 55}
+      - {label: music,   pool: guitar_only,  dur: 100, take: 9}
+      - {label: speech,  pool: conversation, dur: 105}

@@ -39,9 +39,11 @@ def test_dsp_baseline_returns_a_bounded_curve_of_the_right_length():
 
 
 def test_dsp_baseline_scores_a_tone_above_white_noise():
+    # 880 Hz, not 220: a tone below the 250 Hz cutoff would be separated from
+    # noise by the low-band term alone, leaving the tonality term untested.
     det = DspBaseline()
     det.load()
-    tonal, _ = det.music_score(tone(220, 6.0), SR)
+    tonal, _ = det.music_score(tone(880, 6.0), SR)
     noisy, _ = det.music_score(noise(6.0), SR)
     assert float(np.median(tonal)) > float(np.median(noisy))
 
@@ -53,19 +55,27 @@ def test_dsp_baseline_scores_silence_near_zero():
     assert float(np.max(scores)) < 0.05
 
 
-def test_dsp_baseline_memory_does_not_grow_with_length():
+def test_dsp_baseline_stitches_chunks_into_a_uniform_grid():
+    # 130 s spans three 60 s chunks, so this fails if chunked_scores drops or
+    # duplicates frames at a seam. The single-chunk cases below cannot catch that.
     det = DspBaseline()
     det.load()
-    short, _ = det.music_score(tone(220, 5.0), SR)
-    long, _ = det.music_score(tone(220, 60.0), SR)
+    short, hop = det.music_score(tone(220, 5.0), SR)
+    long, _ = det.music_score(tone(220, 130.0), SR)
+    assert hop == pytest.approx(0.1)
+    assert len(long) == pytest.approx(130.0 / hop, abs=10)
     assert len(long) > len(short) * 10
     assert float(np.median(long)) == pytest.approx(float(np.median(short)), abs=0.15)
 
 
 def test_registry_round_trips_a_detector():
     registry.register("fake:default", lambda: DspBaseline())
-    assert "fake:default" in registry.all_keys()
-    assert isinstance(registry.get("fake:default"), Detector)
+    try:
+        assert "fake:default" in registry.all_keys()
+        assert isinstance(registry.get("fake:default"), Detector)
+    finally:
+        # module-level registry: without this the key outlives the test
+        registry._FACTORIES.pop("fake:default", None)
 
 
 def test_registry_raises_on_an_unknown_key():

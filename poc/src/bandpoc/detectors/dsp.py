@@ -11,11 +11,12 @@ import numpy as np
 from scipy.signal import stft
 
 from ..audio import resample
-from .base import Detector
+from .base import Detector, chunked_scores
 
 _SR = 16000
 _HOP_S = 0.1
 _WIN_S = 0.4
+_CHUNK_S = 60.0
 
 
 def _sigmoid(x: np.ndarray) -> np.ndarray:
@@ -24,16 +25,19 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
 
 class DspBaseline(Detector):
     name = "dsp_baseline"
-    version = "1"
+    # v2: routed through chunked_scores so memory stays independent of audio
+    # length (see fix report — v1 ran a single stft() over the whole signal,
+    # which was ~2.7 GB peak on a 60-minute scene). Bumped because the cache
+    # (Task 9) keys on version and scores now change shape at chunk seams.
+    version = "2"
     requires = ()
 
-    def music_score(self, wav: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
-        wav = resample(np.asarray(wav, dtype=np.float32), sr, _SR)
+    def _score_chunk(self, chunk: np.ndarray) -> np.ndarray:
         nperseg = int(_WIN_S * _SR)
         noverlap = nperseg - int(_HOP_S * _SR)
-        if wav.size < nperseg:
-            wav = np.pad(wav, (0, nperseg - wav.size))
-        _, _, Z = stft(wav, fs=_SR, nperseg=nperseg, noverlap=noverlap,
+        if chunk.size < nperseg:
+            chunk = np.pad(chunk, (0, nperseg - chunk.size))
+        _, _, Z = stft(chunk, fs=_SR, nperseg=nperseg, noverlap=noverlap,
                        boundary=None, padded=False)
         power = (np.abs(Z) ** 2).astype(np.float64) + 1e-12
         freqs = np.linspace(0, _SR / 2, power.shape[0])
@@ -45,5 +49,12 @@ class DspBaseline(Detector):
         gate = _sigmoid((rms_db + 55.0) / 6.0)
         tonal = _sigmoid((0.35 - flatness) / 0.08)
         lowness = _sigmoid((low_ratio - 0.25) / 0.10)
-        scores = gate * (0.6 * tonal + 0.4 * lowness)
-        return np.clip(scores, 0.0, 1.0).astype(np.float32), _HOP_S
+        return (gate * (0.6 * tonal + 0.4 * lowness)).astype(np.float32)
+
+    def music_score(self, wav: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
+        wav = resample(np.asarray(wav, dtype=np.float32), sr, _SR)
+        scores = chunked_scores(
+            wav, _SR, chunk_s=_CHUNK_S, overlap_s=_WIN_S, fn=self._score_chunk,
+            hop_s=_HOP_S,
+        )
+        return scores, _HOP_S

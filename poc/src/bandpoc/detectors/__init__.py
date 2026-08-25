@@ -48,5 +48,23 @@ def _register_all() -> None:
 
     registry.register("clap_zeroshot:default", _clap)
 
+    def _yamnet(variant: str):
+        def factory():
+            from .yamnet import Yamnet
+
+            return Yamnet(variant=variant)
+
+        return factory
+
+    registry.register("yamnet:music_only", _yamnet("music_only"))
+    registry.register("yamnet:music_group", _yamnet("music_group"))
+
+    def _ina():
+        from .ina import InaSegmenter
+
+        return InaSegmenter()
+
+    registry.register("ina_segmenter:default", _ina)
+
 
 _register_all()

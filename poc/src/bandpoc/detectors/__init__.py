@@ -30,5 +30,23 @@ def _register_all() -> None:
 
     registry.register("silero_vad:default", _silero)
 
+    def _ast(variant: str):
+        def factory():
+            from .ast import AstAudioSet
+
+            return AstAudioSet(variant=variant)
+
+        return factory
+
+    registry.register("ast:music_only", _ast("music_only"))
+    registry.register("ast:music_group", _ast("music_group"))
+
+    def _clap():
+        from .clap import ClapZeroShot
+
+        return ClapZeroShot()
+
+    registry.register("clap_zeroshot:default", _clap)
+
 
 _register_all()

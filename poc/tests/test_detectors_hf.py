@@ -14,6 +14,33 @@ def tone(freq, seconds, sr=SR):
     return (0.3 * np.sin(2 * np.pi * freq * t)).astype(np.float32)
 
 
+def music_like(seconds, sr=SR):
+    """A stimulus an AudioSet head actually calls music.
+
+    A bare sine will not do: AST labels one "Sine wave" at 0.94 and "Music" at
+    0.008, which is the model being right, not broken. Harmonic chords, note
+    attacks and a percussive hit are what push the Music class up.
+    """
+    rng = np.random.default_rng(0)
+    n = int(seconds * sr)
+    out = np.zeros(n, dtype=np.float32)
+    beat = int(0.5 * sr)
+    t = np.arange(beat) / sr
+    envelope = np.exp(-3.5 * t)
+    for k, start in enumerate(range(0, n - beat, beat)):
+        chord = (220.0, 277.18, 329.63) if k % 2 == 0 else (246.94, 311.13, 369.99)
+        for root in chord:
+            for harmonic, amp in enumerate((1.0, 0.5, 0.3, 0.18, 0.1), start=1):
+                phase = rng.uniform(0, 2 * np.pi)
+                out[start : start + beat] += (
+                    amp * 0.12 * np.sin(2 * np.pi * root * harmonic * t + phase) * envelope
+                )
+        out[start : start + beat] += (
+            rng.standard_normal(beat).astype(np.float32) * np.exp(-30 * t) * 0.25
+        )
+    return np.clip(out, -1.0, 1.0).astype(np.float32)
+
+
 def get_or_skip(key):
     try:
         det = registry.get(key)
@@ -44,9 +71,9 @@ def test_curve_length_grows_with_audio_length(key):
     assert len(long) > len(short) * 2
 
 
-def test_ast_scores_a_musical_tone_above_silence():
+def test_ast_scores_music_above_silence():
     det = get_or_skip("ast:music_group")
-    music, _ = det.music_score(tone(220, 30.0), SR)
+    music, _ = det.music_score(music_like(30.0), SR)
     quiet, _ = det.music_score(np.zeros(SR * 30, dtype=np.float32), SR)
     assert float(np.median(music)) > float(np.median(quiet))
 

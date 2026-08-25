@@ -22,7 +22,9 @@ dependencies = [
 dev = ["pytest>=8.0"]
 # torchaudio: the silero-vad hub repo imports it unconditionally.
 torch = ["torch>=2.1", "torchaudio>=2.1", "panns-inference>=0.1.1"]
-hf = ["torch>=2.1", "transformers>=4.40"]
+# transformers 5 renamed the CLAP processor audio kwarg and wrapped the
+# feature getters in output objects; the adapters use that API.
+hf = ["torch>=2.1", "transformers>=5.0"]
 tf = ["tensorflow-cpu>=2.13,<2.17", "tensorflow-hub>=0.15", "inaSpeechSegmenter>=0.7.7"]
 
 [project.scripts]

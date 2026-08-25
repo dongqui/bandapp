@@ -61,8 +61,10 @@ class ClapZeroShot(Detector):
         inputs = self._processor(text=prompts, return_tensors="pt", padding=True)
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with torch.no_grad():
-            emb = self._model.get_text_features(**inputs)
-        self._text_emb = torch.nn.functional.normalize(emb, dim=-1)
+            out = self._model.get_text_features(**inputs)
+        # transformers 5 returns an output object whose pooler_output is the
+        # already-L2-normalised projection, not a bare tensor.
+        self._text_emb = out.pooler_output
 
     def _score_chunk(self, chunk: np.ndarray) -> np.ndarray:
         import torch
@@ -75,12 +77,11 @@ class ClapZeroShot(Detector):
         if not windows:
             return np.zeros(0, dtype=np.float32)
         inputs = self._processor(
-            audios=windows, sampling_rate=_SR, return_tensors="pt", padding=True
+            audio=windows, sampling_rate=_SR, return_tensors="pt", padding=True
         )
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with torch.no_grad():
-            audio_emb = self._model.get_audio_features(**inputs)
-            audio_emb = torch.nn.functional.normalize(audio_emb, dim=-1)
+            audio_emb = self._model.get_audio_features(**inputs).pooler_output
             sims = audio_emb @ self._text_emb.T
             pos = sims[:, : self._n_pos].mean(dim=1)
             neg = sims[:, self._n_pos :].mean(dim=1)

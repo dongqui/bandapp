@@ -1,0 +1,64 @@
+# Material pools for scene synthesis (spec § 4.1).
+#
+# Each pool is filled from YouTube search queries and/or explicit URLs.
+# Search results are UNVETTED — after `bandpoc fetch`, listen through
+# data/clips/<pool>/ and delete anything that does not match the pool's
+# intent. Bad material silently corrupts every downstream metric.
+
+pools:
+  band_full:
+    queries:
+      - "밴드 합주실 합주 영상"
+      - "합주실 밴드 연습 브이로그"
+      - "band rehearsal room full band practice"
+    max_results: 4
+    clips_per_video: 4
+    clip_seconds: 30
+
+  drums_only:
+    queries:
+      - "드럼 연습실 개인연습"
+      - "drum practice room solo"
+    max_results: 3
+    clips_per_video: 4
+    clip_seconds: 30
+
+  guitar_only:
+    queries:
+      - "일렉기타 연습 합주실"
+      - "electric guitar practice amp room"
+    max_results: 3
+    clips_per_video: 4
+    clip_seconds: 30
+
+  conversation:
+    queries:
+      - "한국어 일상 대화 실내"
+      - "밴드 합주 브이로그 대화"
+    max_results: 4
+    clips_per_video: 5
+    clip_seconds: 30
+
+  guitar_noodle:
+    queries:
+      - "기타 노들링 무의미하게 치기"
+      - "guitar noodling riffs practice idle"
+    max_results: 3
+    clips_per_video: 5
+    clip_seconds: 30
+
+  tuning:
+    queries:
+      - "기타 튜닝 소리"
+      - "guitar tuning sound drum tuning"
+    max_results: 3
+    clips_per_video: 4
+    clip_seconds: 20
+
+  room_tone:
+    queries:
+      - "room tone ambience empty room"
+      - "air conditioner hum room tone"
+    max_results: 2
+    clips_per_video: 4
+    clip_seconds: 30

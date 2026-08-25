@@ -63,3 +63,37 @@ def test_normalize_loudness_leaves_silence_untouched():
     wav = np.zeros(48000 * 2, dtype=np.float32)
     out = normalize_loudness(wav, 48000)
     np.testing.assert_array_equal(out, wav)
+
+
+def test_load_audio_resamples_to_the_requested_rate(tmp_path):
+    import soundfile as sf
+
+    from bandpoc.audio import load_audio
+
+    path = tmp_path / "tone.wav"
+    t = np.arange(44100 * 2) / 44100
+    sf.write(str(path), (0.3 * np.sin(2 * np.pi * 440 * t)).astype(np.float32), 44100)
+
+    wav, sr = load_audio(path, target_sr=16000)
+
+    assert sr == 16000
+    assert abs(len(wav) - 32000) <= 2
+    assert wav.dtype == np.float32
+    assert float(np.max(np.abs(wav))) > 0.1, "resampling must not silence the signal"
+
+
+def test_load_audio_downmixes_stereo_to_mono(tmp_path):
+    import soundfile as sf
+
+    from bandpoc.audio import load_audio
+
+    path = tmp_path / "stereo.wav"
+    left = np.full(16000, 0.5, dtype=np.float32)
+    right = np.full(16000, -0.1, dtype=np.float32)
+    sf.write(str(path), np.stack([left, right], axis=1), 16000)
+
+    wav, sr = load_audio(path)
+
+    assert wav.ndim == 1
+    assert sr == 16000
+    assert float(np.mean(wav)) == pytest.approx(0.2, abs=1e-3)

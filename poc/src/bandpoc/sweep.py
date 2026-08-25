@@ -112,12 +112,17 @@ def best_point(
     def recall_or_zero(p: SweepPoint) -> float:
         return 0.0 if np.isnan(p.recall) else p.recall
 
-    def false_or_inf(p: SweepPoint) -> float:
-        return float("inf") if np.isnan(p.false_ratio) else p.false_seconds
+    def false_seconds_of(p: SweepPoint) -> float:
+        # false_total == 0 means the scenes contain no non-music frames at all,
+        # so there was no opportunity for a false positive and false_seconds is
+        # genuinely 0.0, not infinite. This is params-independent, so it is the
+        # same for every point in a sweep and cannot change any ranking — but
+        # inf would still be the wrong thing to write down.
+        return 0.0 if np.isnan(p.false_ratio) else p.false_seconds
 
-    top_recall = max(points, key=lambda p: (recall_or_zero(p), -false_or_inf(p)))
+    top_recall = max(points, key=lambda p: (recall_or_zero(p), -false_seconds_of(p)))
     qualifying = [p for p in points if recall_or_zero(p) >= min_recall]
     if not qualifying:
         return None, top_recall
-    best = min(qualifying, key=lambda p: (false_or_inf(p), abs(p.take_count_error)))
+    best = min(qualifying, key=lambda p: (false_seconds_of(p), abs(p.take_count_error)))
     return best, top_recall

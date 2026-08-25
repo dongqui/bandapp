@@ -53,11 +53,16 @@ def test_dontcare_frames_are_excluded_from_false_music():
     assert c.false_total == 10
 
 
-def test_dontcare_frames_are_excluded_from_recall_denominator():
-    m = masks_from(["music"] * 10 + ["speech"] * 5, dontcare=range(10, 15))
+def test_dontcare_wins_over_music_in_the_recall_denominator():
+    # labels.py makes music and don't-care disjoint, so this state is
+    # unreachable in production. Constructing it directly is the only way to
+    # prove the `& keep` guard on the music path does something — without it,
+    # a future change to that invariant would silently inflate music_total.
+    m = masks_from(["music"] * 10 + ["speech"] * 5, dontcare=range(5, 15))
     detected = np.array([True] * 10 + [False] * 5)
     c = frame_counts(detected, m)
-    assert c.music_total == 10
+    assert c.music_total == 5, "music frames marked don't-care must not count"
+    assert c.music_hit == 5
 
 
 def test_per_label_false_rate_isolates_the_hard_cases():

@@ -122,26 +122,91 @@ def test_report_without_any_cache_fails_with_a_clear_message(tmp_path, capsys):
     assert "bandpoc run" in capsys.readouterr().out
 
 
+def _assert_every_string_constant_encodes(module, codec="cp949"):
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                node.value.encode(codec)
+            except UnicodeEncodeError as exc:
+                raise AssertionError(
+                    f"{Path(module.__file__).name} line {node.lineno} has a "
+                    f"character {codec} cannot encode: {exc}"
+                ) from exc
+
+
 def test_cli_messages_encode_on_a_cp949_console():
     """Korean Windows consoles default to cp949, which has no em dash.
 
     `bandpoc fetch` completed its whole download and then died printing the
-    closing advice, so keep every CLI string inside that codec.
+    closing advice, so keep every CLI string inside that codec. cli.py is
+    pure CLI plumbing with no HTML/JS payload mixed in, so every string
+    constant in the module is fair game -- unlike explore.py below.
+    """
+    from bandpoc import cli
+
+    _assert_every_string_constant_encodes(cli)
+
+
+def test_session_messages_encode_on_a_cp949_console():
+    """Minor 7: session.py's exceptions (SessionExists, ValueError,
+    RuntimeError) are printed verbatim by cli.py's
+    `except ... as exc: print(f"[fail] {exc}")` -- widen the same guard
+    here. Like cli.py, session.py is pure logic with no HTML/JS payload, so
+    scanning every string constant is safe.
+    """
+    from bandpoc import session
+
+    _assert_every_string_constant_encodes(session)
+
+
+def test_explore_console_bound_messages_encode_on_a_cp949_console():
+    """Minor 7: explore.py's encode_mp3 raises a RuntimeError that cmd_explore
+    prints verbatim, and collect_session's per-key skip reasons (returned via
+    SessionView.skipped, not printed here) get printed by cmd_explore too --
+    if explore.py ever gains a print() of its own, its arguments must stay
+    inside cp949 exactly like those. But explore.py also emits an HTML/JS
+    page (`_CSS`, `_JS`, `render_session`, `render_index`) that never reaches
+    a Windows console; render_index's own em dash in legitimate HTML output
+    would fail a blanket whole-module scan (the same one cli.py and
+    session.py use above) on correct code. Scope this one to what can
+    actually reach a print(): string literals passed to print(...) calls in
+    this module, and messages passed to raised exceptions here (cli.py
+    prints every exception out of this module verbatim, the same as it does
+    for session.py's).
     """
     import ast
     from pathlib import Path
 
-    from bandpoc import cli
+    from bandpoc import explore
 
-    tree = ast.parse(Path(cli.__file__).read_text(encoding="utf-8"))
+    tree = ast.parse(Path(explore.__file__).read_text(encoding="utf-8"))
+    checked = 0
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            try:
-                node.value.encode("cp949")
-            except UnicodeEncodeError as exc:
-                raise AssertionError(
-                    f"cli.py line {node.lineno} has a character cp949 cannot encode: {exc}"
-                ) from exc
+        targets = []
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            targets.extend(node.exc.args)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "print"
+        ):
+            targets.extend(node.args)
+        for arg in targets:
+            for sub in ast.walk(arg):
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    checked += 1
+                    try:
+                        sub.value.encode("cp949")
+                    except UnicodeEncodeError as exc:
+                        raise AssertionError(
+                            f"explore.py line {sub.lineno} has a character "
+                            f"cp949 cannot encode: {exc}"
+                        ) from exc
+    assert checked > 0, "scoped scan found nothing to check -- probably broken"
 
 
 def write_session(root, session_id="session_01", seconds=4.0):

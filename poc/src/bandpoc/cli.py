@@ -1,4 +1,5 @@
-"""Command line: fetch → build-scenes → run → report."""
+"""Command line: fetch -> build-scenes -> run -> report, plus add-session ->
+explore for a whole unlabelled recording."""
 
 from __future__ import annotations
 

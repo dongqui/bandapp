@@ -52,6 +52,16 @@ bandpoc explore      # reports/explore/<timestamp>/index.html
 0.5로 물러나고 그 사실이 페이지에 표시된다 — 그 모델이 신호를 분리하지 못한다는
 뜻이므로 그것도 결과다.
 
+#### 저장 공간
+
+`bandpoc add-session`이 유튜브 URL을 받으면 변환 전 원본을
+`data/raw_sessions/<id>.wav`에 남겨둔다 (45분 녹음 기준 약 500 MB). 변환된
+`data/scenes/<id>.wav`, `bandpoc explore`가 캐시하는 mp3, 그리고 `bandpoc
+report`가 리포트마다 남기는 mp3 사본까지 더하면 세션 하나가 금방 커진다.
+`raw_sessions/`는 자동으로 지우지 않는다 — 지울지 말지는 사용자가 정한다.
+(`bandpoc report`는 `.wav` 없이 라벨과 캐시만으로 동작하므로, 채점이 끝난 뒤라면
+`data/scenes/<id>.wav`를 지워도 리포트 재생성에는 지장이 없다.)
+
 ### fetch 이후 반드시 할 일
 
 `sources.yaml`은 고정 URL이 아니라 **검색 쿼리**로 클립을 모은다. 검색 결과는

@@ -33,6 +33,17 @@ def scores_to_segments(scores: np.ndarray, hop: float, params: PostParams) -> li
 
     Merging must precede the duration filter: two 12 s runs 4 s apart are one
     28 s Take, but filtering first would delete both.
+
+    `bandpoc.explore._JS` embeds a hand-written JS mirror of this function
+    (`toSegments`, used by the explore page's live cutoff slider) -- edit
+    them together, and keep every comparison's equality exactly the same in
+    both (`>=` threshold, `<=` merge_gap, `>=` min_duration). The two are
+    guarded by a differential test,
+    `tests/test_explore.py::test_js_toSegments_agrees_with_python_scores_to_segments`,
+    which pulls `toSegments` out of `_JS` and runs it under node against this
+    function's own output -- it fails on drift between the two, but only if
+    you run it; nothing here enforces that automatically for an isolated
+    edit to this function alone.
     """
     segments = _runs_to_segments(np.asarray(scores) >= params.threshold, hop)
     segments = _merge_gaps(segments, params.merge_gap)

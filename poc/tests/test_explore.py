@@ -205,3 +205,96 @@ def test_encode_mp3_re_encodes_when_the_wav_is_newer(tmp_path):
     encode_mp3(wav, mp3)
 
     assert mp3.stat().st_mtime_ns != first
+
+
+import json
+import re
+
+from bandpoc.explore import render_index, render_session
+
+
+def built_view(tmp_path, session_id="s"):
+    write_session_wav(tmp_path, session_id)
+    cache_curve(tmp_path, session_id, "dsp_baseline:default", square_curve())
+    return collect_session(tmp_path, session_id, ["dsp_baseline:default"])
+
+
+def embedded_payload(html):
+    match = re.search(r'<script id="session-data" type="application/json">(.*?)</script>',
+                      html, re.S)
+    assert match, "session data must be embedded as JSON"
+    return json.loads(match.group(1))
+
+
+def test_render_session_writes_a_page_named_after_the_session(tmp_path):
+    view = built_view(tmp_path)
+    out = render_session(view, "s.mp3", tmp_path / "out")
+    assert out == tmp_path / "out" / "s.html"
+    assert out.exists()
+
+
+def test_the_page_references_the_mp3_relatively(tmp_path):
+    html = render_session(built_view(tmp_path), "s.mp3", tmp_path / "out").read_text(
+        encoding="utf-8"
+    )
+    assert '<audio' in html
+    assert 'src="s.mp3"' in html
+
+
+def test_the_page_names_every_model(tmp_path):
+    html = render_session(built_view(tmp_path), "s.mp3", tmp_path / "out").read_text(
+        encoding="utf-8"
+    )
+    assert "dsp_baseline:default" in html
+
+
+def test_the_page_embeds_scores_and_the_python_reference_segments(tmp_path):
+    view = built_view(tmp_path)
+    html = render_session(view, "s.mp3", tmp_path / "out").read_text(encoding="utf-8")
+
+    payload = embedded_payload(html)
+    model = payload["models"][0]
+    assert len(model["scores"]) == len(view.models[0].scores)
+    assert model["threshold"] == view.models[0].threshold
+    # The cross-check baseline for the JS reimplementation (spec § 5 R1).
+    assert model["reference"] == [list(s) for s in view.models[0].segments]
+
+
+def test_the_page_carries_the_post_processing_defaults(tmp_path):
+    payload = embedded_payload(
+        render_session(built_view(tmp_path), "s.mp3", tmp_path / "out").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert payload["minDuration"] == 20.0
+    assert payload["mergeGap"] == 10.0
+    assert payload["hop"] == 0.1
+
+
+def test_a_model_that_could_not_separate_is_flagged_in_the_page(tmp_path):
+    write_session_wav(tmp_path, "flat")
+    cache_curve(tmp_path, "flat", "dsp_baseline:default",
+                np.full(1200, 0.4, dtype=np.float32))
+    view = collect_session(tmp_path, "flat", ["dsp_baseline:default"])
+
+    html = render_session(view, "flat.mp3", tmp_path / "out").read_text(encoding="utf-8")
+
+    assert "do not separate" in html
+
+
+def test_the_page_has_no_external_requests(tmp_path):
+    html = render_session(built_view(tmp_path), "s.mp3", tmp_path / "out").read_text(
+        encoding="utf-8"
+    )
+    assert "http://" not in html
+    assert "https://" not in html
+
+
+def test_render_index_lists_every_session(tmp_path):
+    views = [built_view(tmp_path, "one"), built_view(tmp_path, "two")]
+    out = render_index(views, tmp_path / "out")
+    html = out.read_text(encoding="utf-8")
+
+    assert out.name == "index.html"
+    assert 'href="one.html"' in html
+    assert 'href="two.html"' in html

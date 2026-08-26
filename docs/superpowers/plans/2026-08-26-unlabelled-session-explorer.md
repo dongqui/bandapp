@@ -76,8 +76,16 @@ def test_slugify_lowercases_and_keeps_safe_characters():
     assert slugify("Session_01-A") == "session_01-a"
 
 
-def test_slugify_replaces_unsafe_characters_with_underscore():
-    assert slugify("밴드 합주 (1차)") == "_"
+def test_slugify_strips_hangul_spaces_and_brackets_but_keeps_safe_characters():
+    # The ASCII "1" of "1차" is in the safe set and survives; Hangul, spaces
+    # and brackets do not. A session id becomes a file path and a cache key,
+    # so nothing outside [a-z0-9_-] may reach it.
+    assert slugify("밴드 합주 (1차)") == "1"
+
+
+def test_slugify_returns_empty_when_nothing_safe_remains():
+    # derive_id turns this into a "pass --id" error rather than a bare path.
+    assert slugify("밴드 합주") == ""
 
 
 def test_slugify_collapses_runs_of_underscores():
@@ -302,7 +310,7 @@ def add_session(
 cd poc && .venv/Scripts/python.exe -m pytest tests/test_session.py -v
 ```
 
-Expected: 12 passed
+Expected: 13 passed
 
 - [ ] **Step 5: 커밋**
 

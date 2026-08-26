@@ -298,3 +298,54 @@ def test_render_index_lists_every_session(tmp_path):
     assert out.name == "index.html"
     assert 'href="one.html"' in html
     assert 'href="two.html"' in html
+
+
+def test_segments_are_derived_from_the_same_rounded_curve_as_the_scores(
+    tmp_path, monkeypatch
+):
+    """The page's JS only ever sees the 2-decimal `scores` array; it never
+    sees the full-precision curve. If `segments` (embedded as `reference`,
+    the drift-check baseline for spec Section 5 R1) were computed from the
+    full-precision curve while `scores` is rounded, a frame whose true value
+    sits within 0.005 of the threshold can cross it only after rounding (or
+    only before) -- the browser reimplementation would then legitimately
+    disagree with `reference` even though neither post-processing
+    implementation has a bug. That would make the drift banner cry wolf.
+
+    This pins the invariant that `scores` and `segments` must come from the
+    exact same (rounded) curve, so the only way this comparison can
+    disagree is a real algorithm bug -- reusing the boundary shape found
+    during investigation: threshold 0.32, frames with true value 0.319
+    (which rounds up to 0.32 and so toggles from "off" to "on").
+    """
+    import bandpoc.explore as explore_mod
+    from bandpoc.autothresh import AutoThreshold
+    from bandpoc.postproc import PostParams, scores_to_segments
+
+    monkeypatch.setattr(
+        explore_mod,
+        "auto_threshold",
+        lambda curve: AutoThreshold(0.32, "fixed for test", True),
+    )
+
+    write_session_wav(tmp_path, "s")
+    curve = np.full(1200, 0.05, dtype=np.float32)
+    # 250 frames (25 s) at the boundary value -- long enough to survive
+    # DEFAULTS.min_duration (20 s) if and only if rounding puts them "on".
+    curve[500:750] = np.float32(0.319)
+    cache_curve(tmp_path, "s", "dsp_baseline:default", curve)
+
+    view = collect_session(tmp_path, "s", ["dsp_baseline:default"])
+    model = view.models[0]
+
+    assert model.threshold == 0.32
+    params = PostParams(
+        threshold=model.threshold,
+        min_duration=DEFAULTS.min_duration,
+        merge_gap=DEFAULTS.merge_gap,
+    )
+    rounded_curve = np.array(model.scores, dtype=np.float32)
+    expected = [
+        (s.start, s.end) for s in scores_to_segments(rounded_curve, 0.1, params)
+    ]
+    assert model.segments == expected

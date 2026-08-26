@@ -3,6 +3,19 @@
 Nothing here scores anything. It assembles what a human needs to judge:
 the score curve, a starting cutoff, and the segments that cutoff produces.
 The actual comparison happens in a browser, against the audio.
+
+`ModelView.segments` are computed from the ROUNDED score curve (see
+`_SCORE_DECIMALS`), not the full-precision one -- deliberately. The page's
+JS reimplementation of the post-processing (`toSegments`) only ever sees the
+rounded `scores` it is sent, so segments derived from a different, more
+precise input would legitimately disagree with what the browser computes
+near the cutoff, even with no bug on either side, and would trip the page's
+drift banner (spec § 5 R1) on a false alarm. Consequence: the segments shown
+can differ from what the full-precision curve would produce, for frames
+within `10 ** -_SCORE_DECIMALS / 2` of the cutoff. That is acceptable -- this
+is an eyeball tool with a live slider, and a frame-level difference at the
+cutoff is far below what a human is judging by ear. Do not "fix" this by
+computing segments from the full-precision curve again.
 """
 
 from __future__ import annotations
@@ -74,7 +87,13 @@ def collect_session(
             continue
         cached = cache.load(path)
         curve = resample_scores(cached.scores, cached.hop, n_frames, HOP)
+        # auto_threshold reads the full-precision curve: it only picks a
+        # cutoff and never needs to agree with anything frame-by-frame.
         chosen = auto_threshold(curve)
+        # Round BEFORE segmenting, not after. The page's JS only ever sees
+        # this rounded curve, so `scores` and `segments` must both be
+        # derived from it -- see the module docstring for why.
+        shown = np.round(curve, _SCORE_DECIMALS).astype(np.float32)
         params = PostParams(
             threshold=chosen.value,
             min_duration=DEFAULTS.min_duration,
@@ -83,12 +102,12 @@ def collect_session(
         models.append(
             ModelView(
                 key=key,
-                scores=[round(float(v), _SCORE_DECIMALS) for v in curve],
+                scores=[round(float(v), _SCORE_DECIMALS) for v in shown],
                 threshold=chosen.value,
                 reason=chosen.reason,
                 separated=chosen.separated,
                 segments=[
-                    (s.start, s.end) for s in scores_to_segments(curve, HOP, params)
+                    (s.start, s.end) for s in scores_to_segments(shown, HOP, params)
                 ],
                 meta=cached.meta,
             )

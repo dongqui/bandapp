@@ -446,24 +446,74 @@ def test_js_toSegments_agrees_with_python_scores_to_segments():
     from bandpoc.postproc import PostParams, scores_to_segments
 
     rng = np.random.default_rng(20260826)
+    # Case tuples are (scores, hop, threshold, merge_gap, min_duration, dtype).
+    # dtype controls what the PYTHON side is compared against -- "float32"
+    # for the one fixture below that needs to match collect_session's
+    # actual dtype path (see that fixture's comment); "float64" everywhere
+    # else, matching a plain Python list.
     cases = {
         "run reaches the final frame": (
-            [0.9] * 5 + [0.1] * 3 + [0.9] * 4, 0.1, 0.5, 0.0, 0.0
+            [0.9] * 5 + [0.1] * 3 + [0.9] * 4, 0.1, 0.5, 0.0, 0.0, "float64"
         ),
         "run starts at frame 0": (
-            [0.9] * 4 + [0.1] * 6, 0.1, 0.5, 0.0, 0.0
+            [0.9] * 4 + [0.1] * 6, 0.1, 0.5, 0.0, 0.0, "float64"
         ),
         "gap exactly equal to merge_gap": (
-            [0.9, 0.9, 0.1, 0.1, 0.1, 0.9, 0.9], 0.1, 0.5, 0.3, 0.0
+            [0.9, 0.9, 0.1, 0.1, 0.1, 0.9, 0.9], 0.1, 0.5, 0.3, 0.0, "float64"
         ),
         "segment exactly equal to min_duration": (
-            [0.9] * 5 + [0.1] * 3, 0.1, 0.5, 0.0, 0.5
+            [0.9] * 5 + [0.1] * 3, 0.1, 0.5, 0.0, 0.5, "float64"
         ),
-        "all above threshold": ([0.9] * 8, 0.1, 0.5, 0.0, 0.0),
-        "all below threshold": ([0.1] * 8, 0.1, 0.5, 0.0, 0.0),
-        "empty curve": ([], 0.1, 0.5, 0.0, 0.0),
-        "single frame above threshold": ([0.9], 0.1, 0.5, 0.0, 0.0),
-        "single frame below threshold": ([0.1], 0.1, 0.5, 0.0, 0.0),
+        "all above threshold": ([0.9] * 8, 0.1, 0.5, 0.0, 0.0, "float64"),
+        "all below threshold": ([0.1] * 8, 0.1, 0.5, 0.0, 0.0, "float64"),
+        "empty curve": ([], 0.1, 0.5, 0.0, 0.0, "float64"),
+        "single frame above threshold": ([0.9], 0.1, 0.5, 0.0, 0.0, "float64"),
+        "single frame below threshold": ([0.1], 0.1, 0.5, 0.0, 0.0, "float64"),
+        # --- Fixtures below: each is engineered so exactly ONE boundary
+        # decision determines the whole output. The scenarios above name
+        # the right situations but none of them survive into the compared
+        # segment lists: an isolated flipped frame is absorbed by
+        # min_duration, or a generous merge_gap re-merges a shifted run
+        # into its neighbour before comparison. These three cannot be
+        # absorbed. Verified by hand-mutating the real toSegments source
+        # (>= -> >; dropped the +1e-9 merge tolerance; >= -> > on the
+        # duration filter) and rerunning this exact test -- all three
+        # mutations made it fail; see the task report for the transcript.
+        #
+        # (a) Threshold equality must decide a WHOLE segment: every frame
+        # exactly equals the threshold. With >= this is one segment
+        # (0.0, 1.5); with > (mutation 1) it is zero -- no min_duration or
+        # merge_gap can absorb that either way. 0.32 is exactly
+        # representable at 2 decimals, and these scores are rounded to 2
+        # decimals then cast to float32 -- the same path collect_session's
+        # `shown` array takes -- so the "float32" dtype below reproduces
+        # the ACTUAL comparison (float32 array vs a plain Python float
+        # threshold), not an idealised float64 one.
+        "threshold equality decides a whole segment": (
+            [round(float(v), 2) for v in np.round(np.full(15, 0.32, dtype=np.float32), 2)],
+            0.1, 0.32, 0.0, 1.0, "float32",
+        ),
+        # (b) Gap equality must decide the segment COUNT: two runs, each
+        # comfortably over min_duration, separated by a gap of exactly
+        # merge_gap = 1.8 s -- an ordinary value on the 0.1 s grid, not a
+        # contrived one (a 10.0 s gap against merge_gap=10.0 is just as
+        # ordinary and arises constantly). frame_index * hop is not exact
+        # in binary floating point: the raw JS-computed gap here comes out
+        # to 1.8000000000000007, a hair above 1.8. With the +1e-9
+        # tolerance present, this still merges into one segment; drop the
+        # tolerance (mutation 2) and it does not -- two segments instead
+        # of one.
+        "gap equality decides the segment count": (
+            [0.9] * 30 + [0.1] * 18 + [0.9] * 30, 0.1, 0.5, 1.8, 1.0, "float64"
+        ),
+        # (c) Duration equality must decide survival: a single run whose
+        # length is bit-exactly min_duration (1.2 s). With
+        # `>= minDuration - 1e-9` it survives; mutating to `> minDuration`
+        # (mutation 3) drops it, because exact equality no longer counts
+        # as "big enough".
+        "duration equality decides survival": (
+            [0.1] + [0.9] * 12 + [0.1], 0.1, 0.5, 0.0, 1.2, "float64"
+        ),
     }
     for seed in range(5):
         n = int(rng.integers(20, 200))
@@ -472,7 +522,7 @@ def test_js_toSegments_agrees_with_python_scores_to_segments():
         merge_gap = round(float(rng.uniform(0.0, 2.0)), 2)
         min_duration = round(float(rng.uniform(0.0, 2.0)), 2)
         cases[f"seeded random curve {seed}"] = (
-            scores, 0.1, threshold, merge_gap, min_duration
+            scores, 0.1, threshold, merge_gap, min_duration, "float64"
         )
 
     labels = list(cases.keys())
@@ -490,12 +540,13 @@ def test_js_toSegments_agrees_with_python_scores_to_segments():
     )
 
     for label, js_segments in zip(labels, js_results):
-        scores, hop, threshold, merge_gap, min_duration = cases[label]
+        scores, hop, threshold, merge_gap, min_duration, dtype = cases[label]
         params = PostParams(
             threshold=threshold, min_duration=min_duration, merge_gap=merge_gap
         )
         py_segments = [
-            (s.start, s.end) for s in scores_to_segments(np.array(scores), hop, params)
+            (s.start, s.end)
+            for s in scores_to_segments(np.array(scores, dtype=dtype), hop, params)
         ]
         js_segments = [tuple(seg) for seg in js_segments]
 

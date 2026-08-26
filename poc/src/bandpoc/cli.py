@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -240,7 +241,28 @@ def cmd_explore(args) -> int:
     if not scene_ids:
         print(f"no recordings under {data_dir / 'scenes'}; run `bandpoc add-session` first")
         return 1
-    keys = registry.all_keys() if args.detectors == "all" else args.detectors.split(",")
+
+    # Validate --detectors up front, the same way cmd_run does, instead of
+    # letting collect_session's version lookup swallow an unknown key. Left
+    # unvalidated, a typo'd key matches no cache file and every session ends
+    # up at "no cached scores found -- run `bandpoc run` first" -- which is
+    # actively wrong (the scores may well be cached, just under a key the
+    # user did not typo) and sends the user off to redo inference for
+    # nothing.
+    requested = registry.all_keys() if args.detectors == "all" else args.detectors.split(",")
+    known = set(registry.all_keys())
+    keys = []
+    for key in requested:
+        if key in known:
+            keys.append(key)
+            continue
+        try:
+            registry.get(key)
+        except (KeyError, ImportError) as exc:
+            print(f"[skip] {key}: {exc}")
+    if not keys:
+        print(f"no known detectors requested; known: {sorted(known)}")
+        return 1
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out_dir = Path(args.out_dir) / stamp
@@ -250,10 +272,12 @@ def cmd_explore(args) -> int:
         if not view.models:
             print(f"[skip] {scene_id}: no cached scores")
             continue
-        # encode_mp3 raises RuntimeError when ffmpeg is missing. That must
-        # not take down the whole command: earlier sessions in this loop may
-        # already have pages written into out_dir, and later ones deserve a
-        # chance too. Skip this one with a clear message instead.
+        # encode_mp3 raises RuntimeError when ffmpeg is missing, and raises
+        # subprocess.CalledProcessError when ffmpeg is present but fails on
+        # this file (corrupt/unsupported input, disk full, a codec problem).
+        # Neither must take down the whole command: earlier sessions in this
+        # loop may already have pages written into out_dir, and later ones
+        # deserve a chance too. Skip this one with a clear message instead.
         try:
             mp3 = encode_mp3(
                 data_dir / "scenes" / f"{scene_id}.wav",
@@ -262,6 +286,15 @@ def cmd_explore(args) -> int:
         except RuntimeError as exc:
             print(f"[skip] {scene_id}: {exc}")
             continue
+        except subprocess.CalledProcessError as exc:
+            print(f"[skip] {scene_id}: ffmpeg failed on this file: {exc}")
+            continue
+        # Load-bearing order: out_dir.mkdir/copyfile/render_session/
+        # views.append all happen only past this point, after a successful
+        # encode. Moving any of them above the two `continue`s above would
+        # let a session with a missing or failed mp3 still get linked from
+        # the index, or leave an empty out_dir behind when every session is
+        # skipped. Do not reorder.
         out_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(mp3, out_dir / mp3.name)
         render_session(view, mp3.name, out_dir)

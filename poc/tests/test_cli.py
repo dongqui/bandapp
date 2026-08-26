@@ -261,3 +261,90 @@ def test_explore_without_any_cached_scores_fails_clearly(tmp_path, capsys):
     assert main(["explore", "--data-dir", str(tmp_path),
                  "--out-dir", str(tmp_path / "reports")]) == 1
     assert "bandpoc run" in capsys.readouterr().out
+
+
+def test_explore_flags_an_unknown_detector_key_but_still_renders_the_good_one(
+    tmp_path, capsys
+):
+    src = tmp_path / "take.wav"
+    t = np.arange(WORK_SR * 60) / WORK_SR
+    sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    code = main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports"),
+                 "--detectors", "dsp_baseline:default,bogus:xyz"])
+
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "bogus:xyz" in out
+    assert "unknown detector" in out
+    pages = sorted(p.name for p in (tmp_path / "reports").rglob("*.html"))
+    assert pages == ["index.html", "s.html"]
+
+
+def test_explore_says_so_plainly_when_every_detector_key_is_unknown(tmp_path, capsys):
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(WORK_SR, dtype=np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+    capsys.readouterr()  # discard add-session's own output
+
+    code = main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports"),
+                 "--detectors", "bogus:xyz"])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "unknown detector" in out
+    # An all-unknown --detectors must not be blamed on a missing `bandpoc run`.
+    assert "bandpoc run" not in out
+
+
+def test_explore_keeps_an_already_encoded_session_when_ffmpeg_is_unavailable(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression test for the ffmpeg-missing guard in cmd_explore.
+
+    One session ("cached") already has an mp3 newer than its wav -- the real
+    encode_mp3 would short-circuit and return it without touching ffmpeg at
+    all. The other ("fresh") has no mp3 and needs a real encode, which fails
+    without ffmpeg. explore must still render the cached session into the
+    index and cleanly skip the other one, with exit code 0.
+    """
+    import os
+    from pathlib import Path
+
+    for sid in ("cached", "fresh"):
+        src = tmp_path / f"{sid}.wav"
+        t = np.arange(WORK_SR * 30) / WORK_SR
+        sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+        main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", sid])
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    cached_wav = tmp_path / "scenes" / "cached.wav"
+    cached_mp3 = tmp_path / "scenes" / "cached.mp3"
+    cached_mp3.write_bytes(b"fake mp3 bytes")
+    future = cached_wav.stat().st_mtime + 60
+    os.utime(cached_mp3, (future, future))
+
+    import bandpoc.cli as cli_module
+
+    def fake_encode_mp3(wav_path, mp3_path):
+        wav_path, mp3_path = Path(wav_path), Path(mp3_path)
+        if mp3_path.exists() and mp3_path.stat().st_mtime_ns >= wav_path.stat().st_mtime_ns:
+            return mp3_path
+        raise RuntimeError("ffmpeg not found on PATH. Install it: winget install Gyan.FFmpeg")
+
+    monkeypatch.setattr(cli_module, "encode_mp3", fake_encode_mp3)
+
+    code = main(["explore", "--data-dir", str(tmp_path), "--out-dir", str(tmp_path / "reports")])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "[skip] fresh" in out
+    pages = sorted(p.name for p in (tmp_path / "reports").rglob("*.html"))
+    assert pages == ["cached.html", "index.html"]
+    index_html = next((tmp_path / "reports").rglob("index.html")).read_text(encoding="utf-8")
+    assert "cached" in index_html
+    assert "fresh" not in index_html

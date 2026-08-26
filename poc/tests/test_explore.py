@@ -2,10 +2,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from bandpoc import cache
+import bandpoc.detectors  # noqa: F401 - populate the registry regardless of import order
+from bandpoc import cache, registry
 from bandpoc.audio import WORK_SR
 from bandpoc.explore import (
     DEFAULTS,
+    _detector_version,
     collect_session,
     encode_mp3,
 )
@@ -20,7 +22,14 @@ def write_session_wav(data_dir, session_id="s", seconds=120.0):
     return path
 
 
-def cache_curve(data_dir, session_id, key, curve, hop=0.1, version="1"):
+def cache_curve(data_dir, session_id, key, curve, hop=0.1, version=None):
+    """Version comes from the registry, as collect_session's lookup does.
+    Hardcoding "1" made these tests pass alone and fail in the full suite:
+    importing bandpoc.detectors registers dsp_baseline:default at version "2",
+    and the cache path stopped matching.
+    """
+    if version is None:
+        version = _detector_version(key)
     cache.save(
         cache.cache_path(data_dir / "cache", session_id, key, version),
         np.asarray(curve, dtype=np.float32),
@@ -121,6 +130,23 @@ def test_scores_are_rounded_to_keep_the_page_small(tmp_path):
 def test_defaults_match_the_post_processing_spec():
     assert DEFAULTS.min_duration == 20.0
     assert DEFAULTS.merge_gap == 10.0
+
+
+def test_detector_version_resolves_a_registered_key_to_its_real_version():
+    # Compare against the registry's own value, not a hardcoded string, so a
+    # future version bump on dsp_baseline doesn't break this test too.
+    assert _detector_version("dsp_baseline:default") == registry.get(
+        "dsp_baseline:default"
+    ).version
+
+
+def test_detector_version_falls_back_for_an_unknown_key():
+    assert _detector_version("no_such_detector:default") == "1"
+
+
+# No registered detector in this environment raises ImportError (every backend
+# imports cleanly here), so the ImportError fallback path of _detector_version
+# is exercised by inspection only - see the task report.
 
 
 def test_encode_mp3_writes_a_file_and_reuses_it(tmp_path):

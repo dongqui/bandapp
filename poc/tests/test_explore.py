@@ -103,18 +103,48 @@ def test_segments_use_the_automatic_threshold(tmp_path):
 def test_models_are_sorted_by_take_count_ascending(tmp_path):
     write_session_wav(tmp_path)
     cache_curve(tmp_path, "s", "dsp_baseline:default", square_curve())
-    # Three separated bursts, each well over the 20 s minimum.
+    # Three 25 s bursts with 15 s gaps between them. The gaps must exceed
+    # DEFAULTS.merge_gap (10 s) or postproc merges the bursts into one segment
+    # and this test compares 1 against 1, which is true in either order.
     busy = np.zeros(1200, dtype=np.float32)
     for lo in (0, 400, 800):
-        busy[lo : lo + 300] = 0.95
+        busy[lo : lo + 250] = 0.95
     cache_curve(tmp_path, "s", "silero_vad:default", busy)
 
+    # Deliberately passed in the reverse of the expected output order, so the
+    # assertions below catch a missing (or reversed) sort.
     view = collect_session(
         tmp_path, "s", ["silero_vad:default", "dsp_baseline:default"]
     )
 
-    counts = [len(m.segments) for m in view.models]
-    assert counts == sorted(counts)
+    # Assert the ORDER, not just that the counts happen to be sorted:
+    # [1, 1] == sorted([1, 1]) is trivially true regardless of which model
+    # comes first, which is what let the original fixture (equal counts)
+    # pass with the sort reversed, the key tie-break removed, or no sort at
+    # all.
+    assert [len(m.segments) for m in view.models] == [1, 3]
+    assert [m.key for m in view.models] == [
+        "dsp_baseline:default",
+        "silero_vad:default",
+    ]
+
+
+def test_models_with_equal_take_counts_are_tie_broken_by_key(tmp_path):
+    write_session_wav(tmp_path)
+    cache_curve(tmp_path, "s", "dsp_baseline:default", square_curve())
+    cache_curve(tmp_path, "s", "silero_vad:default", square_curve())
+
+    # Passed in reverse-alphabetical order so the assertion catches a missing
+    # (len(segments), key) tie-break, not just a coincidence of input order.
+    view = collect_session(
+        tmp_path, "s", ["silero_vad:default", "dsp_baseline:default"]
+    )
+
+    assert [len(m.segments) for m in view.models] == [1, 1]
+    assert [m.key for m in view.models] == [
+        "dsp_baseline:default",
+        "silero_vad:default",
+    ]
 
 
 def test_scores_are_rounded_to_keep_the_page_small(tmp_path):

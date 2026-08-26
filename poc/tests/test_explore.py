@@ -174,13 +174,126 @@ def test_detector_version_resolves_a_registered_key_to_its_real_version():
     ).version
 
 
-def test_detector_version_falls_back_for_an_unknown_key():
-    assert _detector_version("no_such_detector:default") == "1"
+def test_detector_version_does_not_fabricate_a_version_for_an_unknown_key():
+    # Important 2: this used to return "1" for any lookup failure, which
+    # became part of the cache path collect_session went looking for. That
+    # happened to be right for every real detector except one, by
+    # coincidence -- see _resolve_version's docstring. It must return None
+    # instead, never a guess.
+    assert _detector_version("no_such_detector:default") is None
 
 
-# No registered detector in this environment raises ImportError (every backend
-# imports cleanly here), so the ImportError fallback path of _detector_version
-# is exercised by inspection only - see the task report.
+def test_collect_session_reads_duration_from_the_header_not_the_samples(
+    tmp_path, monkeypatch
+):
+    """Important 1: collect_session must never call load_audio to get the
+    duration -- doing so pulls the whole session into RAM (measured 1132 MB
+    peak RSS on a real 45-minute session against a 95 MB baseline; see the
+    comment in collect_session). Monkeypatch load_audio in the explore
+    namespace to blow up if collect_session ever calls it, and confirm the
+    duration is still correct via soundfile.info.
+    """
+    import bandpoc.explore as explore_mod
+
+    write_session_wav(tmp_path)  # 120.0 s, see write_session_wav's default
+    cache_curve(tmp_path, "s", "dsp_baseline:default", square_curve())
+
+    def boom(*args, **kwargs):
+        raise AssertionError("collect_session must not call load_audio for duration")
+
+    monkeypatch.setattr(explore_mod, "load_audio", boom)
+
+    view = collect_session(tmp_path, "s", ["dsp_baseline:default"])
+
+    assert view.duration == pytest.approx(120.0, abs=0.05)
+
+
+def test_collect_session_finds_the_cache_file_when_version_lookup_fails(
+    tmp_path, monkeypatch
+):
+    """Important 2: a registered backend's factory can raise ImportError when
+    instantiated even though the key is known (registry.py defers heavy
+    imports to instantiation time) -- e.g. torch/tf/hf missing at runtime.
+    Before the fix, that made the version lookup fabricate "1", which
+    happened to match dsp_baseline's real version by coincidence; a detector
+    actually cached at a different version would be missed entirely. Here a
+    real cache file exists at version "7", but the registry lookup blows up
+    -- collect_session must still find and use it.
+    """
+    write_session_wav(tmp_path)
+    cache_curve(tmp_path, "s", "dsp_baseline:default", square_curve(), version="7")
+
+    def fake_get(key):
+        raise ImportError("simulated: backend not installed")
+
+    monkeypatch.setattr(registry, "get", fake_get)
+
+    view = collect_session(tmp_path, "s", ["dsp_baseline:default"])
+
+    assert [m.key for m in view.models] == ["dsp_baseline:default"]
+    assert view.skipped == {}
+
+
+def test_collect_session_reports_the_real_reason_when_nothing_is_cached_either(
+    tmp_path, monkeypatch
+):
+    """Important 2: when the version lookup fails AND no cache file exists
+    under any version, collect_session must say why (the real import error)
+    instead of leaving the caller to conclude the cache is simply empty.
+    """
+    write_session_wav(tmp_path)
+
+    def fake_get(key):
+        raise ImportError("simulated: backend not installed")
+
+    monkeypatch.setattr(registry, "get", fake_get)
+
+    view = collect_session(tmp_path, "s", ["dsp_baseline:default"])
+
+    assert view.models == []
+    assert view.skipped == {
+        "dsp_baseline:default": "simulated: backend not installed"
+    }
+
+
+def test_a_hard_binary_curve_gets_a_note_that_the_cutoff_does_nothing(tmp_path):
+    """Minor 9: ina_segmenter and silero_vad emit hard 0/1 labels, so their
+    cutoff slider does nothing across almost its whole range -- but
+    `separated` doesn't catch this: Otsu's between-class variance on a clean
+    0/1 split is ~0.25, comfortably above the floor, so `separated` reports
+    True (autothresh.py calls this a known limitation). Detect a curve with
+    essentially two distinct values directly and note it on the page.
+    """
+    write_session_wav(tmp_path)
+    binary_curve = np.concatenate(
+        [np.zeros(600, dtype=np.float32), np.ones(600, dtype=np.float32)]
+    )
+    cache_curve(tmp_path, "s", "silero_vad:default", binary_curve)
+
+    view = collect_session(tmp_path, "s", ["silero_vad:default"])
+    model = view.models[0]
+    assert model.separated is True  # sanity: Otsu's spread check misses this
+    assert model.binary is True
+
+    html = render_session(view, "s.mp3", tmp_path / "out").read_text(encoding="utf-8")
+    assert "does nothing" in html
+
+
+def test_a_non_binary_curve_gets_no_binary_note(tmp_path):
+    # square_curve() only has two distinct values itself (0.05 / 0.95) and
+    # would trip the binary detector too -- use a curve with more than two
+    # distinct values, the actual case this test wants to distinguish.
+    write_session_wav(tmp_path)
+    cache_curve(
+        tmp_path, "s", "dsp_baseline:default",
+        np.linspace(0.0, 1.0, 1200, dtype=np.float32),
+    )
+
+    view = collect_session(tmp_path, "s", ["dsp_baseline:default"])
+    assert view.models[0].binary is False
+
+    html = render_session(view, "s.mp3", tmp_path / "out").read_text(encoding="utf-8")
+    assert "does nothing" not in html
 
 
 def test_encode_mp3_writes_a_file_and_reuses_it(tmp_path):
@@ -290,7 +403,7 @@ def test_a_model_that_could_not_separate_is_flagged_in_the_page(tmp_path):
     # THIS model, not as a page-level heading about "models" in general --
     # and it must actually carry this model's own reason text, not just a
     # fixed word that happens to survive any wording change.
-    match = re.search(r"<span class='flag'>(.*?)</span>", html)
+    match = re.search(r'<span class="flag">(.*?)</span>', html)
     assert match, "no flag span rendered for a model that did not separate"
     flag_text = match.group(1)
     assert "does not separate" in flag_text

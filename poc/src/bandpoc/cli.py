@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 
 from . import cache, registry
 from .audio import WORK_SR, load_audio
@@ -229,8 +230,12 @@ def cmd_add_session(args) -> int:
     except (SessionExists, ValueError, RuntimeError) as exc:
         print(f"[fail] {exc}")
         return 1
-    wav, sr = load_audio(path)
-    print(f"{path.stem}: {len(wav) / sr / 60:.1f} min -> {path}")
+    # Header read, not load_audio: see collect_session in explore.py for the
+    # measured RSS cost (1132 MB on a 45-minute session) of loading a whole
+    # recording into RAM just to print a minute count.
+    info = sf.info(str(path))
+    minutes = info.frames / info.samplerate / 60
+    print(f"{path.stem}: {minutes:.1f} min -> {path}")
     print("next: bandpoc run   (then: bandpoc explore)")
     return 0
 
@@ -269,8 +274,17 @@ def cmd_explore(args) -> int:
     views = []
     for scene_id in scene_ids:
         view = collect_session(data_dir, scene_id, keys)
+        # A detector whose version could not be resolved (unknown, or a
+        # registered backend whose heavy import blew up) AND has nothing
+        # cached under any version either -- collect_session couldn't find
+        # anything to show for it, but say the real reason instead of
+        # leaving it to the generic "no cached scores" line below to imply
+        # the cache is simply empty (Important 2).
+        for key, reason in view.skipped.items():
+            print(f"[skip] {scene_id}: {key}: {reason}")
         if not view.models:
-            print(f"[skip] {scene_id}: no cached scores")
+            if not view.skipped:
+                print(f"[skip] {scene_id}: no cached scores")
             continue
         # encode_mp3 raises RuntimeError when ffmpeg is missing, and raises
         # subprocess.CalledProcessError when ffmpeg is present but fails on

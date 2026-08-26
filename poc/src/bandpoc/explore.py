@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 
 from . import cache, registry
 from .audio import load_audio
@@ -52,6 +53,7 @@ class ModelView:
     reason: str
     separated: bool
     segments: list[tuple[float, float]]
+    binary: bool = False
     meta: dict = field(default_factory=dict)
 
 
@@ -60,13 +62,57 @@ class SessionView:
     session_id: str
     duration: float
     models: list[ModelView]
+    # key -> human reason, for a requested detector that could not be
+    # resolved to any cache file at all (Important 2). Kept separate from
+    # `models` rather than folded into a log line printed here: this module
+    # never prints (only cli.py does), so the caller decides how -- or
+    # whether -- to surface it.
+    skipped: dict = field(default_factory=dict)
 
 
-def _detector_version(key: str) -> str:
+def _resolve_version(key: str) -> tuple[str | None, str | None]:
+    """Look up a detector's real cache version.
+
+    Returns ``(version, None)`` on success, or ``(None, reason)`` when the
+    key is unknown or a *registered* backend's factory blows up importing a
+    heavy dependency (registry.py defers those imports to instantiation
+    time, so a key can pass `explore`'s own --detectors validation and still
+    fail here). Never fabricates a version on failure -- explore only ever
+    reads `.npz` files, it does not touch a model, so inventing a version
+    number would silently point the cache lookup at the wrong filename (see
+    `_cached_path_for_unresolved_version` below and the Important 2 writeup
+    in the task report for the full story: this used to return "1", which
+    happened to be right for every detector except one, by coincidence).
+    """
     try:
-        return registry.get(key).version
-    except (KeyError, ImportError):
-        return "1"
+        return registry.get(key).version, None
+    except (KeyError, ImportError) as exc:
+        return None, str(exc)
+
+
+def _detector_version(key: str) -> str | None:
+    return _resolve_version(key)[0]
+
+
+def _cached_path_for_unresolved_version(
+    cache_dir: Path, session_id: str, key: str
+) -> Path | None:
+    """Find a cached score file for `key` when its version can't be looked
+    up. Cache filenames are ``<session>__<key>__v<version>.npz``; build the
+    glob through `cache._sanitize` -- the same sanitiser `cache.cache_path`
+    uses to write them -- rather than reimplementing the escaping rules, so
+    a session id or key containing characters the sanitiser rewrites still
+    matches its own file.
+
+    Returns a match only when it is unambiguous. If the cache holds curves
+    for this key at two different versions (a stale one from before a
+    version bump, plus a fresh one, both orphaned because the version can no
+    longer be looked up), guessing which is "the" cache would risk silently
+    showing stale scores as current ones.
+    """
+    pattern = f"{cache._sanitize(session_id)}__{cache._sanitize(key)}__v*.npz"
+    matches = sorted(Path(cache_dir).glob(pattern))
+    return matches[0] if len(matches) == 1 else None
 
 
 def collect_session(
@@ -74,15 +120,35 @@ def collect_session(
 ) -> SessionView:
     """Gather every cached curve for one session, ready for rendering."""
     data_dir = Path(data_dir)
-    wav, sr = load_audio(data_dir / "scenes" / f"{session_id}.wav")
-    duration = len(wav) / sr
+    # Read the duration from the header, not the samples: `load_audio` pulls
+    # the whole file into RAM as float32, and this function only ever needed
+    # one number out of it. Measured on a real 45-minute session: peak RSS
+    # 1132 MB against a 95 MB baseline, scaling linearly with recording
+    # length -- on a tool whose whole premise is "the recording is imported
+    # whole, length unlimited" (a 2-hour rehearsal would be ~3 GB). Do not
+    # "simplify" this back to `wav, sr = load_audio(path); len(wav) / sr`.
+    info = sf.info(str(data_dir / "scenes" / f"{session_id}.wav"))
+    duration = info.frames / info.samplerate
     n_frames = int(np.floor(round(duration / HOP, 6)))
 
     models: list[ModelView] = []
+    skipped: dict = {}
+    cache_dir = data_dir / "cache"
     for key in keys:
-        path = cache.cache_path(
-            data_dir / "cache", session_id, key, _detector_version(key)
-        )
+        version, reason = _resolve_version(key)
+        if version is not None:
+            path = cache.cache_path(cache_dir, session_id, key, version)
+        else:
+            path = _cached_path_for_unresolved_version(cache_dir, session_id, key)
+            if path is None:
+                # The version lookup failed AND nothing is cached under any
+                # version for this key either -- there is genuinely nothing
+                # to show, but say why instead of leaving the caller to
+                # conclude (wrongly) that the cache is simply empty. Before
+                # this fix that wrong conclusion sent people to re-run
+                # `bandpoc run`, which hits the exact same failed import.
+                skipped[key] = reason
+                continue
         if not path.exists():
             continue
         cached = cache.load(path)
@@ -118,6 +184,16 @@ def collect_session(
         segments = [
             (s.start, s.end) for s in scores_to_segments(shown, HOP, params)
         ]
+        # Hard-label detectors (ina_segmenter, silero_vad) emit essentially
+        # two distinct values, which makes the cutoff slider meaningless
+        # across almost its whole range -- but `separated` doesn't catch
+        # this: Otsu's between-class variance on a clean 0/1 split is ~0.25,
+        # comfortably above the floor, so `separated` reports True
+        # (autothresh.py's docstring calls this out as a known limitation of
+        # `separated` being a spread proxy, not a bimodality test). Today
+        # this caveat only lives in README.md, and only about the scored
+        # report -- surface it on the explore page too (Minor 9).
+        binary = bool(np.unique(shown).size == 2)
         models.append(
             ModelView(
                 key=key,
@@ -126,6 +202,7 @@ def collect_session(
                 reason=chosen.reason,
                 separated=chosen.separated,
                 segments=segments,
+                binary=binary,
                 meta=cached.meta,
             )
         )
@@ -133,7 +210,9 @@ def collect_session(
     # Ascending take count: whichever model over-detects sinks to the bottom
     # where it is obvious. Fixed at load time - see the renderer.
     models.sort(key=lambda m: (len(m.segments), m.key))
-    return SessionView(session_id=session_id, duration=duration, models=models)
+    return SessionView(
+        session_id=session_id, duration=duration, models=models, skipped=skipped
+    )
 
 
 def encode_mp3(wav_path: str | Path, mp3_path: str | Path) -> Path:
@@ -168,7 +247,7 @@ audio{width:100%;margin-bottom:1rem}
 .model header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
 .key{font-weight:600;font-size:.9rem;min-width:16rem}
 .count{font-size:.85rem;color:#555}
-.flag{color:#c62828;font-size:.78rem}
+.flag,.binary-flag{color:#c62828;font-size:.78rem}
 canvas{width:100%;height:64px;display:block;margin-top:.4rem;cursor:pointer}
 .segs{font-size:.75rem;color:#555;margin-top:.3rem;
       font-family:ui-monospace,Consolas,monospace;word-break:break-all}
@@ -323,22 +402,31 @@ if (drifted.length) {
 
 def _model_block(index: int, model: ModelView) -> str:
     flag = (
-        f"<span class='flag'>this model does not separate cleanly: "
-        f"{html_mod.escape(model.reason)}</span>"
+        f'<span class="flag">this model does not separate cleanly: '
+        f'{html_mod.escape(model.reason)}</span>'
         if not model.separated
         else ""
     )
-    return f"""<section class='model'>
+    # Minor 9: a hard-label detector's cutoff slider does nothing across
+    # almost its whole range -- see the `binary` comment in collect_session.
+    binary_note = (
+        '<span class="binary-flag">this model outputs a hard 0/1 curve -- '
+        "the cutoff slider does nothing across almost its whole range</span>"
+        if model.binary
+        else ""
+    )
+    return f"""<section class="model">
   <header>
-    <span class='key'>{html_mod.escape(model.key)}</span>
-    <label>cutoff <input type='range' id='thresh-{index}' min='0' max='1'
-      step='0.01' value='{model.threshold}'></label>
-    <span id='value-{index}'>{model.threshold:.2f}</span>
-    <span class='count' id='count-{index}'></span>
+    <span class="key">{html_mod.escape(model.key)}</span>
+    <label>cutoff <input type="range" id="thresh-{index}" min="0" max="1"
+      step="0.01" value="{model.threshold}"></label>
+    <span id="value-{index}">{model.threshold:.2f}</span>
+    <span class="count" id="count-{index}"></span>
     {flag}
+    {binary_note}
   </header>
-  <canvas id='canvas-{index}'></canvas>
-  <div class='segs' id='segs-{index}'></div>
+  <canvas id="canvas-{index}"></canvas>
+  <div class="segs" id="segs-{index}"></div>
 </section>"""
 
 
@@ -371,17 +459,17 @@ def render_session(view: SessionView, mp3_name: str, out_dir: str | Path) -> Pat
     # this sink is closed even if some other future caller of render_session
     # passes an unvalidated session_id. Do not remove this.
     embedded_json = json.dumps(payload).replace("</", "<\\/")
-    page = f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
+    page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>{html_mod.escape(view.session_id)} - 모델 비교</title>
 <style>{_CSS}</style></head><body>
 <h1>{html_mod.escape(view.session_id)} · {view.duration / 60:.1f} min</h1>
-<div class='banner' id='drift'></div>
-<audio id='player' controls src="{html_mod.escape(mp3_name)}"></audio>
-<div class='controls'>
-  <label>min duration <input type='number' id='min-duration'
-    value='{DEFAULTS.min_duration}' min='0' step='1'> s</label>
-  <label>merge gap <input type='number' id='merge-gap'
-    value='{DEFAULTS.merge_gap}' min='0' step='1'> s</label>
+<div class="banner" id="drift"></div>
+<audio id="player" controls src="{html_mod.escape(mp3_name)}"></audio>
+<div class="controls">
+  <label>min duration <input type="number" id="min-duration"
+    value="{DEFAULTS.min_duration}" min="0" step="1"> s</label>
+  <label>merge gap <input type="number" id="merge-gap"
+    value="{DEFAULTS.merge_gap}" min="0" step="1"> s</label>
   <span>타임라인을 클릭하면 그 시점부터 재생된다.</span>
 </div>
 {blocks}
@@ -402,7 +490,7 @@ def render_index(views: list[SessionView], out_dir: str | Path) -> Path:
         f"{len(v.models)} models</li>"
         for v in views
     )
-    page = f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
+    page = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>세션 탐색</title><style>{_CSS}</style></head><body>
 <h1>세션 탐색</h1>
 <p>정답 라벨이 없는 실제 녹음이다. 오디오를 들으며 모델별 검출 구간을 직접 비교한다.</p>

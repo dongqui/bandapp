@@ -1,3 +1,5 @@
+import shutil
+
 import numpy as np
 import pytest
 import soundfile as sf
@@ -11,6 +13,8 @@ from bandpoc.explore import (
     collect_session,
     encode_mp3,
 )
+
+_NODE = shutil.which("node")
 
 
 def write_session_wav(data_dir, session_id="s", seconds=120.0):
@@ -276,10 +280,22 @@ def test_a_model_that_could_not_separate_is_flagged_in_the_page(tmp_path):
     cache_curve(tmp_path, "flat", "dsp_baseline:default",
                 np.full(1200, 0.4, dtype=np.float32))
     view = collect_session(tmp_path, "flat", ["dsp_baseline:default"])
+    model = view.models[0]
+    assert model.separated is False  # sanity: this is the case under test
 
     html = render_session(view, "flat.mp3", tmp_path / "out").read_text(encoding="utf-8")
 
-    assert "do not separate" in html
+    # The flag renders inside a single model's own row (one <section
+    # class='model'> per model), so its wording must read as describing
+    # THIS model, not as a page-level heading about "models" in general --
+    # and it must actually carry this model's own reason text, not just a
+    # fixed word that happens to survive any wording change.
+    match = re.search(r"<span class='flag'>(.*?)</span>", html)
+    assert match, "no flag span rendered for a model that did not separate"
+    flag_text = match.group(1)
+    assert "does not separate" in flag_text
+    assert "models" not in flag_text
+    assert model.reason in flag_text
 
 
 def test_the_page_has_no_external_requests(tmp_path):
@@ -288,6 +304,16 @@ def test_the_page_has_no_external_requests(tmp_path):
     )
     assert "http://" not in html
     assert "https://" not in html
+    # A protocol-relative URL ("//cdn.example.com/x.js" in a src/href
+    # attribute) reaches the network exactly like an https:// one but is not
+    # caught by the checks above.
+    assert '="//' not in html
+    # No script-driven network calls, and no CSS-level external resource
+    # loading (@import can pull in a stylesheet, and by extension whatever
+    # that stylesheet references).
+    assert "fetch(" not in html
+    assert "XMLHttpRequest" not in html
+    assert "@import" not in html
 
 
 def test_render_index_lists_every_session(tmp_path):
@@ -349,3 +375,141 @@ def test_segments_are_derived_from_the_same_rounded_curve_as_the_scores(
         (s.start, s.end) for s in scores_to_segments(rounded_curve, 0.1, params)
     ]
     assert model.segments == expected
+
+
+def _extract_to_segments_js():
+    """Pull the `toSegments` function verbatim out of `bandpoc.explore._JS`.
+
+    This is a differential test against the ACTUAL page script, not a copy
+    of it -- copying the algorithm into the test would only prove the copy
+    agrees with Python, which tells us nothing about whether the shipped
+    page does. The end-of-function marker is a closing brace at column 0:
+    every brace *inside* the function body is indented, so this cannot
+    truncate early on the function's own for-loops and if-statements.
+    """
+    import re as re_mod
+
+    import bandpoc.explore as explore_mod
+
+    match = re_mod.search(r"function toSegments\(.*?\n\}\n", explore_mod._JS, re_mod.S)
+    assert match, "toSegments not found in bandpoc.explore._JS"
+    return match.group(0)
+
+
+def _run_js_to_segments(cases):
+    """Run `toSegments` under node for a batch of cases in one process.
+
+    One node startup for the whole batch, not one per case: this test's
+    whole point is to run on every push, so it has to stay fast.
+    """
+    import json as json_mod
+    import subprocess
+    import tempfile
+    from pathlib import Path as PathMod
+
+    script = _extract_to_segments_js() + """
+let data = '';
+process.stdin.on('data', chunk => { data += chunk; });
+process.stdin.on('end', () => {
+  const cases = JSON.parse(data);
+  const results = cases.map(c =>
+    toSegments(c.scores, c.hop, c.threshold, c.mergeGap, c.minDuration));
+  process.stdout.write(JSON.stringify(results));
+});
+"""
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".js", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(script)
+        script_path = f.name
+    try:
+        result = subprocess.run(
+            ["node", script_path],
+            input=json_mod.dumps(cases),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    finally:
+        PathMod(script_path).unlink()
+    return json_mod.loads(result.stdout)
+
+
+@pytest.mark.skipif(_NODE is None, reason="node not on PATH")
+def test_js_toSegments_agrees_with_python_scores_to_segments():
+    """The one guard that matters (spec Section 5 R1): if the page's JS
+    reimplementation of the post-processing ever disagrees with
+    bandpoc.postproc.scores_to_segments, the whole tool shows a picture
+    that does not match what the pipeline computes. Today that is caught
+    only by a banner a human has to notice; this pins it in the suite.
+    """
+    from bandpoc.postproc import PostParams, scores_to_segments
+
+    rng = np.random.default_rng(20260826)
+    cases = {
+        "run reaches the final frame": (
+            [0.9] * 5 + [0.1] * 3 + [0.9] * 4, 0.1, 0.5, 0.0, 0.0
+        ),
+        "run starts at frame 0": (
+            [0.9] * 4 + [0.1] * 6, 0.1, 0.5, 0.0, 0.0
+        ),
+        "gap exactly equal to merge_gap": (
+            [0.9, 0.9, 0.1, 0.1, 0.1, 0.9, 0.9], 0.1, 0.5, 0.3, 0.0
+        ),
+        "segment exactly equal to min_duration": (
+            [0.9] * 5 + [0.1] * 3, 0.1, 0.5, 0.0, 0.5
+        ),
+        "all above threshold": ([0.9] * 8, 0.1, 0.5, 0.0, 0.0),
+        "all below threshold": ([0.1] * 8, 0.1, 0.5, 0.0, 0.0),
+        "empty curve": ([], 0.1, 0.5, 0.0, 0.0),
+        "single frame above threshold": ([0.9], 0.1, 0.5, 0.0, 0.0),
+        "single frame below threshold": ([0.1], 0.1, 0.5, 0.0, 0.0),
+    }
+    for seed in range(5):
+        n = int(rng.integers(20, 200))
+        scores = np.round(rng.random(n), 2).tolist()
+        threshold = round(float(rng.uniform(0.1, 0.9)), 2)
+        merge_gap = round(float(rng.uniform(0.0, 2.0)), 2)
+        min_duration = round(float(rng.uniform(0.0, 2.0)), 2)
+        cases[f"seeded random curve {seed}"] = (
+            scores, 0.1, threshold, merge_gap, min_duration
+        )
+
+    labels = list(cases.keys())
+    js_results = _run_js_to_segments(
+        [
+            {
+                "scores": cases[label][0],
+                "hop": cases[label][1],
+                "threshold": cases[label][2],
+                "mergeGap": cases[label][3],
+                "minDuration": cases[label][4],
+            }
+            for label in labels
+        ]
+    )
+
+    for label, js_segments in zip(labels, js_results):
+        scores, hop, threshold, merge_gap, min_duration = cases[label]
+        params = PostParams(
+            threshold=threshold, min_duration=min_duration, merge_gap=merge_gap
+        )
+        py_segments = [
+            (s.start, s.end) for s in scores_to_segments(np.array(scores), hop, params)
+        ]
+        js_segments = [tuple(seg) for seg in js_segments]
+
+        assert len(py_segments) == len(js_segments), (
+            f"{label}: segment count differs -- python={py_segments} js={js_segments}"
+        )
+        for (py_start, py_end), (js_start, js_end) in zip(py_segments, js_segments):
+            # Same 1e-6 tolerance the page's own drift check uses (spec
+            # Section 5 R1): both languages compute frame_index * hop, which
+            # is not exact in binary floating point, and Python additionally
+            # rounds to 1e-10. Neither is a bug; anything above 1e-6 would be.
+            assert abs(py_start - js_start) < 1e-6, (
+                f"{label}: start differs -- python={py_start} js={js_start}"
+            )
+            assert abs(py_end - js_end) < 1e-6, (
+                f"{label}: end differs -- python={py_end} js={js_end}"
+            )

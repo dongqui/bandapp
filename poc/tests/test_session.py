@@ -60,6 +60,25 @@ def test_derive_id_rejects_a_name_that_slugifies_to_nothing(tmp_path):
         derive_id(str(tmp_path / "밴드.wav"))
 
 
+def test_derive_id_rejects_a_path_traversal_disguised_as_a_youtube_id():
+    # The `v=` query parameter is otherwise unvalidated attacker-controlled
+    # text; a session id becomes a filename (explore.py writes
+    # out_dir / f"{session_id}.html"), so "../../evil" must never survive as
+    # one. It must fall through to the filename-stem path instead of the raw
+    # query value, and must not contain a path separator or "..".
+    result = derive_id("https://www.youtube.com/watch?v=../../evil")
+    assert result == "evil"
+    assert "/" not in result and ".." not in result
+
+
+def test_derive_id_rejects_script_breakout_characters_disguised_as_a_youtube_id():
+    # A session id is interpolated into the explorer page's embedded JSON
+    # (explore.py). "<" and "/" must never survive as part of an id.
+    result = derive_id("https://www.youtube.com/watch?v=x</script>y")
+    assert "<" not in result and ">" not in result
+    assert "/script" not in result
+
+
 def test_add_session_converts_a_local_file_to_the_work_sample_rate(tmp_path):
     src = tmp_path / "take.wav"
     t = np.arange(8000 * 3) / 8000

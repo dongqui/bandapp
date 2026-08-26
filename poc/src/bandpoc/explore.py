@@ -99,6 +99,25 @@ def collect_session(
             min_duration=DEFAULTS.min_duration,
             merge_gap=DEFAULTS.merge_gap,
         )
+        # `shown` is float32; `chosen.value` (params.threshold) is a plain
+        # Python float. For about half of the 101 possible 2-decimal
+        # thresholds, float32(v) < v in float64 (e.g. float32(0.32) ==
+        # 0.3199999928...), so the two languages agreeing that a
+        # frame == threshold is "on" is NOT a given. It works here because
+        # scores_to_segments does `np.asarray(shown) >= params.threshold`:
+        # with numpy<2's scalar promotion rules, comparing a float32 array
+        # against a Python float scalar demotes the scalar to float32
+        # first, so this comparison runs float32-vs-float32 -- while the
+        # page's JS runs float64-vs-float64 on the same 2-decimal numbers.
+        # Both preserve equality on the 0.01 grid, but only because of this
+        # implicit, version-dependent promotion. A future numpy upgrade (or
+        # passing a plain Python list here instead of the float32 array)
+        # could silently switch this to a float64 comparison and reintroduce
+        # the false-positive drift-banner risk this function exists to
+        # avoid -- if that ever needs to change, re-verify this note first.
+        segments = [
+            (s.start, s.end) for s in scores_to_segments(shown, HOP, params)
+        ]
         models.append(
             ModelView(
                 key=key,
@@ -106,9 +125,7 @@ def collect_session(
                 threshold=chosen.value,
                 reason=chosen.reason,
                 separated=chosen.separated,
-                segments=[
-                    (s.start, s.end) for s in scores_to_segments(shown, HOP, params)
-                ],
+                segments=segments,
                 meta=cached.meta,
             )
         )
@@ -196,6 +213,18 @@ function sameSegments(a, b) {
     Math.abs(s[0] - b[i][0]) < 1e-6 && Math.abs(s[1] - b[i][1]) < 1e-6);
 }
 
+// <input type='number'> is freely clearable, and parseFloat('') is NaN --
+// without this, clearing min-duration or merge-gap would silently make
+// every "duration >= NaN" comparison false (every timeline goes to "0
+// takes") or silently disable merging, with no indication why. Fall back to
+// the payload default, and never let a negative value through: a negative
+// mergeGap or minDuration does not mean "disabled", it means the field is
+// broken, and should behave like it was never touched.
+function numberOr(value, fallback) {
+  const parsed = parseFloat(value);
+  return Math.max(0, Number.isFinite(parsed) ? parsed : fallback);
+}
+
 const rows = DATA.models.map((model, index) => {
   const canvas = document.getElementById('canvas-' + index);
   const slider = document.getElementById('thresh-' + index);
@@ -246,8 +275,8 @@ function draw(row) {
 }
 
 function recompute(row) {
-  const minDuration = parseFloat(document.getElementById('min-duration').value);
-  const mergeGap = parseFloat(document.getElementById('merge-gap').value);
+  const minDuration = numberOr(document.getElementById('min-duration').value, DATA.minDuration);
+  const mergeGap = numberOr(document.getElementById('merge-gap').value, DATA.mergeGap);
   row.segments = toSegments(
     row.model.scores, DATA.hop, parseFloat(row.slider.value), mergeGap, minDuration);
   row.readout.textContent = parseFloat(row.slider.value).toFixed(2);
@@ -294,7 +323,7 @@ if (drifted.length) {
 
 def _model_block(index: int, model: ModelView) -> str:
     flag = (
-        f"<span class='flag'>models that do not separate cleanly: "
+        f"<span class='flag'>this model does not separate cleanly: "
         f"{html_mod.escape(model.reason)}</span>"
         if not model.separated
         else ""
@@ -333,6 +362,15 @@ def render_session(view: SessionView, mp3_name: str, out_dir: str | Path) -> Pat
         ],
     }
     blocks = "\n".join(_model_block(i, m) for i, m in enumerate(view.models))
+    # Belt-and-braces: the brief this was built from claimed session_id is
+    # always [a-z0-9_-] because of Task 1's slugify, but that claim was
+    # false -- the YouTube branch in session.py returned the raw `v=` query
+    # value with no validation, so a crafted URL could smuggle "</script>"
+    # straight into this payload. session.py now validates the id at the
+    # source (see _VALID_YOUTUBE_ID there), but escaping "</" here too means
+    # this sink is closed even if some other future caller of render_session
+    # passes an unvalidated session_id. Do not remove this.
+    embedded_json = json.dumps(payload).replace("</", "<\\/")
     page = f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
 <title>{html_mod.escape(view.session_id)} - 모델 비교</title>
 <style>{_CSS}</style></head><body>
@@ -347,7 +385,7 @@ def render_session(view: SessionView, mp3_name: str, out_dir: str | Path) -> Pat
   <span>타임라인을 클릭하면 그 시점부터 재생된다.</span>
 </div>
 {blocks}
-<script id="session-data" type="application/json">{json.dumps(payload)}</script>
+<script id="session-data" type="application/json">{embedded_json}</script>
 <script>{_JS}</script>
 </body></html>"""
     out_dir = Path(out_dir)

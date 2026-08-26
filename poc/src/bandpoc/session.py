@@ -16,6 +16,15 @@ from urllib.parse import parse_qs, urlparse
 from .audio import WORK_SR, load_audio, save_audio
 
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+# Real YouTube video ids are exactly this character class. The `v=` query
+# parameter and the youtu.be path segment are otherwise attacker-controlled
+# strings with no validation from yt-dlp or the URL parser: an id becomes a
+# session id, which becomes a filename (`explore.py`'s render_session writes
+# `out_dir / f"{session_id}.html"`) and an unescaped `href`. Rejecting
+# anything outside [A-Za-z0-9_-] here is what keeps "../../evil" and
+# "x</script>y" from ever being treated as a session id (case is kept per a
+# prior ruling: real ids are case-sensitive).
+_VALID_YOUTUBE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 class SessionExists(ValueError):
@@ -44,8 +53,15 @@ def _youtube_id(source: str) -> str | None:
         return None
     if parsed.netloc == "youtu.be":
         segments = [segment for segment in parsed.path.split("/") if segment]
-        return segments[0] if segments else None
-    return (parse_qs(parsed.query).get("v") or [None])[0]
+        candidate = segments[0] if segments else None
+    else:
+        candidate = (parse_qs(parsed.query).get("v") or [None])[0]
+    # An id we cannot trust is not an id: fall through to the filename-stem
+    # path (or its "pass --id explicitly" error) rather than returning
+    # attacker-controlled text as a session id. See _VALID_YOUTUBE_ID above.
+    if candidate is None or not _VALID_YOUTUBE_ID.match(candidate):
+        return None
+    return candidate
 
 
 def derive_id(source: str) -> str:

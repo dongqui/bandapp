@@ -27,7 +27,8 @@ def test_a_constant_curve_falls_back_and_says_why():
     result = auto_threshold(np.full(500, 0.8, dtype=np.float32))
     assert result.value == FALLBACK
     assert result.separated is False
-    assert "separate" in result.reason
+    assert "spread" in result.reason
+    assert "below" in result.reason
 
 
 def test_a_unimodal_curve_falls_back():
@@ -43,6 +44,32 @@ def test_a_binary_curve_lands_between_zero_and_one():
     result = auto_threshold(scores)
     assert 0.0 < result.value < 1.0
     assert result.separated is True
+
+
+def test_uniform_noise_is_reported_as_separated_even_though_it_has_no_humps():
+    # Documents a known limitation (see the module docstring), not a desired
+    # outcome: Otsu's between-class variance is monotone in overall spread,
+    # not in bimodality. The most structureless curve possible -- uniform
+    # noise over the whole range -- has high spread and clears the floor, so
+    # `separated` comes back True even though there are no humps at all.
+    rng = np.random.default_rng(0)
+    scores = rng.uniform(0, 1, 1000).astype(np.float32)
+    result = auto_threshold(scores)
+    assert result.separated is True
+
+
+def test_a_tight_bimodal_curve_is_reported_as_not_separated():
+    # Documents the mirror-image limitation: two clusters squeezed into a
+    # narrow band (the compressed-scale model the module docstring warns
+    # about) are genuinely bimodal but have low overall spread, so they can
+    # measure below the floor and come back separated=False. This is the
+    # false negative side of the same monotone-in-spread behaviour above --
+    # pinned here so the constant is not "fixed" later by retuning it, which
+    # cannot repair the flag (the two regimes overlap; no constant separates
+    # them).
+    scores = np.concatenate([np.full(500, 0.43), np.full(500, 0.57)]).astype(np.float32)
+    result = auto_threshold(scores)
+    assert result.separated is False
 
 
 def test_an_empty_curve_falls_back_without_raising():

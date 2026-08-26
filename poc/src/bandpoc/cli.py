@@ -90,7 +90,7 @@ def cmd_fetch(args) -> int:
     print(f"\n{total} clips written to {data_dir / 'clips'}")
     print(
         "Search results are UNVETTED. Listen through each pool and delete anything "
-        "that does not match its intent before running build-scenes — bad material "
+        "that does not match its intent before running build-scenes -- bad material "
         "silently corrupts every metric downstream."
     )
     return 0
@@ -131,18 +131,18 @@ def cmd_run(args) -> int:
                 print(f"[skip] {key}: {reason}")
                 continue
             if not args.force and cache.exists(cache_dir, scene_id, key, detector.version):
-                print(f"[cached] {scene_id} × {key}")
+                print(f"[cached] {scene_id} x {key}")
                 continue
             try:
                 detector.load()
                 scores, hop, meta = score_scene(detector, wav, sr)
             except Exception as exc:  # a broken backend must not end the run
-                print(f"[fail] {scene_id} × {key}: {type(exc).__name__}: {exc}")
+                print(f"[fail] {scene_id} x {key}: {type(exc).__name__}: {exc}")
                 continue
             cache.save(
                 cache.cache_path(cache_dir, scene_id, key, detector.version), scores, hop, meta
             )
-            print(f"[done] {scene_id} × {key}  RTF={meta['rtf']:.4f}  "
+            print(f"[done] {scene_id} x {key}  RTF={meta['rtf']:.4f}  "
                   f"RSS={meta['peak_rss_mb']:.0f}MB")
     return 0
 
@@ -191,7 +191,7 @@ def cmd_report(args) -> int:
         results.append(DetectorResult(key, True, "", best, top, points, curves, meta))
 
     if not any(r.available for r in results):
-        print("no cached scores found — run `bandpoc run` first")
+        print("no cached scores found -- run `bandpoc run` first")
         return 1
 
     stamp = time.strftime("%Y%m%d-%H%M%S")

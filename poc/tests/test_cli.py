@@ -120,3 +120,25 @@ def test_report_without_any_cache_fails_with_a_clear_message(tmp_path, capsys):
     assert main(["report", "--data-dir", str(tmp_path),
                  "--out-dir", str(tmp_path / "reports")]) == 1
     assert "bandpoc run" in capsys.readouterr().out
+
+
+def test_cli_messages_encode_on_a_cp949_console():
+    """Korean Windows consoles default to cp949, which has no em dash.
+
+    `bandpoc fetch` completed its whole download and then died printing the
+    closing advice, so keep every CLI string inside that codec.
+    """
+    import ast
+    from pathlib import Path
+
+    from bandpoc import cli
+
+    tree = ast.parse(Path(cli.__file__).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            try:
+                node.value.encode("cp949")
+            except UnicodeEncodeError as exc:
+                raise AssertionError(
+                    f"cli.py line {node.lineno} has a character cp949 cannot encode: {exc}"
+                ) from exc

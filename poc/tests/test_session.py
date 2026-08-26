@@ -130,6 +130,43 @@ def test_add_session_does_not_normalise_loudness(tmp_path):
     assert float(np.abs(wav).max()) == pytest.approx(0.01, abs=0.002)
 
 
+def test_add_session_checks_ffmpeg_before_downloading_a_url(tmp_path, monkeypatch):
+    """Minor 5: `_download` runs `yt-dlp -x --audio-format wav`, which needs
+    ffmpeg -- but nothing checked before this fix, so a missing ffmpeg
+    surfaced only after yt-dlp ran, as a confusing "yt-dlp produced no
+    audio" instead of the same clean install hint `cmd_fetch` gives.
+    """
+    import subprocess
+
+    from bandpoc import session as session_mod
+
+    calls = []
+    monkeypatch.setattr(session_mod, "ffmpeg_available", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        add_session(
+            "https://www.youtube.com/watch?v=igMctbh0pT8", tmp_path / "scenes"
+        )
+
+    assert not calls, "must fail before ever shelling out to yt-dlp"
+
+
+def test_add_session_does_not_need_ffmpeg_for_a_local_file(tmp_path, monkeypatch):
+    """A local-file import never downloads anything, so it must not pay the
+    ffmpeg precheck Minor 5 added for the URL path.
+    """
+    from bandpoc import session as session_mod
+
+    monkeypatch.setattr(session_mod, "ffmpeg_available", lambda: False)
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(8000, dtype=np.float32), 8000)
+
+    out = add_session(str(src), tmp_path / "scenes")
+
+    assert out.exists()
+
+
 def test_add_session_downloads_a_youtube_url_through_the_running_interpreter(
     tmp_path, monkeypatch
 ):

@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .audio import WORK_SR, load_audio, save_audio
+from .fetch import ffmpeg_available
 
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 # Real YouTube video ids are exactly this character class. The `v=` query
@@ -83,6 +84,15 @@ def _raw_dir(scenes_dir: str | Path) -> Path:
 
 
 def _download(source: str, session_id: str, raw_dir: Path) -> Path:
+    # `-x --audio-format wav` needs ffmpeg to do the actual extraction; a
+    # missing ffmpeg otherwise surfaces only after yt-dlp runs, as a
+    # confusing "yt-dlp produced no audio" instead of the same clean install
+    # hint `cmd_fetch` already gives (Minor 5). A local-file import never
+    # reaches this function, so it never pays this check.
+    if not ffmpeg_available():
+        raise RuntimeError(
+            "ffmpeg not found on PATH. Install it: winget install Gyan.FFmpeg"
+        )
     raw_dir.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [

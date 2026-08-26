@@ -172,8 +172,8 @@ def test_scene_ids_lists_labelled_and_unlabelled_together(tmp_path):
     assert _scene_ids(tmp_path, "all") == ["session_01", "tiny"]
 
 
-def test_labelled_ids_keeps_only_scenes_with_a_labels_file(tmp_path):
-    from bandpoc.cli import _labelled_ids, _scene_ids
+def test_labelled_scene_ids_keeps_only_scenes_with_a_labels_file(tmp_path):
+    from bandpoc.cli import _labelled_scene_ids
 
     write_pools(tmp_path / "clips")
     write_recipes(tmp_path / "scenes.yaml")
@@ -181,7 +181,108 @@ def test_labelled_ids_keeps_only_scenes_with_a_labels_file(tmp_path):
           "--recipes", str(tmp_path / "scenes.yaml")])
     write_session(tmp_path)
 
-    assert _labelled_ids(tmp_path, _scene_ids(tmp_path, "all")) == ["tiny"]
+    assert _labelled_scene_ids(tmp_path, "all") == ["tiny"]
+
+
+def test_labelled_scene_ids_works_when_the_wav_was_deleted(tmp_path):
+    """Minor 4: report only ever reads labels.json and the cache, never the
+    wav -- a scene whose (large) wav was deleted after scoring must still be
+    found.
+    """
+    from bandpoc.cli import _labelled_scene_ids
+
+    write_pools(tmp_path / "clips")
+    write_recipes(tmp_path / "scenes.yaml")
+    main(["build-scenes", "--data-dir", str(tmp_path),
+          "--recipes", str(tmp_path / "scenes.yaml")])
+
+    (tmp_path / "scenes" / "tiny.wav").unlink()
+
+    assert _labelled_scene_ids(tmp_path, "all") == ["tiny"]
+
+
+def test_scene_ids_reports_an_unknown_id_by_name(tmp_path, capsys):
+    """Minor 3: an unknown --scenes id must be named, not silently dropped."""
+    from bandpoc.cli import _scene_ids
+
+    write_session(tmp_path, "session_01")
+
+    result = _scene_ids(tmp_path, "session_01,typoo")
+
+    assert result == ["session_01"]
+    assert "typoo" in capsys.readouterr().out
+
+
+def test_report_builds_from_labels_and_cache_after_the_wav_is_deleted(tmp_path):
+    """Minor 4: each session wav is large (~259 MB for 45 minutes); deleting
+    it after scoring is normal housekeeping, and report must not need it.
+    """
+    write_pools(tmp_path / "clips")
+    write_recipes(tmp_path / "scenes.yaml")
+    main(["build-scenes", "--data-dir", str(tmp_path),
+          "--recipes", str(tmp_path / "scenes.yaml")])
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    (tmp_path / "scenes" / "tiny.wav").unlink()
+
+    code = main(["report", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports")])
+
+    assert code == 0
+    pages = list((tmp_path / "reports").rglob("index.html"))
+    assert len(pages) == 1
+    assert "dsp_baseline:default" in pages[0].read_text(encoding="utf-8")
+
+
+def test_explore_says_something_accurate_when_every_scene_id_is_a_typo(
+    tmp_path, capsys
+):
+    """Minor 3: `explore --scenes typoo` on a populated directory must not
+    blame a missing `add-session` -- "s" exists, it was just misspelled.
+    """
+    src = tmp_path / "take.wav"
+    t = np.arange(WORK_SR * 30) / WORK_SR
+    sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+    capsys.readouterr()
+
+    code = main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports"),
+                 "--scenes", "typoo"])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "typoo" in out
+    assert "add-session" not in out
+
+
+def test_explore_reports_the_real_reason_when_a_detectors_version_lookup_fails(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression for Important 2: an installed-but-unimportable backend must
+    not make explore fabricate a cache version and blame an empty cache.
+    """
+    src = tmp_path / "take.wav"
+    t = np.arange(WORK_SR * 30) / WORK_SR
+    sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+    capsys.readouterr()
+
+    from bandpoc import registry
+
+    def fake_get(key):
+        raise ImportError("simulated: backend not installed")
+
+    monkeypatch.setattr(registry, "get", fake_get)
+
+    code = main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports"),
+                 "--detectors", "dsp_baseline:default"])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "simulated: backend not installed" in out
 
 
 def test_run_scores_a_session_that_has_no_labels(tmp_path):

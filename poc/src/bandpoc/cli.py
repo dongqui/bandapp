@@ -74,23 +74,71 @@ def score_scene(detector: Detector, wav: np.ndarray, sr: int) -> tuple[np.ndarra
     )
 
 
+def _filter_requested_ids(
+    available: list[str], requested: str, data_dir: Path, kind: str
+) -> list[str]:
+    """Apply a --scenes filter against `available`, reporting an unknown id
+    by name instead of silently dropping it (Minor 3 -- mirrors what
+    cmd_explore already does for an unknown --detectors key). Shared by
+    `_scene_ids` and `_labelled_scene_ids` so `run`, `report` and `explore`
+    all get the diagnostic without three copies of it.
+    """
+    if requested == "all":
+        return available
+    names = requested.split(",")
+    for name in names:
+        if name not in available:
+            print(f"[skip] {name}: no {kind} by that id under {data_dir / 'scenes'}")
+    return [name for name in names if name in available]
+
+
 def _scene_ids(data_dir: Path, requested: str) -> list[str]:
     """Every wav under scenes/, labelled or not.
 
     A session with no labels.json is still something `run` can score; only
-    `report` needs the ground truth.
+    `report` needs the ground truth. `run` needs the real wav to score it,
+    which is why this globs *.wav rather than *.labels.json -- see
+    `_labelled_scene_ids` for the counterpart `report` uses.
     """
     available = sorted(p.stem for p in (data_dir / "scenes").glob("*.wav"))
-    if requested == "all":
-        return available
-    return [s for s in requested.split(",") if s in available]
+    return _filter_requested_ids(available, requested, data_dir, "scene")
 
 
-def _labelled_ids(data_dir: Path, scene_ids: list[str]) -> list[str]:
-    return [
-        sid for sid in scene_ids
-        if (data_dir / "scenes" / f"{sid}.labels.json").exists()
-    ]
+def _labelled_scene_ids(data_dir: Path, requested: str) -> list[str]:
+    """Every scene with a labels.json under scenes/, wav present or not.
+
+    `report` never reads the wav itself -- only labels.json and the cache --
+    so a scene whose (large) wav was deleted after scoring must still be
+    reportable (Minor 4: each 45-minute session wav is ~259 MB, and deleting
+    it once it's scored is normal housekeeping). This globs *.labels.json
+    directly instead of `_scene_ids`'s wav stems filtered down to the
+    labelled subset -- that indirection was the actual bug: a deleted wav
+    made the scene invisible before its labels were even checked. Be careful
+    not to reuse `_scene_ids` here again; the whole point is not to require
+    the wav.
+    """
+    scenes_dir = data_dir / "scenes"
+    available = sorted(
+        p.name[: -len(".labels.json")] for p in scenes_dir.glob("*.labels.json")
+    )
+    return _filter_requested_ids(available, requested, data_dir, "labelled scene")
+
+
+def _no_scenes_message(
+    available: list[str], requested: str, data_dir: Path, hint: str, noun: str = "scenes"
+) -> str:
+    """The right "nothing to work with" message for an empty scene-id result
+    (Minor 3), shared by `run`/`report`/`explore`. `--scenes all` (or a
+    request that matches nothing at all) genuinely needs `hint` -- go
+    produce some scenes. But `--scenes` naming only ids that don't exist
+    does not: those ids might just be misspelled, and telling the user to
+    redo the step that already produced the real ones is actively wrong.
+    That was the original bug: `explore --scenes typoo` on a populated
+    directory blamed a missing `add-session`.
+    """
+    if requested != "all" and available:
+        return f"no known {noun} requested; known: {available}"
+    return f"no {noun} under {data_dir / 'scenes'}; {hint}"
 
 
 def cmd_fetch(args) -> int:
@@ -130,7 +178,10 @@ def cmd_run(args) -> int:
     cache_dir = data_dir / "cache"
     scene_ids = _scene_ids(data_dir, args.scenes)
     if not scene_ids:
-        print(f"no scenes under {data_dir / 'scenes'}; run `bandpoc build-scenes` first")
+        available = sorted(p.stem for p in (data_dir / "scenes").glob("*.wav"))
+        print(_no_scenes_message(
+            available, args.scenes, data_dir, "run `bandpoc build-scenes` first"
+        ))
         return 1
     keys = registry.all_keys() if args.detectors == "all" else args.detectors.split(",")
 
@@ -166,17 +217,25 @@ def cmd_run(args) -> int:
 def cmd_report(args) -> int:
     data_dir = Path(args.data_dir)
     cache_dir = data_dir / "cache"
-    scene_ids = _labelled_ids(data_dir, _scene_ids(data_dir, args.scenes))
+    # `_labelled_scene_ids` globs labels.json directly (Minor 4): report
+    # only ever reads labels + the cache, never the wav, so a scene whose
+    # wav was deleted after scoring must still be reportable.
+    scene_ids = _labelled_scene_ids(data_dir, args.scenes)
     scenes = {
         sid: SceneLabels.from_json(data_dir / "scenes" / f"{sid}.labels.json")
         for sid in scene_ids
     }
     if not scenes:
-        print(
-            f"no labelled scenes under {data_dir / 'scenes'}; "
-            "run `bandpoc build-scenes`, or use `bandpoc explore` for sessions "
-            "that have no ground truth"
+        available = sorted(
+            p.name[: -len(".labels.json")]
+            for p in (data_dir / "scenes").glob("*.labels.json")
         )
+        print(_no_scenes_message(
+            available, args.scenes, data_dir,
+            "run `bandpoc build-scenes`, or use `bandpoc explore` for sessions "
+            "that have no ground truth",
+            noun="labelled scenes",
+        ))
         return 1
 
     results: list[DetectorResult] = []
@@ -244,7 +303,11 @@ def cmd_explore(args) -> int:
     data_dir = Path(args.data_dir)
     scene_ids = _scene_ids(data_dir, args.scenes)
     if not scene_ids:
-        print(f"no recordings under {data_dir / 'scenes'}; run `bandpoc add-session` first")
+        available = sorted(p.stem for p in (data_dir / "scenes").glob("*.wav"))
+        print(_no_scenes_message(
+            available, args.scenes, data_dir, "run `bandpoc add-session` first",
+            noun="recordings",
+        ))
         return 1
 
     # Validate --detectors up front, the same way cmd_run does, instead of
@@ -261,9 +324,15 @@ def cmd_explore(args) -> int:
         if key in known:
             keys.append(key)
             continue
+        # `key` is already known not to be in `known` == set(all_keys()), so
+        # registry.get(key) can only ever raise KeyError here -- it checks
+        # membership before ever calling a factory (registry.py), and a
+        # factory's own ImportError is exactly the case handled below, for
+        # keys that ARE known. Do not add ImportError back here (Minor 12);
+        # that is a different, live case in explore.py's own version lookup.
         try:
             registry.get(key)
-        except (KeyError, ImportError) as exc:
+        except KeyError as exc:
             print(f"[skip] {key}: {exc}")
     if not keys:
         print(f"no known detectors requested; known: {sorted(known)}")
@@ -323,8 +392,13 @@ def cmd_explore(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # No top-level --data-dir (Minor 11): every subparser below redefines its
+    # own --data-dir with its own default, and argparse resolves that by
+    # simply overwriting whatever the top-level flag set -- so
+    # `bandpoc --data-dir X explore` silently used `data/` regardless of X.
+    # Each subcommand's own --data-dir already covers the real use case; do
+    # not add a top-level one back without also removing the six duplicates.
     parser = argparse.ArgumentParser(prog="bandpoc")
-    parser.add_argument("--data-dir", default=str(_DEFAULT_DATA))
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("fetch", help="download YouTube material into data/clips")

@@ -70,11 +70,22 @@ def score_scene(detector: Detector, wav: np.ndarray, sr: int) -> tuple[np.ndarra
 
 
 def _scene_ids(data_dir: Path, requested: str) -> list[str]:
-    available = sorted(p.stem.replace(".labels", "")
-                       for p in (data_dir / "scenes").glob("*.labels.json"))
+    """Every wav under scenes/, labelled or not.
+
+    A session with no labels.json is still something `run` can score; only
+    `report` needs the ground truth.
+    """
+    available = sorted(p.stem for p in (data_dir / "scenes").glob("*.wav"))
     if requested == "all":
         return available
     return [s for s in requested.split(",") if s in available]
+
+
+def _labelled_ids(data_dir: Path, scene_ids: list[str]) -> list[str]:
+    return [
+        sid for sid in scene_ids
+        if (data_dir / "scenes" / f"{sid}.labels.json").exists()
+    ]
 
 
 def cmd_fetch(args) -> int:
@@ -150,13 +161,17 @@ def cmd_run(args) -> int:
 def cmd_report(args) -> int:
     data_dir = Path(args.data_dir)
     cache_dir = data_dir / "cache"
-    scene_ids = _scene_ids(data_dir, args.scenes)
+    scene_ids = _labelled_ids(data_dir, _scene_ids(data_dir, args.scenes))
     scenes = {
         sid: SceneLabels.from_json(data_dir / "scenes" / f"{sid}.labels.json")
         for sid in scene_ids
     }
     if not scenes:
-        print(f"no scenes under {data_dir / 'scenes'}; run `bandpoc build-scenes` first")
+        print(
+            f"no labelled scenes under {data_dir / 'scenes'}; "
+            "run `bandpoc build-scenes`, or use `bandpoc explore` for sessions "
+            "that have no ground truth"
+        )
         return 1
 
     results: list[DetectorResult] = []

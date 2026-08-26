@@ -142,3 +142,74 @@ def test_cli_messages_encode_on_a_cp949_console():
                 raise AssertionError(
                     f"cli.py line {node.lineno} has a character cp949 cannot encode: {exc}"
                 ) from exc
+
+
+def write_session(root, session_id="session_01", seconds=4.0):
+    """A wav with no labels.json beside it."""
+    scenes = root / "scenes"
+    scenes.mkdir(parents=True, exist_ok=True)
+    t = np.arange(int(WORK_SR * seconds)) / WORK_SR
+    sf.write(str(scenes / f"{session_id}.wav"),
+             (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+
+
+def test_scene_ids_finds_a_wav_without_labels(tmp_path):
+    from bandpoc.cli import _scene_ids
+
+    write_session(tmp_path)
+    assert _scene_ids(tmp_path, "all") == ["session_01"]
+
+
+def test_scene_ids_lists_labelled_and_unlabelled_together(tmp_path):
+    from bandpoc.cli import _scene_ids
+
+    write_pools(tmp_path / "clips")
+    write_recipes(tmp_path / "scenes.yaml")
+    main(["build-scenes", "--data-dir", str(tmp_path),
+          "--recipes", str(tmp_path / "scenes.yaml")])
+    write_session(tmp_path)
+
+    assert _scene_ids(tmp_path, "all") == ["session_01", "tiny"]
+
+
+def test_labelled_ids_keeps_only_scenes_with_a_labels_file(tmp_path):
+    from bandpoc.cli import _labelled_ids, _scene_ids
+
+    write_pools(tmp_path / "clips")
+    write_recipes(tmp_path / "scenes.yaml")
+    main(["build-scenes", "--data-dir", str(tmp_path),
+          "--recipes", str(tmp_path / "scenes.yaml")])
+    write_session(tmp_path)
+
+    assert _labelled_ids(tmp_path, _scene_ids(tmp_path, "all")) == ["tiny"]
+
+
+def test_run_scores_a_session_that_has_no_labels(tmp_path):
+    write_session(tmp_path)
+
+    assert main(["run", "--data-dir", str(tmp_path),
+                 "--detectors", "dsp_baseline:default"]) == 0
+    assert len(list((tmp_path / "cache").glob("*.npz"))) == 1
+
+
+def test_report_skips_unlabelled_sessions_instead_of_failing(tmp_path, capsys):
+    write_pools(tmp_path / "clips")
+    write_recipes(tmp_path / "scenes.yaml")
+    main(["build-scenes", "--data-dir", str(tmp_path),
+          "--recipes", str(tmp_path / "scenes.yaml")])
+    write_session(tmp_path)
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    assert main(["report", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports")]) == 0
+    pages = list((tmp_path / "reports").rglob("index.html"))
+    assert "session_01" not in pages[0].read_text(encoding="utf-8")
+
+
+def test_report_says_so_when_every_scene_is_unlabelled(tmp_path, capsys):
+    write_session(tmp_path)
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    assert main(["report", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports")]) == 1
+    assert "bandpoc explore" in capsys.readouterr().out

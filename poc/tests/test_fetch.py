@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from bandpoc.audio import WORK_SR
-from bandpoc.fetch import PoolSpec, load_sources, slice_clips
+from bandpoc.fetch import PoolSpec, fetch_pool, load_sources, slice_clips
 
 
 def spec(**over):
@@ -76,3 +76,34 @@ def test_load_sources_rejects_a_pool_with_neither_queries_nor_urls(tmp_path):
     p.write_text("pools:\n  empty: {}\n", encoding="utf-8")
     with pytest.raises(ValueError, match="empty"):
         load_sources(p)
+
+
+def test_fetch_pool_invokes_yt_dlp_through_the_running_interpreter(tmp_path, monkeypatch):
+    """The `yt-dlp` console script is only on PATH when the venv is activated,
+    so invoking it by name fails for anyone calling bandpoc.exe directly."""
+    import subprocess
+    import sys
+
+    from bandpoc import fetch as fetch_mod
+
+    calls = []
+    monkeypatch.setattr(fetch_mod, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+
+    spec = PoolSpec(name="p", queries=("q",), urls=(), max_results=1,
+                    clips_per_video=1, clip_seconds=5)
+    fetch_pool(spec, tmp_path / "raw", tmp_path / "clips")
+
+    assert calls, "expected a downloader invocation"
+    assert calls[0][:3] == [sys.executable, "-m", "yt_dlp"]
+    assert "yt-dlp" not in calls[0], "must not depend on the PATH console script"
+
+
+def test_fetch_pool_refuses_to_run_without_ffmpeg(tmp_path, monkeypatch):
+    from bandpoc import fetch as fetch_mod
+
+    monkeypatch.setattr(fetch_mod, "ffmpeg_available", lambda: False)
+    spec = PoolSpec(name="p", queries=("q",), urls=(), max_results=1,
+                    clips_per_video=1, clip_seconds=5)
+    with pytest.raises(RuntimeError, match="ffmpeg"):
+        fetch_pool(spec, tmp_path / "raw", tmp_path / "clips")

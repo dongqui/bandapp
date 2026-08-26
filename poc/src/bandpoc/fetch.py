@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +97,11 @@ def fetch_pool(
     for target in _targets(spec):
         subprocess.run(
             [
-                "yt-dlp", "-x", "--audio-format", "wav", "--no-playlist",
+                # `python -m yt_dlp`, not the `yt-dlp` console script: the script
+                # lives in the venv's Scripts dir, which is only on PATH when the
+                # venv is activated. This binds to the interpreter already running.
+                sys.executable, "-m", "yt_dlp",
+                "-x", "--audio-format", "wav", "--no-playlist",
                 "--match-filter", "duration>120 & duration<3600",
                 "-o", str(raw_pool / "%(id)s.%(ext)s"), target,
             ],

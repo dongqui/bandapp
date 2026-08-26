@@ -45,6 +45,12 @@ def test_derive_id_handles_short_youtube_links():
     assert derive_id("https://youtu.be/igMctbh0pT8") == "igMctbh0pT8"
 
 
+def test_derive_id_handles_short_youtube_links_with_a_trailing_slash():
+    # A trailing "/" must not leak a path separator into the session id:
+    # that id becomes a filename component and a cache key.
+    assert derive_id("https://youtu.be/igMctbh0pT8/") == "igMctbh0pT8"
+
+
 def test_derive_id_uses_the_filename_stem_for_local_paths():
     assert derive_id(r"C:\recordings\Practice Take 2.wav") == "practice_take_2"
 
@@ -75,6 +81,14 @@ def test_add_session_honours_an_explicit_id(tmp_path):
     out = add_session(str(src), tmp_path / "scenes", session_id="session_01")
 
     assert out.name == "session_01.wav"
+
+
+def test_add_session_rejects_an_explicit_id_that_slugifies_to_nothing(tmp_path):
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(8000, dtype=np.float32), 8000)
+
+    with pytest.raises(ValueError, match="--id"):
+        add_session(str(src), tmp_path / "scenes", session_id="밴드")
 
 
 def test_add_session_refuses_to_overwrite_an_existing_session(tmp_path):

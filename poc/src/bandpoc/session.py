@@ -43,7 +43,8 @@ def _youtube_id(source: str) -> str | None:
     if parsed.netloc not in _YOUTUBE_HOSTS:
         return None
     if parsed.netloc == "youtu.be":
-        return parsed.path.lstrip("/") or None
+        segments = [segment for segment in parsed.path.split("/") if segment]
+        return segments[0] if segments else None
     return (parse_qs(parsed.query).get("v") or [None])[0]
 
 
@@ -87,7 +88,15 @@ def add_session(
     source: str, scenes_dir: str | Path, session_id: str | None = None
 ) -> Path:
     """Put one whole recording under ``scenes_dir`` as ``<id>.wav``."""
-    session_id = slugify(session_id) if session_id else derive_id(source)
+    if session_id:
+        slug = slugify(session_id)
+        if not slug:
+            raise ValueError(
+                f"--id {session_id!r} has no safe characters; pass a different --id"
+            )
+        session_id = slug
+    else:
+        session_id = derive_id(source)
     out = Path(scenes_dir) / f"{session_id}.wav"
     if out.exists():
         raise SessionExists(

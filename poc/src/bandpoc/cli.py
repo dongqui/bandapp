@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -13,10 +14,12 @@ import numpy as np
 from . import cache, registry
 from .audio import WORK_SR, load_audio
 from .detectors.base import Detector
+from .explore import collect_session, encode_mp3, render_index, render_session
 from .fetch import fetch_pool, ffmpeg_available, load_sources
 from .labels import HOP, SceneLabels
 from .postproc import resample_scores
 from .report import DetectorResult, build_report
+from .session import SessionExists, add_session
 from .synth import ClipPool, build_scene, load_recipes
 from .sweep import SceneInput, best_point, run_sweep
 
@@ -218,6 +221,60 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_add_session(args) -> int:
+    data_dir = Path(args.data_dir)
+    try:
+        path = add_session(args.source, data_dir / "scenes", session_id=args.id)
+    except (SessionExists, ValueError, RuntimeError) as exc:
+        print(f"[fail] {exc}")
+        return 1
+    wav, sr = load_audio(path)
+    print(f"{path.stem}: {len(wav) / sr / 60:.1f} min -> {path}")
+    print("next: bandpoc run   (then: bandpoc explore)")
+    return 0
+
+
+def cmd_explore(args) -> int:
+    data_dir = Path(args.data_dir)
+    scene_ids = _scene_ids(data_dir, args.scenes)
+    if not scene_ids:
+        print(f"no recordings under {data_dir / 'scenes'}; run `bandpoc add-session` first")
+        return 1
+    keys = registry.all_keys() if args.detectors == "all" else args.detectors.split(",")
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out_dir = Path(args.out_dir) / stamp
+    views = []
+    for scene_id in scene_ids:
+        view = collect_session(data_dir, scene_id, keys)
+        if not view.models:
+            print(f"[skip] {scene_id}: no cached scores")
+            continue
+        # encode_mp3 raises RuntimeError when ffmpeg is missing. That must
+        # not take down the whole command: earlier sessions in this loop may
+        # already have pages written into out_dir, and later ones deserve a
+        # chance too. Skip this one with a clear message instead.
+        try:
+            mp3 = encode_mp3(
+                data_dir / "scenes" / f"{scene_id}.wav",
+                data_dir / "scenes" / f"{scene_id}.mp3",
+            )
+        except RuntimeError as exc:
+            print(f"[skip] {scene_id}: {exc}")
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(mp3, out_dir / mp3.name)
+        render_session(view, mp3.name, out_dir)
+        views.append(view)
+        print(f"[done] {scene_id}: {len(view.models)} models")
+
+    if not views:
+        print("no cached scores found -- run `bandpoc run` first")
+        return 1
+    print(f"explorer written to {render_index(views, out_dir)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bandpoc")
     parser.add_argument("--data-dir", default=str(_DEFAULT_DATA))
@@ -245,6 +302,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-dir", default="reports")
     p.add_argument("--data-dir", default=str(_DEFAULT_DATA))
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("add-session", help="import one whole recording (URL or file)")
+    p.add_argument("source")
+    p.add_argument("--id", default=None)
+    p.add_argument("--data-dir", default=str(_DEFAULT_DATA))
+    p.set_defaults(func=cmd_add_session)
+
+    p = sub.add_parser("explore", help="browse model output against the audio")
+    p.add_argument("--detectors", default="all")
+    p.add_argument("--scenes", default="all")
+    p.add_argument("--out-dir", default="reports/explore")
+    p.add_argument("--data-dir", default=str(_DEFAULT_DATA))
+    p.set_defaults(func=cmd_explore)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

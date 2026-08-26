@@ -34,6 +34,24 @@ bandpoc run            # 추론 → data/cache/
 bandpoc report         # 스윕 + 메트릭 → reports/<timestamp>/index.html
 ```
 
+### 정답 라벨 없이 실제 녹음 비교하기
+
+합성 씬 대신 실제 합주 녹음을 통째로 넣고, 오디오를 들으며 모델을 고른다.
+
+```bash
+bandpoc add-session "https://www.youtube.com/watch?v=..."   # 또는 로컬 파일 경로
+bandpoc run          # 라벨이 없어도 점수를 캐시한다
+bandpoc explore      # reports/explore/<timestamp>/index.html
+```
+
+정답이 없으므로 Recall·False Music 같은 수치는 나오지 않는다. 판단은 사람이 한다 —
+재생하면서 각 모델이 어느 구간을 연주로 봤는지 보고, 커트라인 슬라이더를 밀어
+"선을 옮기면 나아지는 모델"과 "옮겨도 안 되는 모델"을 가른다.
+
+모델별 커트라인은 점수 분포에서 자동으로 잡힌다. 분포가 한 덩어리라 가를 수 없으면
+0.5로 물러나고 그 사실이 페이지에 표시된다 — 그 모델이 신호를 분리하지 못한다는
+뜻이므로 그것도 결과다.
+
 ### fetch 이후 반드시 할 일
 
 `sources.yaml`은 고정 URL이 아니라 **검색 쿼리**로 클립을 모은다. 검색 결과는

@@ -213,3 +213,51 @@ def test_report_says_so_when_every_scene_is_unlabelled(tmp_path, capsys):
     assert main(["report", "--data-dir", str(tmp_path),
                  "--out-dir", str(tmp_path / "reports")]) == 1
     assert "bandpoc explore" in capsys.readouterr().out
+
+
+def test_add_session_command_imports_a_local_file(tmp_path):
+    src = tmp_path / "take.wav"
+    t = np.arange(WORK_SR * 2) / WORK_SR
+    sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+
+    code = main(["add-session", str(src), "--data-dir", str(tmp_path),
+                 "--id", "session_01"])
+
+    assert code == 0
+    assert (tmp_path / "scenes" / "session_01.wav").exists()
+
+
+def test_add_session_reports_a_duplicate_without_a_traceback(tmp_path, capsys):
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(WORK_SR, dtype=np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+
+    assert main(["add-session", str(src), "--data-dir", str(tmp_path),
+                 "--id", "s"]) == 1
+    assert "already exists" in capsys.readouterr().out
+
+
+def test_explore_builds_a_page_per_session_plus_an_index(tmp_path):
+    src = tmp_path / "take.wav"
+    t = np.arange(WORK_SR * 60) / WORK_SR
+    sf.write(str(src), (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+    main(["run", "--data-dir", str(tmp_path), "--detectors", "dsp_baseline:default"])
+
+    code = main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports")])
+
+    assert code == 0
+    pages = sorted(p.name for p in (tmp_path / "reports").rglob("*.html"))
+    assert pages == ["index.html", "s.html"]
+    assert list((tmp_path / "reports").rglob("s.mp3"))
+
+
+def test_explore_without_any_cached_scores_fails_clearly(tmp_path, capsys):
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(WORK_SR * 2, dtype=np.float32), WORK_SR)
+    main(["add-session", str(src), "--data-dir", str(tmp_path), "--id", "s"])
+
+    assert main(["explore", "--data-dir", str(tmp_path),
+                 "--out-dir", str(tmp_path / "reports")]) == 1
+    assert "bandpoc run" in capsys.readouterr().out

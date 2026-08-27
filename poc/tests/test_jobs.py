@@ -108,3 +108,93 @@ def test_capture_into_flushes_even_when_the_body_raises():
             print("before the failure")
             raise RuntimeError("boom")
     assert job.log == ["before the failure"]
+
+
+def test_recent_with_zero_limit_returns_empty_list():
+    """Regression: self._order[-0:] is the whole list, not nothing."""
+    q = JobQueue(runner=lambda job: None)
+    q.submit("a", ["k"])
+    assert q.wait_idle(timeout=5)
+    assert q.recent(limit=0) == []
+
+
+def test_recency_cap_never_drops_a_job_that_has_not_finished():
+    """Regression: the recency cap used to evict the oldest *submitted* job
+    regardless of its state. Submitting well past the cap with a slow runner
+    used to leave some jobs evicted -- and therefore never run -- before the
+    worker ever got to them: get(job_id) returned None forever, with no
+    error and no state transition, for an id submit() itself had handed
+    back.
+    """
+    from bandpoc.jobs import _RECENT_CAP
+
+    ran = []
+    lock = threading.Lock()
+
+    def slow(job):
+        time.sleep(0.002)
+        with lock:
+            ran.append(job.job_id)
+
+    q = JobQueue(runner=slow)
+    n = _RECENT_CAP + 100  # well past the cap while jobs are still in flight
+    ids = [q.submit(str(i), ["k"]).job_id for i in range(n)]
+    assert q.wait_idle(timeout=60)
+
+    with lock:
+        ran_ids = set(ran)
+    missing = set(ids) - ran_ids
+    assert not missing, f"{len(missing)} submitted jobs never ran: {sorted(missing)[:5]}"
+
+    # A job may age out of the recent-window cache once it has *finished*
+    # (that's the intended bounded cache); it must never come back missing
+    # with no explanation.
+    for jid in ids:
+        job = q.get(jid)
+        if job is not None:
+            assert job.state == "done"
+
+
+def test_wait_idle_never_lies_while_work_is_outstanding():
+    """Regression: _idle used to be derived from a snapshot of a different
+    structure (_pending.empty()) taken at a different moment than the
+    increment/clear in submit(). A submit's clear() landing between the
+    worker's task_done() and its empty()-check let the worker's set()
+    clobber it, so wait_idle() could return True with a job still
+    outstanding. Track outstanding work with a counter mutated under the
+    same lock as the idle flip instead, and prove here that whenever
+    wait_idle() returns True, every job submitted so far has actually
+    started and finished.
+    """
+    lock = threading.Lock()
+    started = 0
+    finished = 0
+
+    def flaky(job):
+        nonlocal started, finished
+        with lock:
+            started += 1
+        try:
+            if int(job.source) % 7 == 0:
+                raise ValueError("flaky failure")
+        finally:
+            with lock:
+                finished += 1
+
+    q = JobQueue(runner=flaky)
+    submitted = 0
+    for round_ in range(25):
+        batch = [q.submit(str(submitted + i), ["k"]).job_id for i in range(20)]
+        submitted += len(batch)
+        assert q.wait_idle(timeout=10), f"round {round_}: wait_idle timed out"
+        with lock:
+            snapshot_started, snapshot_finished = started, finished
+        assert snapshot_started == submitted, (
+            f"round {round_}: wait_idle() returned True but only "
+            f"{snapshot_started}/{submitted} jobs had started"
+        )
+        assert snapshot_finished == submitted, (
+            f"round {round_}: wait_idle() returned True but only "
+            f"{snapshot_finished}/{submitted} jobs had finished"
+        )
+    assert submitted == 500

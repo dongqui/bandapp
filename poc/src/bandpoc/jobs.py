@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 _RECENT_CAP = 200
+_TERMINAL_STATES = ("done", "failed")
 
 
 @dataclass
@@ -93,6 +94,10 @@ class JobQueue:
         self._order: list[str] = []
         self._lock = threading.Lock()
         self._pending: queue.Queue[str] = queue.Queue()
+        # Count of jobs submitted but not yet finished. Guarded by _lock so
+        # that the increment (submit) and decrement (worker) can never
+        # interleave with the idle-event flip -- see wait_idle below.
+        self._outstanding = 0
         self._idle = threading.Event()
         self._idle.set()
         self._worker = threading.Thread(target=self._loop, daemon=True)
@@ -115,9 +120,9 @@ class JobQueue:
         with self._lock:
             self._jobs[job.job_id] = job
             self._order.append(job.job_id)
-            if len(self._order) > _RECENT_CAP:
-                self._jobs.pop(self._order.pop(0), None)
-        self._idle.clear()
+            self._outstanding += 1
+            self._idle.clear()
+            self._evict_finished_over_cap_locked()
         self._pending.put(job.job_id)
         return job
 
@@ -126,12 +131,35 @@ class JobQueue:
             return self._jobs.get(job_id)
 
     def recent(self, limit: int = 20) -> list[Job]:
+        if limit <= 0:
+            return []
         with self._lock:
             return [self._jobs[j] for j in reversed(self._order[-limit:])]
 
     def wait_idle(self, timeout: float | None = None) -> bool:
         """Block until nothing is queued or running. For tests and shutdown."""
         return self._idle.wait(timeout)
+
+    def _evict_finished_over_cap_locked(self) -> None:
+        """Drop the oldest *finished* job once the recent-window exceeds the cap.
+
+        Must be called with ``self._lock`` held. A job that is still queued
+        or running is never evicted -- a caller may be holding exactly the id
+        ``submit()`` handed back and polling it, and silently losing that job
+        would leave the poll returning None forever with no error and no
+        state transition. A backlog is a temporary condition; losing work is
+        not. If nothing has finished yet, the window is simply allowed to
+        exceed the cap until something does.
+        """
+        while len(self._order) > _RECENT_CAP:
+            for idx, jid in enumerate(self._order):
+                job = self._jobs.get(jid)
+                if job is not None and job.state in _TERMINAL_STATES:
+                    del self._order[idx]
+                    self._jobs.pop(jid, None)
+                    break
+            else:
+                break  # nothing finished yet -- leave the window over cap
 
     def _loop(self) -> None:
         while True:
@@ -140,8 +168,17 @@ class JobQueue:
             if job is not None:
                 self._run_one(job)
             self._pending.task_done()
-            if self._pending.empty():
-                self._idle.set()
+            # The decrement and the idle flip happen together, under the
+            # same lock submit() uses to increment and clear. Deriving
+            # idleness from _pending.empty() instead (a snapshot of a
+            # different structure, read at a different moment) is what let
+            # a racing submit's clear() get clobbered by this set() -- see
+            # the task-1 review. This counter is the only thing wait_idle
+            # answers from.
+            with self._lock:
+                self._outstanding -= 1
+                if self._outstanding == 0:
+                    self._idle.set()
 
     def _run_one(self, job: Job) -> None:
         job.state = "running"

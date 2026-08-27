@@ -397,3 +397,68 @@ def test_a_write_failure_during_upload_does_not_leak_the_temp_file(server, monke
     assert len(created_paths) == 1
     assert not Path(created_paths[0]).exists()
     assert len(queue.recent(limit=200)) == 0
+
+
+from urllib.parse import quote
+
+
+def read_bytes(url):
+    with urlopen(url) as response:
+        return response.status, response.read(), response.headers["Content-Type"]
+
+
+def test_a_report_file_is_served(server):
+    base, _, reports, _ = server
+    (reports / "j1" / "20260827-120000").mkdir(parents=True)
+    page = reports / "j1" / "20260827-120000" / "index.html"
+    page.write_text("<h1>hello</h1>", encoding="utf-8")
+
+    status, body, ctype = read_bytes(f"{base}/reports/j1/20260827-120000/index.html")
+
+    assert status == 200
+    assert b"hello" in body
+    assert "text/html" in ctype
+
+
+def test_an_mp3_is_served_with_an_audio_content_type(server):
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    (reports / "j1" / "s.mp3").write_bytes(b"ID3fake")
+
+    status, body, ctype = read_bytes(f"{base}/reports/j1/s.mp3")
+
+    assert status == 200
+    assert body == b"ID3fake"
+    assert ctype == "audio/mpeg"
+
+
+def test_a_missing_report_file_is_a_404(server):
+    base, _, _, _ = server
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}/reports/j1/nope.html")
+    assert excinfo.value.code == 404
+
+
+@pytest.mark.parametrize("attack", [
+    "/reports/../secret.txt",
+    "/reports/j1/../../secret.txt",
+    "/reports/" + quote("../secret.txt"),
+    "/reports/%2e%2e/secret.txt",
+])
+def test_path_traversal_is_refused(server, tmp_path, attack):
+    """This project already shipped one traversal hole (?v=../../evil)."""
+    base, _, reports, _ = server
+    (reports.parent / "secret.txt").write_text("do not serve me", encoding="utf-8")
+
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}{attack}")
+
+    assert excinfo.value.code in (403, 404)
+
+
+def test_a_directory_is_not_served(server):
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}/reports/j1")
+    assert excinfo.value.code == 404

@@ -21,6 +21,16 @@ while a runaway request cannot fill the disk."""
 _HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
+_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".json": "application/json; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".png": "image/png",
+}
+
 PAGE = "<!doctype html><title>bandpoc</title><p>form arrives in a later task"
 
 
@@ -200,7 +210,27 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             ).job_id
 
         def _serve_report(self, rel: str) -> None:
-            self._fail(404, "static serving arrives in a later task")
+            target = self._safe_report_path(rel)
+            if target is None:
+                self._fail(404, "not found")
+                return
+            content_type = _CONTENT_TYPES.get(
+                target.suffix.lower(), "application/octet-stream"
+            )
+            self._send(200, target.read_bytes(), content_type)
+
+        def _safe_report_path(self, rel: str) -> Path | None:
+            """Resolve under the report root, or refuse.
+
+            resolve() collapses `..` and follows symlinks BEFORE the check, so
+            neither can walk out. Returning None for every rejection -- rather
+            than distinguishing "outside the root" from "does not exist" --
+            keeps the response from confirming what lives elsewhere on disk.
+            """
+            candidate = (reports_root / rel.lstrip("/")).resolve()
+            if not candidate.is_relative_to(reports_root):
+                return None
+            return candidate if candidate.is_file() else None
 
     return Handler
 

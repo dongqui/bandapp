@@ -594,3 +594,42 @@ def test_a_directory_is_not_served(server):
     with pytest.raises(HTTPError) as excinfo:
         read_bytes(f"{base}/reports/j1")
     assert excinfo.value.code == 404
+
+
+def test_the_form_page_is_served_at_the_root(server):
+    base, _, _, _ = server
+    status, body, ctype = read_bytes(base + "/")
+    assert status == 200
+    assert "text/html" in ctype
+    assert b"<form" in body or b"submit" in body
+
+
+def test_the_form_page_makes_no_external_requests(server):
+    base, _, _, _ = server
+    _, body, _ = read_bytes(base + "/")
+    html = body.decode("utf-8")
+    assert "http://" not in html
+    assert "https://" not in html
+    assert '="//' not in html
+    assert "@import" not in html
+
+
+def test_the_form_page_polls_its_own_api(server):
+    base, _, _, _ = server
+    _, body, _ = read_bytes(base + "/")
+    html = body.decode("utf-8")
+    for endpoint in ("/api/detectors", "/api/sessions", "/api/jobs"):
+        assert endpoint in html
+
+
+def test_the_form_page_states_the_poll_interval(server):
+    """Spec: poll every 2 s, stop once the job is done or failed."""
+    base, _, _, _ = server
+    _, body, _ = read_bytes(base + "/")
+    html = body.decode("utf-8")
+    assert "2000" in html
+    assert "failed" in html
+    # "failed" alone also appears in the page's CSS (".state.failed{...}"),
+    # so that assertion on its own would not fail if the polling stop-logic
+    # were deleted entirely -- pin the actual stop call too.
+    assert "clearInterval" in html

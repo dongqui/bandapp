@@ -31,7 +31,246 @@ _CONTENT_TYPES = {
     ".png": "image/png",
 }
 
-PAGE = "<!doctype html><title>bandpoc</title><p>form arrives in a later task"
+_PAGE_CSS = """
+body{font-family:system-ui,'Segoe UI','Malgun Gothic',sans-serif;margin:0;
+     padding:1.5rem;background:#fafafa;color:#1a1a1a;max-width:60rem}
+h1{font-size:1.3rem;margin:0 0 1rem}
+h2{font-size:1rem;margin:1.5rem 0 .5rem}
+fieldset{border:1px solid #e0e0e0;background:#fff;margin:0 0 1rem;padding:.8rem 1rem}
+legend{font-size:.85rem;color:#555;padding:0 .4rem}
+input[type=text]{width:100%;padding:.4rem;font-size:.9rem}
+label.det{display:inline-block;min-width:16rem;font-size:.85rem;margin:.15rem 0}
+.drop{border:2px dashed #bbb;padding:1.2rem;text-align:center;color:#777;
+      font-size:.9rem;background:#fff}
+.drop.over{border-color:#1565c0;color:#1565c0}
+button{padding:.5rem 1.2rem;font-size:.9rem;cursor:pointer}
+.job{background:#fff;border:1px solid #e0e0e0;padding:.6rem .9rem;margin-bottom:.6rem}
+.state{font-weight:600;font-size:.85rem}
+.state.done{color:#2e7d32}.state.failed{color:#c62828}.state.running{color:#1565c0}
+.state.queued{color:#888}
+pre{background:#f5f5f5;padding:.5rem;font-size:.75rem;max-height:16rem;
+    overflow:auto;margin:.4rem 0 0;white-space:pre-wrap}
+.err{color:#c62828;font-size:.85rem;margin-top:.3rem}
+.hint{font-size:.78rem;color:#666}
+"""
+
+_PAGE_JS = """
+const FAST = ['dsp_baseline', 'panns_cnn14', 'yamnet'];
+const POLL_MS = 2000;
+const watching = new Map();
+
+function escapeHtml(value) {
+  // Everything rendered here through innerHTML must go through this first.
+  // session_id, error and log lines are not guaranteed safe: session_id can
+  // be the raw, unslugified id a caller supplied in the JSON body (it is
+  // only replaced with the slugified one once the pipeline's add_session
+  // step finishes -- until then, or if it fails before that point, the raw
+  // string is what a poll returns), and error/log carry exception text,
+  // yt-dlp output and filenames verbatim. This project has already shipped
+  // one </script> breakout; treat all three as hostile.
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[ch]));
+}
+
+function friendlyError(text) {
+  // The API reports failures as {"error": "..."} JSON (see server.py's
+  // _fail) so that error text never lands in a raw response status line.
+  // Showing that raw JSON blob to a person isn't friendly, so unwrap it;
+  // fall back to the raw text if it isn't JSON after all.
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.error === 'string' && parsed.error) {
+      return parsed.error;
+    }
+  } catch (err) {
+    // not JSON -- fall through
+  }
+  return text || 'request failed';
+}
+
+async function loadDetectors() {
+  const res = await fetch('/api/detectors');
+  const { detectors } = await res.json();
+  const box = document.getElementById('detectors');
+  box.innerHTML = '';
+  for (const key of detectors) {
+    const fast = FAST.some(prefix => key.startsWith(prefix));
+    const label = document.createElement('label');
+    label.className = 'det';
+    label.innerHTML =
+      `<input type="checkbox" value="${key}"${fast ? ' checked' : ''}> ` +
+      `${key}${fast ? '' : ' <span class="hint">(slow)</span>'}`;
+    box.appendChild(label);
+  }
+}
+
+function chosenDetectors() {
+  return [...document.querySelectorAll('#detectors input:checked')]
+    .map(input => input.value);
+}
+
+function renderJob(snapshot) {
+  const id = 'job-' + snapshot.job_id;
+  let node = document.getElementById(id);
+  if (!node) {
+    node = document.createElement('div');
+    node.className = 'job';
+    node.id = id;
+    document.getElementById('jobs').prepend(node);
+  }
+  const name = escapeHtml(snapshot.session_id || snapshot.job_id);
+  const link = snapshot.report_url
+    ? ` <a href="${escapeHtml(snapshot.report_url)}">open the explorer</a>` : '';
+  const error = snapshot.error
+    ? `<div class="err">${escapeHtml(snapshot.error)}</div>` : '';
+  const log = snapshot.log.length
+    ? `<pre>${snapshot.log.map(escapeHtml).join('\\n')}</pre>` : '';
+  node.innerHTML =
+    `<span class="state ${snapshot.state}">${snapshot.state}</span> ` +
+    `${name}${link}${error}${log}`;
+}
+
+async function poll(jobId) {
+  const res = await fetch('/api/jobs/' + jobId);
+  if (!res.ok) return;
+  const snapshot = await res.json();
+  renderJob(snapshot);
+  // Stop polling once the job can no longer change.
+  if (snapshot.state === 'done' || snapshot.state === 'failed') {
+    clearInterval(watching.get(jobId));
+    watching.delete(jobId);
+  }
+}
+
+function watch(jobId) {
+  poll(jobId);
+  if (!watching.has(jobId)) {
+    watching.set(jobId, setInterval(() => poll(jobId), POLL_MS));
+  }
+}
+
+function say(message) {
+  document.getElementById('status').textContent = message;
+}
+
+async function submitUrl() {
+  const url = document.getElementById('url').value.trim();
+  if (!url) { say('paste a URL first'); return; }
+  const detectors = chosenDetectors();
+  if (!detectors.length) { say('pick at least one model'); return; }
+  let res;
+  try {
+    res = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url, detectors, id: document.getElementById('sid').value.trim(),
+      }),
+    });
+  } catch (err) {
+    say('network error -- is the server still running?');
+    return;
+  }
+  if (!res.ok) { say(friendlyError(await res.text())); return; }
+  const { job_id } = await res.json();
+  document.getElementById('url').value = '';
+  say('queued');
+  watch(job_id);
+}
+
+async function submitFile(file) {
+  const detectors = chosenDetectors();
+  if (!detectors.length) { say('pick at least one model'); return; }
+  say('uploading ' + file.name);
+  // Raw body plus headers, not multipart: nothing to parse means nothing to
+  // parse wrong.
+  let res;
+  try {
+    res = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Filename': file.name,
+        'X-Detectors': detectors.join(','),
+        'X-Session-Id': document.getElementById('sid').value.trim(),
+      },
+      body: file,
+    });
+  } catch (err) {
+    // The server refuses an oversized body from Content-Length before ever
+    // reading it and closes the connection without writing a 413 -- the
+    // browser sees that as a failed fetch (a network error), not an HTTP
+    // response, indistinguishable here from the connection just dropping.
+    // Say so rather than reporting an unexplained failure.
+    say('upload failed -- the file may be larger than the server allows, ' +
+        'or the connection dropped. Try a smaller file.');
+    return;
+  }
+  if (!res.ok) { say(friendlyError(await res.text())); return; }
+  const { job_id } = await res.json();
+  say('queued');
+  watch(job_id);
+}
+
+async function loadRecent() {
+  const res = await fetch('/api/jobs');
+  const { jobs } = await res.json();
+  for (const snapshot of jobs.slice().reverse()) {
+    renderJob(snapshot);
+    if (snapshot.state === 'queued' || snapshot.state === 'running') {
+      watch(snapshot.job_id);
+    }
+  }
+}
+
+document.getElementById('go').addEventListener('click', submitUrl);
+document.getElementById('file').addEventListener('change', event => {
+  if (event.target.files[0]) submitFile(event.target.files[0]);
+});
+const drop = document.getElementById('drop');
+drop.addEventListener('dragover', event => {
+  event.preventDefault(); drop.classList.add('over');
+});
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', event => {
+  event.preventDefault();
+  drop.classList.remove('over');
+  if (event.dataTransfer.files[0]) submitFile(event.dataTransfer.files[0]);
+});
+
+loadDetectors().then(loadRecent);
+"""
+
+PAGE = f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
+<title>bandpoc - 세션 투입</title>
+<style>{_PAGE_CSS}</style></head><body>
+<h1>세션 투입</h1>
+<p class='hint'>유튜브 URL을 넣거나 오디오 파일을 떨어뜨리면 다운로드 - 추론 -
+리포트 생성까지 이어서 돈다. 추론은 녹음 길이와 고른 모델 수에 따라 수십 분이
+걸릴 수 있고, 작업은 하나씩 순서대로 처리된다.</p>
+
+<fieldset><legend>소스</legend>
+  <input type='text' id='url' placeholder='www.youtube.com/watch?v=...'>
+  <p><button id='go'>추가</button>
+     <span id='status' class='hint'></span></p>
+  <div class='drop' id='drop'>여기에 오디오 파일을 떨어뜨리거나
+    <input type='file' id='file' accept='audio/*,video/*'></div>
+</fieldset>
+
+<fieldset><legend>세션 id (선택)</legend>
+  <input type='text' id='sid' placeholder='비우면 URL이나 파일명에서 정해진다'>
+</fieldset>
+
+<fieldset><legend>모델</legend>
+  <div id='detectors'></div>
+  <p class='hint'>ast와 clap은 창을 겹쳐 밀어서 훨씬 느리다. 필요할 때만 켠다.</p>
+</fieldset>
+
+<h2>작업</h2>
+<div id='jobs'></div>
+<script>{_PAGE_JS}</script>
+</body></html>"""
 
 
 def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):

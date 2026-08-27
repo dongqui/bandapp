@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -50,7 +50,17 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
                        "application/json; charset=utf-8")
 
         def _fail(self, status: int, message: str) -> None:
-            self.send_error(status, message)
+            # message may carry attacker-controlled text (an echoed detector
+            # key, a filename, ...). send_error() interpolates its message
+            # straight into the status line with no CR/LF stripping -- that
+            # is HTTP response splitting, confirmed with a raw socket during
+            # review. Route error text through the JSON body instead, where
+            # the status line itself is always the stdlib's fixed reason
+            # phrase, and strip CR/LF from the body text too as belt and
+            # braces (json.dumps already escapes them, but don't depend on
+            # that alone).
+            safe = message.replace("\r", "").replace("\n", "")
+            self._json({"error": safe}, status=status)
 
         # --- GET ----------------------------------------------------------
 
@@ -84,8 +94,23 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             except ValueError:
                 self._fail(400, "bad Content-Length")
                 return
+            # int() accepts "-1" as a legal integer. A negative length would
+            # still be truthy below, so self.rfile.read(length) turns into a
+            # read-until-EOF that never arrives on a live socket -- confirmed
+            # to hang the request thread forever during review. Reject it
+            # here rather than let read() discover the problem.
+            if length < 0:
+                self._fail(400, "bad Content-Length")
+                return
             # Refuse before reading: an oversized body must not be pulled off
-            # the socket just to be discarded.
+            # the socket just to be discarded. Note this only produces a
+            # clean 413 when the client's stated Content-Length lies (as the
+            # tests below do). A client that genuinely streams a body larger
+            # than the cap will instead see its write fail with a connection
+            # error once we close the socket without draining -- confirmed
+            # with a raw socket during review. That is the accepted
+            # trade-off: draining the body to deliver a friendly 413 would
+            # defeat the reason the cap exists.
             if length > MAX_UPLOAD_BYTES:
                 self._fail(413, "upload too large")
                 return
@@ -140,13 +165,37 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             # The filename is used for its extension and to suggest an id.
             # It never becomes part of a path: slugify decides that.
             suffix = Path(filename).suffix.lower() or ".wav"
-            session_id = (self.headers.get("X-Session-Id") or "").strip()
-            session_id = slugify(session_id) if session_id else slugify(Path(filename).stem)
+            header_id = (self.headers.get("X-Session-Id") or "").strip()
+            session_id = slugify(header_id) if header_id else slugify(Path(filename).stem)
+            if not session_id:
+                # Passing None here would let the pipeline derive an id from
+                # job.source instead -- but by then source is the *temp
+                # file* path, and mkstemp's random suffix is always
+                # alphanumeric, so that derivation always succeeds and
+                # quietly names the session after a temp file. Reject
+                # instead of accepting a meaningless id.
+                self._fail(
+                    400,
+                    "cannot derive a session id from the upload; "
+                    "set X-Session-Id",
+                )
+                return None
+
             handle, temp_path = tempfile.mkstemp(suffix=suffix, prefix="bandpoc-")
-            with open(handle, "wb") as out:
-                out.write(body)
+            try:
+                with open(handle, "wb") as out:
+                    out.write(body)
+            except Exception:
+                # No Job exists yet at this point, so the pipeline runner's
+                # per-job cleanup (see jobs.make_runner) never gets a chance
+                # to run. Without this, a write failure here (disk full,
+                # permissions) orphans the temp file permanently.
+                Path(temp_path).unlink(missing_ok=True)
+                self._fail(500, "failed to store upload")
+                return None
+
             return job_queue.submit(
-                temp_path, detectors, session_id=session_id or None,
+                temp_path, detectors, session_id=session_id,
                 cleanup_source=True,
             ).job_id
 
@@ -159,28 +208,14 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
 def serve(data_dir: str | Path, reports_dir: str | Path, port: int = DEFAULT_PORT) -> int:
     """Start the intake server and block until interrupted.
 
-    Wires together the pieces earlier tasks built -- the detector registry,
-    the job queue and its pipeline runner -- the way a terminal session would
-    have; the only new thing here is exposing that over HTTP.
+    Deliberately unimplemented here. The brief for this task listed this
+    signature under "Produces" without giving a body; a first pass at filling
+    it in turned out to be untested, production-shaped scope (CLI wiring,
+    localhost-only binding, busy-port handling) that belongs to its own
+    later task and its own brief. This stub keeps the documented interface
+    importable without pretending that scope is done.
     """
-    from . import registry
-    from .jobs import JobQueue, make_runner
-
-    import bandpoc.detectors  # noqa: F401 -- registers every adapter
-
-    data_dir = Path(data_dir)
-    reports_dir = Path(reports_dir)
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    job_queue = JobQueue(runner=make_runner(data_dir, reports_dir))
-    handler = make_handler(job_queue, reports_dir, registry.all_keys())
-    httpd = ThreadingHTTPServer((_HOST, port), handler)
-    print(f"bandpoc listening on http://{_HOST}:{port}")
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-    return 0
+    raise NotImplementedError(
+        "bandpoc.server.serve is implemented by the CLI-wiring task; "
+        "see .superpowers/sdd/2026-08-27-browser-session-intake/"
+    )

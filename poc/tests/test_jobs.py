@@ -49,6 +49,28 @@ def test_a_runner_that_sets_error_marks_the_job_failed():
     assert q.get(job.job_id).state == "failed"
 
 
+def test_a_baseexception_from_the_runner_still_leaves_the_job_in_a_terminal_state():
+    """FINDING 11: _run_one's except clause is `except Exception`, not
+    BaseException, deliberately -- it exists so a bad *job* cannot take
+    down the worker thread, not to swallow everything, and a BaseException
+    (SystemExit, ...) should still propagate. But without a `finally`, that
+    propagation left job.state stuck at "running" forever: indistinguishable
+    from a job genuinely still in progress. Calls _run_one directly (not
+    through the worker thread) so the test can catch the SystemExit itself
+    rather than needing to detect a background thread's death."""
+    def raises_system_exit(job):
+        raise SystemExit("simulated crash")
+
+    q = JobQueue(runner=lambda job: None)
+    job = Job(job_id="x", source="s", detectors=())
+    q._runner = raises_system_exit
+
+    with pytest.raises(SystemExit):
+        q._run_one(job)
+
+    assert job.state == "failed"
+
+
 def test_jobs_run_one_at_a_time():
     """Two sessions inferring at once would load every model twice."""
     overlap = []

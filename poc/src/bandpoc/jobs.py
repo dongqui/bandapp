@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import io
 import queue
+import sys
 import threading
 import traceback
 import uuid
@@ -187,7 +188,22 @@ class JobQueue:
         except Exception as exc:  # a bad job must not take down the worker
             job.error = f"{type(exc).__name__}: {exc}"
             traceback.print_exc()
-        job.state = "failed" if job.error else "done"
+        finally:
+            # Runs on every exit from the try block above, including a
+            # BaseException (SystemExit, ...) propagating straight out of
+            # self._runner uncaught -- not reachable today, since nothing
+            # this project ships raises one, but without this a job whose
+            # runner did would stay stuck at "running" forever: a poller
+            # has no way to tell that apart from one still genuinely in
+            # progress. Deliberately not widened to `except BaseException`
+            # above -- that clause exists so a bad *job* cannot take down
+            # the worker thread, not to swallow everything; a BaseException
+            # should still propagate (and, today, take the worker with it).
+            # sys.exc_info() is only non-None here while such an exception
+            # is actively propagating through this finally -- an Exception
+            # already caught above leaves it cleared by the time control
+            # reaches here, so the ordinary case still reads job.error.
+            job.state = "failed" if job.error or sys.exc_info()[0] else "done"
 
 
 def make_runner(

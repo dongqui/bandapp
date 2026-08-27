@@ -583,6 +583,43 @@ def test_serve_reports_a_busy_port_instead_of_moving(monkeypatch, tmp_path, caps
     assert "8765" in capsys.readouterr().out
 
 
+def test_threading_http_servers_reuseaddr_guard_is_disabled():
+    """BLOCKING 4: pins the actual attribute serve()'s busy-port guard
+    depends on. Mutation-proven this had no test: swapping the whole
+    subclass out for the stock http.server.ThreadingHTTPServer (i.e.
+    reverting allow_reuse_address to the inherited 1) left every other
+    test in this file and in test_server.py passing, because nothing else
+    here exercises a real double-bind -- see the next test."""
+    from bandpoc import server as server_mod
+
+    assert server_mod.ThreadingHTTPServer.allow_reuse_address is False
+
+
+def test_a_genuinely_busy_port_fails_the_second_bind(tmp_path):
+    """Real double-bind through the module's own class, not a monkeypatched
+    raiser: test_serve_reports_a_busy_port_instead_of_moving above only
+    proves serve() handles an OSError once one occurs, never that binding a
+    live port a second time actually produces one. Confirmed during review
+    that on Windows, with SO_REUSEADDR left at the stock library default,
+    binding the same 127.0.0.1 port twice while the first socket is still
+    open succeeds *silently* both times -- the busy-port guard in serve()
+    would then never fire on that platform at all, and a second
+    `bandpoc serve` would quietly share the port with the first instead of
+    failing loudly."""
+    from bandpoc.jobs import JobQueue
+    from bandpoc.server import ThreadingHTTPServer, make_handler
+
+    queue = JobQueue(runner=lambda job: None)
+    handler = make_handler(queue, tmp_path, [])
+    first = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    try:
+        port = first.server_address[1]
+        with pytest.raises(OSError):
+            ThreadingHTTPServer(("127.0.0.1", port), handler)
+    finally:
+        first.server_close()
+
+
 def test_the_serve_subcommand_is_wired(monkeypatch, tmp_path):
     called = {}
 

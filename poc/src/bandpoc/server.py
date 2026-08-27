@@ -8,9 +8,10 @@ no --host to get wrong.
 
 from __future__ import annotations
 
+import http.server
 import json
 import tempfile
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -21,18 +22,47 @@ while a runaway request cannot fill the disk."""
 _HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
-# http.server.HTTPServer sets allow_reuse_address = 1 (SO_REUSEADDR) so a
-# server restarting quickly can rebind a socket still in TIME_WAIT. On POSIX
-# that flag does not let two live sockets share a port -- a genuinely busy
-# port still fails bind(). On Windows it does: confirmed during review that
-# binding 127.0.0.1 to the same port twice in a row succeeds both times with
-# the stock class, no OSError from either call. Left alone, the busy-port
-# guard in serve() below would never fire on this platform -- a second
-# `bandpoc serve` would silently share the port with the first instead of
-# failing loudly, which is exactly the "quietly moving" behaviour the fixed
-# port exists to avoid. Disabling reuse on the class makes bind() raise
-# OSError for a busy port on Windows too, confirmed the same way.
-ThreadingHTTPServer.allow_reuse_address = False
+
+class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    """Stock ThreadingHTTPServer with SO_REUSEADDR disabled.
+
+    http.server.HTTPServer sets allow_reuse_address = 1 (SO_REUSEADDR) so a
+    server restarting quickly can rebind a socket still in TIME_WAIT. On
+    POSIX that flag does not let two live sockets share a port -- a
+    genuinely busy port still fails bind(). On Windows it does: confirmed
+    during review that binding 127.0.0.1 to the same port twice in a row
+    succeeds both times with the stock class, no OSError from either call.
+    Left alone, the busy-port guard in serve() below would never fire on
+    that platform -- a second `bandpoc serve` would silently share the port
+    with the first instead of failing loudly, which is exactly the
+    "quietly moving" behaviour the fixed port exists to avoid.
+
+    A subclass, not a mutation of http.server.ThreadingHTTPServer itself:
+    the first version of this fix set the attribute directly on the stdlib
+    class, which changed it process-globally for every import of
+    http.server.ThreadingHTTPServer, including in code that has nothing to
+    do with this server (every `bandpoc` subcommand imports this module by
+    way of cli.py, whether or not it ever calls serve()). Shadowing the
+    module-level name with a subclass instead keeps the real stdlib class
+    untouched -- confirmed after this change that
+    `http.server.ThreadingHTTPServer.allow_reuse_address` is still 1 -- and
+    serve() below still finds this class by the same bare name, so the
+    brief's tests, which monkeypatch server_mod.ThreadingHTTPServer by
+    name, patch whichever object that name points to either way.
+
+    Trade-off worth naming: disabling reuse also removes the TIME_WAIT
+    rebind that allow_reuse_address exists for. On POSIX, restarting this
+    server immediately after Ctrl+C can now hit "address already in use"
+    for the remainder of the socket's TIME_WAIT window (typically under a
+    minute) even though nothing is actually still listening. Accepted here:
+    this is a manually-run local dev tool restarted by a person who can
+    just wait a few seconds or pass --port, not a service that needs
+    fast automatic restarts, and it is a small price for a busy-port check
+    that actually means "busy" on every platform.
+    """
+
+    allow_reuse_address = False
+
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -564,6 +594,16 @@ def serve(
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
+        # This only stops the HTTP listener. JobQueue's worker is a daemon
+        # thread that Ctrl+C never reaches (SIGINT lands on the main thread,
+        # blocked in serve_forever() above) and that nothing here joins or
+        # drains -- a job in flight is abandoned mid-pipeline, not finished
+        # or rolled back, the moment the process actually exits. Confirmed
+        # during review: killing a daemon thread mid-write leaves a
+        # truncated file with whatever ran after the write (its own cleanup
+        # included) never executed. In this pipeline that can mean a
+        # truncated scenes/<id>.wav, a corrupt cache .npz, an orphaned
+        # bandpoc-* temp upload, or a detached yt-dlp/ffmpeg child process.
         print("\nstopping")
     finally:
         httpd.server_close()

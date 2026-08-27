@@ -959,3 +959,87 @@ def test_the_page_script_is_syntactically_valid_javascript(server, tmp_path):
         capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_the_default_detector_list_is_exactly_the_three_spec_models():
+    """FINDING 9: the page used to hold *prefixes*
+    (['dsp_baseline', 'panns_cnn14', 'yamnet']) matched with startsWith(),
+    so both panns_cnn14 variants and both yamnet variants ticked by default
+    -- five models, not the three spec section 3.3 names -- and each
+    variant reloads its own checkpoint. Pin the literal array to an exact
+    list first; the next test proves it behaves like one too."""
+    import re as re_mod
+
+    match = re_mod.search(
+        r"const DEFAULT_DETECTORS = \[(.*?)\];", server_module._PAGE_JS, re_mod.S,
+    )
+    assert match, "DEFAULT_DETECTORS not found in _PAGE_JS"
+    keys = re_mod.findall(r"'([^']+)'", match.group(1))
+    assert keys == [
+        "dsp_baseline:default", "panns_cnn14:music_group", "yamnet:music_group",
+    ]
+
+
+def _extract_load_detectors_js():
+    import re as re_mod
+
+    defaults = re_mod.search(
+        r"const DEFAULT_DETECTORS = \[.*?\];", server_module._PAGE_JS, re_mod.S,
+    )
+    function = re_mod.search(
+        r"async function loadDetectors\(\).*?\n\}\n", server_module._PAGE_JS, re_mod.S,
+    )
+    assert defaults and function, "loadDetectors/DEFAULT_DETECTORS not found in _PAGE_JS"
+    return defaults.group(0) + "\n" + function.group(0)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on PATH")
+def test_loaddetectors_checks_exactly_the_three_defaults_in_a_real_dom(tmp_path):
+    """Behavioural companion to the array-literal test above: run the page's
+    real loadDetectors() under node against a stand-in DOM, fed every key
+    this server actually registers (both panns_cnn14 and yamnet variants
+    included -- ten keys total, from registry.all_keys()). A regression back
+    to a prefix match would check five of them, not three; this reads the
+    actual `checked` outcome loadDetectors() produces, not just the source
+    text of the array it consults."""
+    import bandpoc.detectors  # noqa: F401 -- registers every adapter
+    from bandpoc import registry
+
+    keys = registry.all_keys()
+    assert len(keys) >= 5, "expected the full registry, not a test stub"
+
+    script = _extract_load_detectors_js() + """
+let data = '';
+process.stdin.on('data', chunk => { data += chunk; });
+process.stdin.on('end', () => {
+  const keys = JSON.parse(data);
+  const created = [];
+  global.document = {
+    getElementById(id) {
+      if (id !== 'detectors') throw new Error('unexpected id: ' + id);
+      return { innerHTML: '', appendChild: label => created.push(label) };
+    },
+    createElement(tag) { return { className: '', innerHTML: '' }; },
+  };
+  global.fetch = () => Promise.resolve({
+    json: () => Promise.resolve({ detectors: keys }),
+  });
+  loadDetectors().then(() => {
+    const checked = created
+      .filter(label => label.innerHTML.includes('checked'))
+      .map(label => label.innerHTML.match(/value="([^"]+)"/)[1]);
+    process.stdout.write(JSON.stringify(checked));
+  });
+});
+"""
+    script_path = tmp_path / "load_detectors.js"
+    script_path.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        ["node", str(script_path)],
+        input=json.dumps(keys), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    checked = json.loads(result.stdout)
+    assert sorted(checked) == sorted([
+        "dsp_baseline:default", "panns_cnn14:music_group", "yamnet:music_group",
+    ])

@@ -101,7 +101,16 @@ pre{background:#f5f5f5;padding:.5rem;font-size:.75rem;max-height:16rem;
 """
 
 _PAGE_JS = """
-const FAST = ['dsp_baseline', 'panns_cnn14', 'yamnet'];
+// Spec section 3.3's three default models, exactly. An earlier version of
+// this list held prefixes ('dsp_baseline', 'panns_cnn14', 'yamnet') checked
+// with startsWith(), which meant BOTH variants of panns_cnn14 and yamnet
+// matched -- five models ticked by default, not three, and each variant
+// reloads its own checkpoint. music_group (not music_only) is the chosen
+// variant for panns_cnn14 and yamnet: it counts a lone drummer or guitarist
+// as music too, which a rehearsal recording is full of.
+const DEFAULT_DETECTORS = [
+  'dsp_baseline:default', 'panns_cnn14:music_group', 'yamnet:music_group',
+];
 const POLL_MS = 2000;
 const watching = new Map();
 
@@ -151,12 +160,12 @@ async function loadDetectors() {
   const box = document.getElementById('detectors');
   box.innerHTML = '';
   for (const key of detectors) {
-    const fast = FAST.some(prefix => key.startsWith(prefix));
+    const isDefault = DEFAULT_DETECTORS.includes(key);
     const label = document.createElement('label');
     label.className = 'det';
     label.innerHTML =
-      `<input type="checkbox" value="${key}"${fast ? ' checked' : ''}> ` +
-      `${key}${fast ? '' : ' <span class="hint">(slow)</span>'}`;
+      `<input type="checkbox" value="${key}"${isDefault ? ' checked' : ''}> ` +
+      `${key}${isDefault ? '' : ' <span class="hint">(slow)</span>'}`;
     box.appendChild(label);
   }
 }

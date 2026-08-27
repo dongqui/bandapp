@@ -83,6 +83,41 @@ def _raw_dir(scenes_dir: str | Path) -> Path:
     return Path(scenes_dir).parent / "raw_sessions"
 
 
+def _stream_subprocess(cmd: list[str]) -> int:
+    """Run ``cmd``, printing its combined stdout/stderr through this
+    process's own ``print()`` as each line arrives.
+
+    jobs.capture_into works by swapping ``sys.stdout`` at the Python level
+    only -- a *child* process's stdout/stderr write straight to the real
+    fd 1/2, bypassing that swap entirely and confirmed to leave job.log
+    empty for the whole duration of a download. Piping the child's output
+    through this process's own stdout instead is what lets it land wherever
+    sys.stdout currently points, capture_into included. Read and printed one
+    line at a time (not collected and dumped at the end): a user watching a
+    multi-minute download needs to see it progressing, not a wall of text
+    once it's already done -- indistinguishable from a hang until then.
+
+    Every line is re-encoded through cp949 with errors="replace" before
+    printing: yt-dlp's own output can carry text this console's codepage
+    cannot represent (a video title in a script outside cp949, say), and an
+    un-sanitised print() of that would raise UnicodeEncodeError partway
+    through a download.
+    """
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line.rstrip("\n").encode("cp949", errors="replace").decode("cp949"))
+    return process.wait()
+
+
 def _download(source: str, session_id: str, raw_dir: Path) -> Path:
     # `-x --audio-format wav` needs ffmpeg to do the actual extraction; a
     # missing ffmpeg otherwise surfaces only after yt-dlp runs, as a
@@ -94,15 +129,20 @@ def _download(source: str, session_id: str, raw_dir: Path) -> Path:
             "ffmpeg not found on PATH. Install it: winget install Gyan.FFmpeg"
         )
     raw_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
+    # Not subprocess.run(check=False): that inherits fd 1/2 directly, so the
+    # child's own output never passes through Python's sys.stdout at all --
+    # see _stream_subprocess. check=False's spirit (never raise on a bad
+    # exit code -- the "produced no audio" check below is what actually
+    # decides success) carries over: the return code is intentionally
+    # ignored here too.
+    _stream_subprocess(
         [
             # See fetch.py: the console script is not on PATH unless the venv
             # is activated, and bandpoc.exe does not activate it.
             sys.executable, "-m", "yt_dlp",
             "-x", "--audio-format", "wav", "--no-playlist",
             "-o", str(raw_dir / f"{session_id}.%(ext)s"), source,
-        ],
-        check=False,
+        ]
     )
     downloaded = raw_dir / f"{session_id}.wav"
     if not downloaded.exists():

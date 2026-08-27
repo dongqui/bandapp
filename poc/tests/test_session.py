@@ -142,7 +142,7 @@ def test_add_session_checks_ffmpeg_before_downloading_a_url(tmp_path, monkeypatc
 
     calls = []
     monkeypatch.setattr(session_mod, "ffmpeg_available", lambda: False)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(a))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append(a))
 
     with pytest.raises(RuntimeError, match="ffmpeg"):
         add_session(
@@ -177,15 +177,25 @@ def test_add_session_downloads_a_youtube_url_through_the_running_interpreter(
 
     calls = []
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        # yt-dlp would have written this; stand in for it.
-        target = tmp_path / "raw" / "igMctbh0pT8.wav"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(target), np.zeros(WORK_SR, dtype=np.float32), WORK_SR)
+    class FakePopen:
+        """Stands in for subprocess.Popen: _download now streams the
+        child's stdout through _stream_subprocess rather than calling
+        subprocess.run, so a stub here needs a readable .stdout and a
+        .wait() the way the real Popen object does."""
+
+        def __init__(self, cmd, **kwargs):
+            calls.append(cmd)
+            # yt-dlp would have written this; stand in for it.
+            target = tmp_path / "raw" / "igMctbh0pT8.wav"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(str(target), np.zeros(WORK_SR, dtype=np.float32), WORK_SR)
+            self.stdout = iter(["[download] 100%% of 1.00MiB\n"])
+
+        def wait(self):
+            return 0
 
     monkeypatch.setattr(session_mod, "_raw_dir", lambda scenes_dir: tmp_path / "raw")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
 
     out = add_session(
         "https://www.youtube.com/watch?v=igMctbh0pT8", tmp_path / "scenes"
@@ -194,3 +204,62 @@ def test_add_session_downloads_a_youtube_url_through_the_running_interpreter(
     assert out.name == "igMctbh0pT8.wav"
     assert calls[0][:3] == [sys.executable, "-m", "yt_dlp"]
     assert "yt-dlp" not in calls[0]
+
+
+def test_stream_subprocess_output_reaches_the_capturing_job_log():
+    """BLOCKING 3: jobs.capture_into only swaps sys.stdout at the Python
+    level -- a child process's own stdout/stderr write straight to the real
+    fd 1, bypassing that swap entirely, which is why a real yt-dlp download
+    left job.log completely empty for the whole time it ran. Proven here
+    with a trivial child (not a real download): if _stream_subprocess piped
+    the child's output to the real console instead of through Python's own
+    print(), this would see an empty job.log."""
+    from bandpoc.jobs import Job, capture_into
+    from bandpoc.session import _stream_subprocess
+
+    job = Job(job_id="j", source="s", detectors=())
+    with capture_into(job):
+        code = _stream_subprocess([
+            sys.executable, "-c",
+            "print('line one'); print('line two')",
+        ])
+
+    assert code == 0
+    assert job.log == ["line one", "line two"]
+
+
+def test_stream_subprocess_merges_stderr_into_the_same_log():
+    """yt-dlp's diagnostics -- the private/age-restricted/geo-blocked
+    messages a user actually needs to see -- go to stderr, not stdout."""
+    from bandpoc.jobs import Job, capture_into
+    from bandpoc.session import _stream_subprocess
+
+    job = Job(job_id="j", source="s", detectors=())
+    with capture_into(job):
+        _stream_subprocess([
+            sys.executable, "-c",
+            "import sys; sys.stderr.write('err line\\n')",
+        ])
+
+    assert job.log == ["err line"]
+
+
+def test_stream_subprocess_survives_output_the_console_cannot_encode():
+    """yt-dlp's own output can carry text (e.g. a video title) outside this
+    console's cp949 codepage. Printing that unsanitised would raise
+    UnicodeEncodeError and take the download down with it; this must not
+    raise, and must still get *something* into the log."""
+    from bandpoc.jobs import Job, capture_into
+    from bandpoc.session import _stream_subprocess
+
+    job = Job(job_id="j", source="s", detectors=())
+    with capture_into(job):
+        code = _stream_subprocess([
+            sys.executable, "-c",
+            "import sys; sys.stdout.reconfigure(encoding='utf-8'); "
+            "print('\\U0001F3B5 not cp949')",
+        ])
+
+    assert code == 0
+    assert job.log
+    assert "not cp949" in job.log[0]

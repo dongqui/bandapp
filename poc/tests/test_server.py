@@ -327,6 +327,66 @@ def _raw_request(base, headers_text, body=b"", timeout=5):
     return raw
 
 
+def test_a_get_with_an_untrusted_host_header_is_refused(server):
+    """FINDING 5: a page on a short-TTL DNS name rebound to 127.0.0.1 makes
+    a browser treat this server as same-origin with that page -- unless the
+    Host header itself is checked, a GET / with an arbitrary Host used to
+    return 200 regardless."""
+    base, _, _, _ = server
+    headers = (
+        "GET / HTTP/1.1\r\n"
+        "Host: evil.example\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    )
+    raw = _raw_request(base, headers)
+    status_line = raw.split(b"\r\n", 1)[0]
+    assert status_line.endswith(b"403 Forbidden"), raw
+
+
+def test_a_post_with_an_untrusted_host_header_is_refused(server):
+    """The same rebinding hole on the state-changing endpoint: a genuine
+    job-submission POST with a forged Host must not reach _submit_url."""
+    base, queue, _, _ = server
+    payload = json.dumps({"url": "https://youtu.be/abc", "detectors": KEYS[:1]}).encode()
+    headers = (
+        "POST /api/sessions HTTP/1.1\r\n"
+        "Host: evil.example\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(payload)}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    )
+    raw = _raw_request(base, headers, payload)
+    status_line = raw.split(b"\r\n", 1)[0]
+    assert status_line.endswith(b"403 Forbidden"), raw
+    assert queue.recent(limit=200) == []
+
+
+@pytest.mark.parametrize("host_header", [
+    "127.0.0.1",
+    "localhost",
+    "LOCALHOST",
+    "127.0.0.1:{port}",
+    "localhost:{port}",
+])
+def test_a_trusted_host_header_is_accepted(server, host_header):
+    """The allowlist must not be so strict it locks out the server's own
+    browser page -- with or without an explicit port, either name, any
+    case."""
+    base, _, _, _ = server
+    host, port = _host_port(base)
+    headers = (
+        "GET / HTTP/1.1\r\n"
+        f"Host: {host_header.format(port=port)}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    )
+    raw = _raw_request(base, headers)
+    status_line = raw.split(b"\r\n", 1)[0]
+    assert status_line.endswith(b"200 OK"), raw
+
+
 def test_a_crlf_in_the_detectors_field_cannot_inject_a_header(server):
     """FINDING 1: send_error() used to splice this straight into the status
     line unescaped. Assert on the raw bytes off the wire -- urllib's parser

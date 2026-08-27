@@ -1,9 +1,12 @@
 """Local HTTP front end for session intake (spec section 3.2).
 
-Knows nothing about the pipeline: it parses requests, hands a source to the
-job queue, and reports what the queue says. Binds to 127.0.0.1 only -- this
-downloads arbitrary URLs and writes arbitrary paths, so there is deliberately
-no --host to get wrong.
+The request-handling layer (make_handler's Handler) knows nothing about the
+pipeline: it parses requests, hands a source to the job queue, and reports
+what the queue says. serve() below is the composition root -- it is the one
+place that imports the detector registry and pipeline (via jobs.make_runner)
+and wires them to that layer, so the handler itself never has to. Binds to
+127.0.0.1 only -- this downloads arbitrary URLs and writes arbitrary paths,
+so there is deliberately no --host to get wrong.
 """
 
 from __future__ import annotations
@@ -439,9 +442,31 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             safe = message.replace("\r", "").replace("\n", "")
             self._json({"error": safe}, status=status)
 
+        def _host_is_allowed(self) -> bool:
+            """Guard against DNS rebinding.
+
+            Binding 127.0.0.1 keeps this off the network, but it does not by
+            itself stop a page on the public internet from talking to it: a
+            short-TTL DNS name that first resolves to a real server and then
+            re-resolves to 127.0.0.1 makes a browser treat this server as
+            same-origin with that page, at which point genuine CSRF defences
+            (this server has none beyond what falls out incidentally -- no
+            CORS headers, a JSON content type a plain form POST cannot set)
+            no longer apply. A GET / with an arbitrary Host header returning
+            200 is exactly the hole that lets it in: submit a job, or read
+            the user's rehearsal audio straight out of /reports/. An
+            allowlist on the Host header itself is the actual defence.
+            """
+            host_header = self.headers.get("Host", "")
+            hostname = host_header.rsplit(":", 1)[0].lower()
+            return hostname in ("127.0.0.1", "localhost")
+
         # --- GET ----------------------------------------------------------
 
         def do_GET(self) -> None:
+            if not self._host_is_allowed():
+                self._fail(403, "bad host")
+                return
             path = unquote(urlparse(self.path).path)
             if path == "/":
                 self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
@@ -463,6 +488,9 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
         # --- POST ---------------------------------------------------------
 
         def do_POST(self) -> None:
+            if not self._host_is_allowed():
+                self._fail(403, "bad host")
+                return
             if unquote(urlparse(self.path).path) != "/api/sessions":
                 self._fail(404, "not found")
                 return

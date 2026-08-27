@@ -517,14 +517,44 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             except ValueError:
                 self._fail(400, "body is not valid JSON")
                 return None
-            url = (payload.get("url") or "").strip()
+            # json.loads accepts any JSON value, not just objects -- a list,
+            # null, a bare number or a bare string all parse cleanly. Every
+            # field access below assumes a dict, and every .strip()/.join()
+            # below assumes str content, so a body that merely parses is not
+            # a body that is safe to read: `[]`, `null`, `123`, `"x"`,
+            # {"url": 123}, {"url": ["a"]} and {"detectors": [1, 2]} all hit
+            # an unhandled AttributeError/TypeError here before this fix --
+            # dumping a traceback to the console `log_message` was overridden
+            # to keep clean and returning zero bytes to the client. Same
+            # defect class this file already closed for %00 in report paths,
+            # a TOCTOU read, and the worker loop: validate shape, then a
+            # clean 400.
+            if not isinstance(payload, dict):
+                self._fail(400, "request body must be a JSON object")
+                return None
+            raw_url = payload.get("url")
+            if raw_url is not None and not isinstance(raw_url, str):
+                self._fail(400, "url must be a string")
+                return None
+            url = (raw_url or "").strip()
             if not url:
                 self._fail(400, "no url given")
                 return None
-            detectors = self._detectors_or_fail(payload.get("detectors") or [])
+            raw_detectors = payload.get("detectors")
+            if raw_detectors is not None and not (
+                isinstance(raw_detectors, list)
+                and all(isinstance(d, str) for d in raw_detectors)
+            ):
+                self._fail(400, "detectors must be a list of strings")
+                return None
+            detectors = self._detectors_or_fail(raw_detectors or [])
             if detectors is None:
                 return None
-            session_id = (payload.get("id") or "").strip() or None
+            raw_id = payload.get("id")
+            if raw_id is not None and not isinstance(raw_id, str):
+                self._fail(400, "id must be a string")
+                return None
+            session_id = (raw_id or "").strip() or None
             return job_queue.submit(url, detectors, session_id=session_id).job_id
 
         def _submit_upload(self, body: bytes) -> str | None:

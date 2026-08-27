@@ -170,6 +170,42 @@ def test_a_request_with_no_source_is_rejected(server):
     assert excinfo.value.code == 400
 
 
+def _raw_json_post(base, raw_body: bytes):
+    """POST a raw, already-encoded JSON body -- unlike post_json, the caller
+    controls the exact bytes so a body that is valid JSON but the wrong
+    *shape* (a list, null, a bare number, ...) can be sent as-is."""
+    request = Request(f"{base}/api/sessions", data=raw_body,
+                      headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(request) as response:
+        return response.status, json.loads(response.read())
+
+
+@pytest.mark.parametrize("raw_body", [
+    b"[]",
+    b"null",
+    b"123",
+    b'"a string"',
+    b'{"url": 123}',
+    b'{"url": ["a"]}',
+    b'{"url": "https://youtu.be/abc", "detectors": ["dsp_baseline:default"], "id": 5}',
+    b'{"url": "https://youtu.be/abc", "detectors": [1, 2]}',
+])
+def test_a_wrong_shaped_json_body_is_a_clean_400_not_a_crash(server, raw_body):
+    """BLOCKING 2: _submit_url checked the body PARSES but never its shape.
+    Every one of these is valid JSON that used to reach an unhandled
+    AttributeError or TypeError deep in .strip()/.join() and come back as an
+    empty response with a traceback on the console -- confirmed for each of
+    these shapes before this fix. Must come back as a real 400 with a body."""
+    base, _, _, _ = server
+    with pytest.raises(HTTPError) as excinfo:
+        _raw_json_post(base, raw_body)
+    assert excinfo.value.code == 400
+    error_body = excinfo.value.read()
+    assert error_body, "expected a real error body, not an empty socket"
+    parsed = json.loads(error_body)
+    assert isinstance(parsed.get("error"), str) and parsed["error"]
+
+
 def test_malformed_json_is_rejected(server):
     base, _, _, _ = server
     request = Request(f"{base}/api/sessions", data=b"{not json",

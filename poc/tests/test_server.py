@@ -63,8 +63,33 @@ def _extract_script(html_text: str) -> _ScriptExtractor:
 
 
 @pytest.fixture
-def server(tmp_path):
-    """A live server on an ephemeral port, with a runner that does nothing."""
+def server(tmp_path, monkeypatch):
+    """A live server on an ephemeral port, with a runner that does nothing.
+
+    _submit_upload's tempfile.mkstemp(prefix="bandpoc-") writes into the
+    process's real %TEMP%, not tmp_path -- and because this fixture's runner
+    is a no-op stand-in for the real pipeline, none of jobs.make_runner's
+    cleanup-on-completion logic ever runs for it. Left alone, every upload
+    test leaks its temp file into %TEMP% forever; 94 of them had
+    accumulated there from prior test runs before this fixture recorded and
+    swept them up. Recording every path mkstemp hands out and removing
+    whatever is still there at teardown catches all of them without racing
+    the worker thread -- deleting a job's source *inside* the runner instead
+    would race a test that reads job.source back after the job has already
+    finished (the worker can be that fast). Production cleanup itself
+    (make_runner's own `if job.cleanup_source: unlink(...)`) is untouched;
+    this is test-fixture hygiene only.
+    """
+    created_paths: list[str] = []
+    real_mkstemp = tempfile.mkstemp
+
+    def spying_mkstemp(*args, **kwargs):
+        result = real_mkstemp(*args, **kwargs)
+        created_paths.append(result[1])
+        return result
+
+    monkeypatch.setattr(server_module.tempfile, "mkstemp", spying_mkstemp)
+
     ran = []
     queue = JobQueue(runner=lambda job: ran.append(job.job_id))
     reports = tmp_path / "reports"
@@ -77,6 +102,8 @@ def server(tmp_path):
     yield base, queue, reports, ran
     httpd.shutdown()
     httpd.server_close()
+    for path in created_paths:
+        Path(path).unlink(missing_ok=True)
 
 
 def get_json(url):

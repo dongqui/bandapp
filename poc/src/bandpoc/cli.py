@@ -22,6 +22,7 @@ from .fetch import fetch_pool, ffmpeg_available, load_sources
 from .labels import HOP, SceneLabels
 from .postproc import resample_scores
 from .report import DetectorResult, build_report
+from .server import serve
 from .session import SessionExists, add_session
 from .synth import ClipPool, build_scene, load_recipes
 from .sweep import SceneInput, best_point, run_sweep
@@ -392,6 +393,10 @@ def cmd_explore(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    return serve(Path(args.data_dir), Path(args.out_dir), port=args.port)
+
+
 def main(argv: list[str] | None = None) -> int:
     # No top-level --data-dir (Minor 11): every subparser below redefines its
     # own --data-dir with its own default, and argparse resolves that by
@@ -437,6 +442,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-dir", default="reports/explore")
     p.add_argument("--data-dir", default=str(_DEFAULT_DATA))
     p.set_defaults(func=cmd_explore)
+
+    p = sub.add_parser("serve", help="browser front end for adding sessions")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--out-dir", default="reports/explore")
+    p.add_argument("--data-dir", default=str(_DEFAULT_DATA))
+    p.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

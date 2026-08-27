@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -20,6 +20,19 @@ while a runaway request cannot fill the disk."""
 
 _HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
+
+# http.server.HTTPServer sets allow_reuse_address = 1 (SO_REUSEADDR) so a
+# server restarting quickly can rebind a socket still in TIME_WAIT. On POSIX
+# that flag does not let two live sockets share a port -- a genuinely busy
+# port still fails bind(). On Windows it does: confirmed during review that
+# binding 127.0.0.1 to the same port twice in a row succeeds both times with
+# the stock class, no OSError from either call. Left alone, the busy-port
+# guard in serve() below would never fire on this platform -- a second
+# `bandpoc serve` would silently share the port with the first instead of
+# failing loudly, which is exactly the "quietly moving" behaviour the fixed
+# port exists to avoid. Disabling reuse on the class makes bind() raise
+# OSError for a busy port on Windows too, confirmed the same way.
+ThreadingHTTPServer.allow_reuse_address = False
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -521,17 +534,37 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
     return Handler
 
 
-def serve(data_dir: str | Path, reports_dir: str | Path, port: int = DEFAULT_PORT) -> int:
-    """Start the intake server and block until interrupted.
+def serve(
+    data_dir: str | Path, reports_dir: str | Path, port: int = DEFAULT_PORT
+) -> int:
+    """Run the intake server until interrupted."""
+    from . import registry
+    from .jobs import JobQueue, make_runner
 
-    Deliberately unimplemented here. The brief for this task listed this
-    signature under "Produces" without giving a body; a first pass at filling
-    it in turned out to be untested, production-shaped scope (CLI wiring,
-    localhost-only binding, busy-port handling) that belongs to its own
-    later task and its own brief. This stub keeps the documented interface
-    importable without pretending that scope is done.
-    """
-    raise NotImplementedError(
-        "bandpoc.server.serve is implemented by the CLI-wiring task; "
-        "see .superpowers/sdd/2026-08-27-browser-session-intake/"
-    )
+    import bandpoc.detectors  # noqa: F401 -- registers every adapter
+
+    data_dir = Path(data_dir)
+    reports_dir = Path(reports_dir)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    job_queue = JobQueue(runner=make_runner(data_dir, reports_dir))
+    handler = make_handler(job_queue, reports_dir, registry.all_keys())
+    try:
+        httpd = ThreadingHTTPServer((_HOST, port), handler)
+    except OSError as exc:
+        # Do not quietly pick another port: the whole point of a fixed port
+        # is knowing where to point the browser.
+        print(f"[fail] cannot bind {_HOST}:{port}: {exc}")
+        print("try another port: bandpoc serve --port 8766")
+        return 1
+
+    actual = httpd.server_address[1]
+    print(f"bandpoc serving on http://{_HOST}:{actual}")
+    print("local only -- do not expose this to a network")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopping")
+    finally:
+        httpd.server_close()
+    return 0

@@ -138,6 +138,37 @@ def _assert_every_string_constant_encodes(module, codec="cp949"):
                 ) from exc
 
 
+def _assert_every_string_constant_encodes_print_and_raise(module, codec="cp949"):
+    """Only what can reach a console: print() arguments and raised messages.
+
+    server.py carries an HTML/JS page whose Korean copy never touches a
+    Windows console, so a blanket module scan would fail on correct code --
+    the same reason explore.py is scoped this way.
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    checked = 0
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "print":
+            targets = node.args
+        elif isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            targets = node.exc.args
+        for arg in targets:
+            for piece in ast.walk(arg):
+                if isinstance(piece, ast.Constant) and isinstance(piece.value, str):
+                    checked += 1
+                    try:
+                        piece.value.encode(codec)
+                    except UnicodeEncodeError as exc:
+                        raise AssertionError(
+                            f"{Path(module.__file__).name} line {piece.lineno}: {exc}"
+                        ) from exc
+    assert checked > 0, "scanned nothing -- the walk is broken, not the code"
+
+
 def test_cli_messages_encode_on_a_cp949_console():
     """Korean Windows consoles default to cp949, which has no em dash.
 
@@ -514,3 +545,67 @@ def test_explore_keeps_an_already_encoded_session_when_ffmpeg_is_unavailable(
     index_html = next((tmp_path / "reports").rglob("index.html")).read_text(encoding="utf-8")
     assert "cached" in index_html
     assert "fresh" not in index_html
+
+
+def test_serve_binds_localhost_only(monkeypatch, tmp_path):
+    """This downloads arbitrary URLs and writes arbitrary paths."""
+    from bandpoc import server as server_mod
+
+    seen = {}
+
+    class FakeServer:
+        def __init__(self, address, handler):
+            seen["address"] = address
+            self.server_address = address
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            seen["closed"] = True
+
+    monkeypatch.setattr(server_mod, "ThreadingHTTPServer", FakeServer)
+    code = server_mod.serve(tmp_path / "data", tmp_path / "reports", port=0)
+
+    assert code == 0
+    assert seen["address"][0] == "127.0.0.1"
+    assert seen["closed"] is True
+
+
+def test_serve_reports_a_busy_port_instead_of_moving(monkeypatch, tmp_path, capsys):
+    from bandpoc import server as server_mod
+
+    def refuse(address, handler):
+        raise OSError("address already in use")
+
+    monkeypatch.setattr(server_mod, "ThreadingHTTPServer", refuse)
+    assert server_mod.serve(tmp_path / "data", tmp_path / "reports", port=8765) == 1
+    assert "8765" in capsys.readouterr().out
+
+
+def test_the_serve_subcommand_is_wired(monkeypatch, tmp_path):
+    called = {}
+
+    def fake_serve(data_dir, reports_dir, port):
+        called["port"] = port
+        called["data_dir"] = str(data_dir)
+        return 0
+
+    import bandpoc.cli as cli_mod
+
+    monkeypatch.setattr(cli_mod, "serve", fake_serve)
+    assert main(["serve", "--port", "9000", "--data-dir", str(tmp_path)]) == 0
+    assert called["port"] == 9000
+    assert called["data_dir"] == str(tmp_path)
+
+
+def test_server_messages_encode_on_a_cp949_console():
+    from bandpoc import server
+
+    _assert_every_string_constant_encodes_print_and_raise(server)
+
+
+def test_jobs_messages_encode_on_a_cp949_console():
+    from bandpoc import jobs
+
+    _assert_every_string_constant_encodes_print_and_raise(jobs)

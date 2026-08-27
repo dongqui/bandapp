@@ -67,7 +67,17 @@ function escapeHtml(value) {
   // step finishes -- until then, or if it fails before that point, the raw
   // string is what a poll returns), and error/log carry exception text,
   // yt-dlp output and filenames verbatim. This project has already shipped
-  // one </script> breakout; treat all three as hostile.
+  // one <\\/script> breakout; treat all three as hostile.
+  //
+  // That escaped slash above is not decorative: this whole file is embedded
+  // verbatim inside a real script element (see PAGE below), and an HTML
+  // tokenizer ends that element the moment it sees the byte sequence made
+  // of "<", then "/", then "script" -- including inside a JS comment, and
+  // regardless of case. Spelling that sequence out unescaped anywhere in
+  // this file, even just to describe it, is exactly the mistake to avoid:
+  // a first draft of this very comment did that and it truncated the whole
+  // element mid-function in a real browser. See explore.py's
+  // render_session for the same rule applied to embedded JSON.
   return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[ch]));

@@ -1,9 +1,12 @@
 import json
 import os
+import shutil
 import socket
+import subprocess
 import tempfile
 import threading
 import time
+from html.parser import HTMLParser
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -16,6 +19,47 @@ from bandpoc.jobs import JobQueue
 from bandpoc.server import MAX_UPLOAD_BYTES, make_handler
 
 KEYS = ["dsp_baseline:default", "yamnet:music_group"]
+
+
+class _ScriptExtractor(HTMLParser):
+    """Extracts <script> element text content the way a real browser's HTML
+    tokenizer would -- as opposed to a raw substring search over the page,
+    which cannot tell "this JS runs inside one script element" from "an
+    early close-tag sequence inside a comment ended that element, and the
+    rest of the file is now ordinary page text -- or, if some later text
+    happens to spell out an open-tag sequence too, a *second*, unrelated
+    script element that starts mid-sentence".
+
+    element_count is exposed for exactly that second case: naively
+    concatenating the text of every <script> element the parser saw would
+    silently repair a "closed early, reopened by accident" split back into
+    something that might still look like intact JS. Counting elements is
+    what actually catches that -- the real page must contain exactly one."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self._in_script = False
+        self.script_text = ""
+        self.element_count = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "script":
+            self._in_script = True
+            self.element_count += 1
+
+    def handle_endtag(self, tag):
+        if tag == "script":
+            self._in_script = False
+
+    def handle_data(self, data):
+        if self._in_script:
+            self.script_text += data
+
+
+def _extract_script(html_text: str) -> _ScriptExtractor:
+    extractor = _ScriptExtractor()
+    extractor.feed(html_text)
+    return extractor
 
 
 @pytest.fixture
@@ -633,3 +677,66 @@ def test_the_form_page_states_the_poll_interval(server):
     # so that assertion on its own would not fail if the polling stop-logic
     # were deleted entirely -- pin the actual stop call too.
     assert "clearInterval" in html
+
+
+def test_the_page_js_contains_no_literal_script_tag_sequence():
+    """The whole _PAGE_JS string is embedded verbatim inside a real <script>
+    element in PAGE (see the f-string in server.py). An HTML tokenizer ends
+    a script element the moment it sees "<", "/", "script" in sequence --
+    including inside a JS comment -- and, once back in normal parsing, would
+    just as readily treat "<", "script" as the start of a brand new element.
+    Neither sequence may occur in the JS source itself, in either form or
+    case. This is the direct guard; the next two tests prove it actually
+    matters by checking what a real parser and a real JS engine see."""
+    low = server_module._PAGE_JS.lower()
+    assert "</script" not in low
+    assert "<script" not in low
+
+
+def test_the_page_has_exactly_one_script_element_with_the_full_script(server):
+    """Parse PAGE the way a browser's HTML tokenizer would and check two
+    things a raw substring search over the page (as in
+    test_the_form_page_polls_its_own_api and friends) cannot distinguish:
+
+    1. There is exactly one <script> element. An early close-tag sequence
+       inside a comment ends the element there; if the following text also
+       happens to spell out an open-tag sequence, parsing resumes as a
+       *second*, unrelated script element rather than obviously broken
+       markup -- and naively concatenating "all text the parser saw between
+       any start and end script tag" can silently paper back over that
+       split into something that still looks like intact JS. Pinning the
+       element count to exactly one is what actually catches that case (a
+       mutation test confirmed a first draft of this test did not -- see
+       the task report).
+    2. That one element's content ends with the JS's real final statement,
+       not a prefix truncated by an early close-tag sequence. A raw
+       substring search would not catch this either: '/api/detectors',
+       '2000', 'failed' and 'clearInterval' are all still present as plain
+       body text even when the script is truncated mid-function and none of
+       that code ever runs.
+    """
+    base, _, _, _ = server
+    _, body, _ = read_bytes(base + "/")
+    extractor = _extract_script(body.decode("utf-8"))
+    assert extractor.element_count == 1
+    assert extractor.script_text.rstrip().endswith(
+        "loadDetectors().then(loadRecent);"
+    )
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not on PATH")
+def test_the_page_script_is_syntactically_valid_javascript(server, tmp_path):
+    """node --check parses the script element's content without executing
+    it. A syntax error here (from a truncated <script> element, or any
+    other malformed JS) must fail the test suite instead of silently
+    shipping a form that is inert in every real browser."""
+    base, _, _, _ = server
+    _, body, _ = read_bytes(base + "/")
+    extractor = _extract_script(body.decode("utf-8"))
+    script_path = tmp_path / "page.js"
+    script_path.write_text(extractor.script_text, encoding="utf-8")
+    result = subprocess.run(
+        ["node", "--check", str(script_path)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr

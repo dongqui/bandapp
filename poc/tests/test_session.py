@@ -119,6 +119,26 @@ def test_add_session_refuses_to_overwrite_an_existing_session(tmp_path):
         add_session(str(src), tmp_path / "scenes")
 
 
+def test_the_duplicate_session_message_names_the_id_but_no_cli_flag(tmp_path):
+    """FINDING 8: this exception's text is shown verbatim on two different
+    surfaces -- cmd_add_session prints it straight to the CLI console, and
+    jobs.make_runner's runner puts it straight into job.error, which the
+    browser page renders on the COMMON failure path (a session id collision
+    is easy to hit by resubmitting). '...pass a different --id' reads fine
+    on the CLI but makes no sense to someone who never typed a command."""
+    src = tmp_path / "take.wav"
+    sf.write(str(src), np.zeros(8000, dtype=np.float32), 8000)
+    add_session(str(src), tmp_path / "scenes")
+
+    with pytest.raises(SessionExists) as excinfo:
+        add_session(str(src), tmp_path / "scenes")
+
+    message = str(excinfo.value)
+    assert "take" in message
+    assert "--id" not in message
+    assert "different" in message
+
+
 def test_add_session_does_not_normalise_loudness(tmp_path):
     """Real level changes are part of the signal the model will face."""
     src = tmp_path / "quiet.wav"

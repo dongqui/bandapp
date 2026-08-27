@@ -167,7 +167,7 @@ def add_session(
     if out.exists():
         raise SessionExists(
             f"session {session_id!r} already exists at {out}; "
-            "delete it or pass a different --id"
+            "delete it or choose a different session id"
         )
     src = (
         _download(source, session_id, _raw_dir(scenes_dir))

@@ -53,7 +53,19 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             if self.command != "HEAD":
-                self.wfile.write(body)
+                try:
+                    self.wfile.write(body)
+                except ConnectionError:
+                    # The client went away mid-body. Not exotic: with no
+                    # Range support (see _serve_report), an <audio> element
+                    # seeking re-downloads the whole file and then aborts
+                    # once it has enough buffered, so this fires on every
+                    # seek of a large report. There is no one left to send
+                    # anything to at this point -- just don't let it become
+                    # an unhandled-exception traceback on the console that
+                    # log_message() above was written specifically to keep
+                    # clear for job output.
+                    pass
 
         def _json(self, obj, status: int = 200) -> None:
             self._send(status, json.dumps(obj).encode("utf-8"),
@@ -217,7 +229,21 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             content_type = _CONTENT_TYPES.get(
                 target.suffix.lower(), "application/octet-stream"
             )
-            self._send(200, target.read_bytes(), content_type)
+            try:
+                body = target.read_bytes()
+            except OSError:
+                # TOCTOU: is_file() in _safe_report_path and this read are
+                # two separate filesystem calls. The file can vanish or
+                # become unreadable in between (removed, permissions) --
+                # confirmed to raise straight through as an unhandled
+                # OSError, which the client sees as an empty response
+                # (RemoteDisconnected), not a 404, and which prints a
+                # traceback server-side. Same trade-off as the None branch
+                # above: treat "can't be read" the same as "not found"
+                # rather than distinguishing them in the response.
+                self._fail(404, "not found")
+                return
+            self._send(200, body, content_type)
 
         def _safe_report_path(self, rel: str) -> Path | None:
             """Resolve under the report root, or refuse.
@@ -227,7 +253,18 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
             than distinguishing "outside the root" from "does not exist" --
             keeps the response from confirming what lives elsewhere on disk.
             """
-            candidate = (reports_root / rel.lstrip("/")).resolve()
+            try:
+                candidate = (reports_root / rel.lstrip("/")).resolve()
+            except (OSError, ValueError):
+                # resolve() stat()s the path to collapse it, and an embedded
+                # NUL byte (a %00 survives unquote() and reaches the
+                # filesystem layer as a literal null) makes that stat()
+                # raise ValueError rather than return a path -- confirmed
+                # with a raw request during review, closing the connection
+                # with zero bytes and a traceback on stderr. Any other
+                # filesystem-level OSError here gets the same treatment:
+                # refuse, don't crash.
+                return None
             if not candidate.is_relative_to(reports_root):
                 return None
             return candidate if candidate.is_file() else None

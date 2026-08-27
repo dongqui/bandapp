@@ -3,6 +3,7 @@ import os
 import socket
 import tempfile
 import threading
+import time
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -399,9 +400,6 @@ def test_a_write_failure_during_upload_does_not_leak_the_temp_file(server, monke
     assert len(queue.recent(limit=200)) == 0
 
 
-from urllib.parse import quote
-
-
 def read_bytes(url):
     with urlopen(url) as response:
         return response.status, response.read(), response.headers["Content-Type"]
@@ -442,7 +440,13 @@ def test_a_missing_report_file_is_a_404(server):
 @pytest.mark.parametrize("attack", [
     "/reports/../secret.txt",
     "/reports/j1/../../secret.txt",
-    "/reports/" + quote("../secret.txt"),
+    # A distinct encoding from the row below: this one percent-encodes the
+    # trailing slash too (%2f), so after a single unquote() it decodes to
+    # "../" rather than to a literal "%2e%2e" segment. (A prior version of
+    # this parametrization used quote("../secret.txt"), which -- because
+    # quote()'s default safe="/" leaves "." and "/" alone -- produced the
+    # byte-identical string to the row above and bought no extra coverage.)
+    "/reports/%2e%2e%2fsecret.txt",
     "/reports/%2e%2e/secret.txt",
 ])
 def test_path_traversal_is_refused(server, tmp_path, attack):
@@ -454,6 +458,134 @@ def test_path_traversal_is_refused(server, tmp_path, attack):
         read_bytes(f"{base}{attack}")
 
     assert excinfo.value.code in (403, 404)
+
+
+def test_a_sibling_directory_sharing_the_root_name_as_a_string_prefix_is_refused(server):
+    """Pins is_relative_to() as the containment primitive rather than a
+    string check. With root .../reports and sibling .../reports-secret,
+    is_relative_to() is not fooled (it compares path *parts*), but the classic
+    bug -- str(candidate).startswith(str(root)) -- would be: "reports-secret"
+    starts with the string "reports" with no separator in between. Every
+    other traversal case in this file targets reports.parent/secret.txt,
+    which a startswith check also happens to catch, so none of them would
+    catch a regression to the string-prefix form. This one specifically
+    would not."""
+    base, _, reports, _ = server
+    sibling = reports.parent / "reports-secret"
+    sibling.mkdir()
+    (sibling / "leak.txt").write_text("do not serve me", encoding="utf-8")
+
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}/reports/../reports-secret/leak.txt")
+
+    assert excinfo.value.code in (403, 404)
+
+
+def test_a_symlink_pointing_outside_the_root_is_refused(server):
+    """resolve() follows symlinks before the containment check runs, so a
+    symlink planted inside the report root that targets outside it must
+    still be refused. Creating a symlink can require elevated privileges on
+    Windows; skip rather than fail where this environment doesn't allow it,
+    so the suite stays honest about what it actually covers."""
+    base, _, reports, _ = server
+    outside = reports.parent / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("do not serve me", encoding="utf-8")
+
+    link = reports / "escape.txt"
+    try:
+        os.symlink(outside / "secret.txt", link)
+    except OSError as exc:
+        pytest.skip(f"cannot create symlinks in this environment: {exc}")
+
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}/reports/escape.txt")
+
+    assert excinfo.value.code in (403, 404)
+
+
+@pytest.mark.parametrize("attack", [
+    "/reports/%00/secret.txt",
+    "/reports/j1/index.html%00.png",
+    "/reports/j1%00/index.html",
+])
+def test_a_null_byte_in_the_path_is_a_clean_404(server, attack):
+    """resolve() raises ValueError on an embedded NUL (confirmed: 'stat:
+    embedded null character in path'), and a %00 survives unquote() and
+    reaches the filesystem layer as a literal null byte. Before the fix this
+    closed the connection with zero bytes -- urlopen saw a
+    RemoteDisconnected, not an HTTPError -- and dumped a traceback to
+    stderr on every request. Must come back as an ordinary 404 instead."""
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    (reports / "j1" / "index.html").write_text("hi", encoding="utf-8")
+
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}{attack}")
+    assert excinfo.value.code == 404
+
+
+def test_a_read_failure_after_the_existence_check_is_a_clean_404(server, monkeypatch):
+    """The existence check in _safe_report_path (is_file()) and the actual
+    read in _serve_report (read_bytes()) are two separate filesystem calls;
+    anything can happen to the file in between (removed, permissions
+    changed, ...) and read_bytes() raising OSError must not vanish as an
+    empty response with a stack trace on the server side."""
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    (reports / "j1" / "flaky.html").write_text("hi", encoding="utf-8")
+
+    def boom(self):
+        raise OSError("simulated read failure")
+
+    monkeypatch.setattr(Path, "read_bytes", boom)
+
+    with pytest.raises(HTTPError) as excinfo:
+        read_bytes(f"{base}/reports/j1/flaky.html")
+    assert excinfo.value.code == 404
+
+
+def test_a_client_aborting_mid_download_does_not_take_down_the_server(server, capfd):
+    """No Range support means an <audio> element's seek re-downloads the
+    whole file and then aborts once it has enough buffered -- normal
+    behaviour, not exotic. wfile.write() raising ConnectionError partway
+    through the body must not print a stack trace per seek (that would
+    defeat the log_message() override, whose whole point is to keep the
+    console readable for job output) and must not disturb the server's
+    ability to serve the next request."""
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    # Large enough that closing the socket right after the request line
+    # reliably lands the write while the body is still in flight.
+    (reports / "j1" / "big.bin").write_bytes(b"x" * (8 * 1024 * 1024))
+
+    host, port = base[len("http://"):].split(":")
+    sock = socket.create_connection((host, int(port)), timeout=5)
+    sock.settimeout(5)
+    request_text = (
+        "GET /reports/j1/big.bin HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        "Connection: close\r\n\r\n"
+    )
+    sock.sendall(request_text.encode())
+    sock.recv(1)  # make sure the server has started writing the response
+    sock.close()
+
+    # The server thread that was writing big.bin must not have wedged the
+    # whole process: a fresh request still gets a normal response.
+    status, body, _ = read_bytes(f"{base}/reports/j1/big.bin")
+    assert status == 200
+    assert len(body) == 8 * 1024 * 1024
+
+    # Give the aborted thread a moment to finish (it races the assertions
+    # above), then confirm it never reached socketserver's unhandled-error
+    # path -- capfd reads the real stderr file descriptor, so it sees
+    # output from that other thread too, not just this one.
+    time.sleep(0.3)
+    _, err = capfd.readouterr()
+    assert "Traceback" not in err
+    assert "ConnectionResetError" not in err
+    assert "Exception occurred during processing of request" not in err
 
 
 def test_a_directory_is_not_served(server):

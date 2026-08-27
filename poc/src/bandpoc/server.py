@@ -326,6 +326,64 @@ PAGE = f"""<!doctype html><html lang='ko'><head><meta charset='utf-8'>
 </body></html>"""
 
 
+def _parse_range(
+    range_header: str, size: int
+) -> tuple[int, int] | str | None:
+    """Parse a single-range ``Range: bytes=...`` header against a file of
+    ``size`` bytes.
+
+    Returns an inclusive ``(start, end)`` pair, the literal string
+    ``"unsatisfiable"``, or ``None``. ``None`` covers every shape the caller
+    should treat exactly like no Range header at all -- a malformed value, a
+    unit other than ``bytes``, and a multi-range request (``bytes=0-10,20-30``):
+    building a real multipart/byteranges response is not required, and
+    answering 200 to a request this server does not understand is what
+    RFC 7233 prescribes for an unusable Range.
+    """
+    if not range_header.startswith("bytes="):
+        return None
+    spec = range_header[len("bytes="):]
+    if "," in spec or "-" not in spec:
+        return None
+    start_text, _, end_text = spec.partition("-")
+    if start_text == "":
+        # Suffix form: bytes=-N means "the last N bytes".
+        if end_text == "":
+            return None
+        try:
+            suffix_length = int(end_text)
+        except ValueError:
+            return None
+        if suffix_length <= 0 or size == 0:
+            return "unsatisfiable"
+        start = max(0, size - suffix_length)
+        return start, size - 1
+    try:
+        start = int(start_text)
+    except ValueError:
+        return None
+    if start < 0:
+        return None
+    if end_text == "":
+        end = size - 1  # open-ended: bytes=N- means "N to the end"
+    else:
+        try:
+            end = int(end_text)
+        except ValueError:
+            return None
+        if end < start:
+            return None
+    # A start past EOF is a valid *request* that cannot be satisfied, not a
+    # malformed one -- checked after parsing, not folded into the syntax
+    # checks above, so e.g. bytes=<size+100>- (a well-formed open-ended
+    # range whose start sits past EOF, where end is derived from size and
+    # so is always < start) is reported as 416 rather than silently
+    # downgraded to a 200 of the whole file.
+    if start >= size:
+        return "unsatisfiable"
+    return start, min(end, size - 1)
+
+
 def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
     """Build a handler class bound to one queue, report root and key list."""
     reports_root = Path(reports_dir).resolve()
@@ -339,25 +397,30 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
 
         # --- helpers ------------------------------------------------------
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(
+            self,
+            status: int,
+            body: bytes,
+            content_type: str,
+            extra_headers: dict[str, str] | None = None,
+        ) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            if self.command != "HEAD":
-                try:
-                    self.wfile.write(body)
-                except ConnectionError:
-                    # The client went away mid-body. Not exotic: with no
-                    # Range support (see _serve_report), an <audio> element
-                    # seeking re-downloads the whole file and then aborts
-                    # once it has enough buffered, so this fires on every
-                    # seek of a large report. There is no one left to send
-                    # anything to at this point -- just don't let it become
-                    # an unhandled-exception traceback on the console that
-                    # log_message() above was written specifically to keep
-                    # clear for job output.
-                    pass
+            try:
+                self.wfile.write(body)
+            except ConnectionError:
+                # The client went away mid-body. Not exotic: even with Range
+                # support, an <audio> element can abort a partial fetch once
+                # it has enough buffered. There is no one left to send
+                # anything to at this point -- just don't let it become an
+                # unhandled-exception traceback on the console that
+                # log_message() above was written specifically to keep clear
+                # for job output.
+                pass
 
         def _json(self, obj, status: int = 200) -> None:
             self._send(status, json.dumps(obj).encode("utf-8"),
@@ -522,9 +585,9 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
                 target.suffix.lower(), "application/octet-stream"
             )
             try:
-                body = target.read_bytes()
+                size = target.stat().st_size
             except OSError:
-                # TOCTOU: is_file() in _safe_report_path and this read are
+                # TOCTOU: is_file() in _safe_report_path and this stat are
                 # two separate filesystem calls. The file can vanish or
                 # become unreadable in between (removed, permissions) --
                 # confirmed to raise straight through as an unhandled
@@ -535,7 +598,50 @@ def make_handler(job_queue, reports_dir: str | Path, detector_keys: list[str]):
                 # rather than distinguishing them in the response.
                 self._fail(404, "not found")
                 return
-            self._send(200, body, content_type)
+
+            # Range support (spec: click-to-seek needs it -- without
+            # Accept-Ranges and a real 206 answer, Chrome reports a
+            # degenerate `seekable` even with the file fully buffered and
+            # refuses every seek; confirmed A/B against a Range-capable
+            # control server on the same page and file). A missing or
+            # malformed Range header, or one this server does not support
+            # (multi-range), falls through to an ordinary 200 of the whole
+            # file -- RFC 7233 treats an unusable Range the same as none.
+            start, end = 0, size - 1  # inclusive, whole file
+            status = 200
+            range_header = self.headers.get("Range")
+            if range_header is not None:
+                parsed = _parse_range(range_header, size)
+                if parsed == "unsatisfiable":
+                    body = json.dumps(
+                        {"error": "range not satisfiable"}
+                    ).encode("utf-8")
+                    self._send(
+                        416, body, "application/json; charset=utf-8",
+                        extra_headers={"Content-Range": f"bytes */{size}"},
+                    )
+                    return
+                if parsed is not None:
+                    start, end = parsed
+                    status = 206
+
+            length = end - start + 1
+            try:
+                # Seek + bounded read, not read_bytes(): a report's audio
+                # file can be hundreds of MB, and a client seeking near the
+                # end of it must not pull the whole file into memory just to
+                # serve a few KB.
+                with open(target, "rb") as handle:
+                    handle.seek(start)
+                    body = handle.read(length)
+            except OSError:
+                self._fail(404, "not found")
+                return
+
+            extra_headers = {"Accept-Ranges": "bytes"}
+            if status == 206:
+                extra_headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+            self._send(status, body, content_type, extra_headers=extra_headers)
 
         def _safe_report_path(self, rel: str) -> Path | None:
             """Resolve under the report root, or refuse.

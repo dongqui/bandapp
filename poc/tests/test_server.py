@@ -474,6 +474,102 @@ def test_an_mp3_is_served_with_an_audio_content_type(server):
     assert ctype == "audio/mpeg"
 
 
+def read_range(url, range_header):
+    """GET with a Range header. Returns (status, body, headers) on success;
+    on an error status urllib raises HTTPError, which the caller catches to
+    get at the status/body/headers the same way."""
+    request = Request(url, headers={"Range": range_header})
+    with urlopen(request) as response:
+        return response.status, response.read(), response.headers
+
+
+_RANGE_BODY = bytes(range(256)) * 40  # 10240 bytes, byte i%256 makes slices self-checking
+
+
+@pytest.fixture
+def ranged_report(server):
+    base, _, reports, _ = server
+    (reports / "j1").mkdir(parents=True)
+    (reports / "j1" / "audio.wav").write_bytes(_RANGE_BODY)
+    return f"{base}/reports/j1/audio.wav"
+
+
+def test_a_full_report_response_advertises_range_support(ranged_report):
+    """Accept-Ranges must be present on the plain 200 too -- that is what
+    tells a browser's <audio> element seeking is possible at all."""
+    with urlopen(ranged_report) as response:
+        assert response.status == 200
+        assert response.headers["Accept-Ranges"] == "bytes"
+        assert response.read() == _RANGE_BODY
+
+
+def test_a_bounded_range_returns_206_with_the_exact_slice(ranged_report):
+    status, body, headers = read_range(ranged_report, "bytes=10-19")
+    assert status == 206
+    assert body == _RANGE_BODY[10:20]
+    assert headers["Content-Range"] == f"bytes 10-19/{len(_RANGE_BODY)}"
+    assert headers["Content-Length"] == "10"
+    assert headers["Accept-Ranges"] == "bytes"
+
+
+def test_an_open_ended_range_returns_everything_from_start_to_eof(ranged_report):
+    status, body, headers = read_range(ranged_report, "bytes=10000-")
+    assert status == 206
+    assert body == _RANGE_BODY[10000:]
+    assert headers["Content-Range"] == f"bytes 10000-{len(_RANGE_BODY) - 1}/{len(_RANGE_BODY)}"
+
+
+def test_a_suffix_range_returns_the_last_n_bytes(ranged_report):
+    status, body, headers = read_range(ranged_report, "bytes=-100")
+    assert status == 206
+    assert body == _RANGE_BODY[-100:]
+    size = len(_RANGE_BODY)
+    assert headers["Content-Range"] == f"bytes {size - 100}-{size - 1}/{size}"
+
+
+def test_a_range_past_eof_is_416_with_the_asterisk_content_range(ranged_report):
+    with pytest.raises(HTTPError) as excinfo:
+        read_range(ranged_report, f"bytes={len(_RANGE_BODY) + 100}-")
+    assert excinfo.value.code == 416
+    assert excinfo.value.headers["Content-Range"] == f"bytes */{len(_RANGE_BODY)}"
+
+
+def test_a_zero_length_suffix_range_is_416(ranged_report):
+    with pytest.raises(HTTPError) as excinfo:
+        read_range(ranged_report, "bytes=-0")
+    assert excinfo.value.code == 416
+
+
+@pytest.mark.parametrize("bad_range", [
+    "bytes=abc-def",       # not integers
+    "bytes=",              # empty spec
+    "words=0-10",           # wrong unit
+    "bytes=50-10",          # end before start
+    "bytes=-",              # neither a start nor a suffix length
+])
+def test_a_malformed_range_header_is_ignored_and_serves_200(ranged_report, bad_range):
+    status, body, headers = read_range(ranged_report, bad_range)
+    assert status == 200
+    assert body == _RANGE_BODY
+    assert "Content-Range" not in headers
+
+
+def test_a_multi_range_request_is_not_supported_and_serves_200(ranged_report):
+    """Multi-range is explicitly out of scope: respond 200 to the whole file
+    rather than attempting a multipart/byteranges body."""
+    status, body, headers = read_range(ranged_report, "bytes=0-9,20-29")
+    assert status == 200
+    assert body == _RANGE_BODY
+    assert "Content-Range" not in headers
+
+
+def test_the_delivered_range_bytes_match_the_files_actual_slice(ranged_report, tmp_path):
+    """Not just headers -- the bytes read via seek()+read() must be the same
+    bytes a plain read of that slice off disk would produce."""
+    status, body, _ = read_range(ranged_report, "bytes=4096-8191")
+    assert body == _RANGE_BODY[4096:8192]
+
+
 def test_a_missing_report_file_is_a_404(server):
     base, _, _, _ = server
     with pytest.raises(HTTPError) as excinfo:
@@ -571,18 +667,18 @@ def test_a_null_byte_in_the_path_is_a_clean_404(server, attack):
 
 def test_a_read_failure_after_the_existence_check_is_a_clean_404(server, monkeypatch):
     """The existence check in _safe_report_path (is_file()) and the actual
-    read in _serve_report (read_bytes()) are two separate filesystem calls;
-    anything can happen to the file in between (removed, permissions
-    changed, ...) and read_bytes() raising OSError must not vanish as an
+    read in _serve_report (open()+seek()+read()) are separate filesystem
+    calls; anything can happen to the file in between (removed, permissions
+    changed, ...) and that open() raising OSError must not vanish as an
     empty response with a stack trace on the server side."""
     base, _, reports, _ = server
     (reports / "j1").mkdir(parents=True)
     (reports / "j1" / "flaky.html").write_text("hi", encoding="utf-8")
 
-    def boom(self):
+    def boom(*args, **kwargs):
         raise OSError("simulated read failure")
 
-    monkeypatch.setattr(Path, "read_bytes", boom)
+    monkeypatch.setattr(server_module, "open", boom, raising=False)
 
     with pytest.raises(HTTPError) as excinfo:
         read_bytes(f"{base}/reports/j1/flaky.html")

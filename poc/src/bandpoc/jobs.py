@@ -188,3 +188,66 @@ class JobQueue:
             job.error = f"{type(exc).__name__}: {exc}"
             traceback.print_exc()
         job.state = "failed" if job.error else "done"
+
+
+def make_runner(
+    data_dir: "str | Path", reports_dir: "str | Path"
+) -> Callable[[Job], None]:
+    """Build the runner that walks one job through the existing pipeline.
+
+    Calls cmd_run and cmd_explore rather than reimplementing them, so a
+    browser-submitted session takes byte-for-byte the same path as a
+    terminal one. Imports are deferred to keep jobs.py importable without
+    dragging the whole detector registry in.
+    """
+    from argparse import Namespace
+    from pathlib import Path
+
+    data_dir = Path(data_dir)
+    reports_dir = Path(reports_dir)
+
+    def run(job: Job) -> None:
+        from .cli import cmd_explore, cmd_run
+        from .session import add_session
+
+        detectors = ",".join(job.detectors)
+        try:
+            with capture_into(job):
+                path = add_session(
+                    job.source, data_dir / "scenes", session_id=job.session_id
+                )
+                job.session_id = path.stem
+                print(f"[done] session {job.session_id} imported")
+
+                if cmd_run(Namespace(
+                    data_dir=str(data_dir), scenes=job.session_id,
+                    detectors=detectors, force=False,
+                )) != 0:
+                    job.error = "inference failed; see the log"
+                    return
+
+                # One report directory per job: cmd_explore adds its own
+                # timestamp underneath, so the job id alone makes the path
+                # predictable without parsing anything out of the log.
+                out_dir = reports_dir / job.job_id
+                if cmd_explore(Namespace(
+                    data_dir=str(data_dir), scenes=job.session_id,
+                    detectors=detectors, out_dir=str(out_dir),
+                )) != 0:
+                    job.error = "explore failed; see the log"
+                    return
+
+                pages = sorted(out_dir.glob("*/index.html"))
+                if not pages:
+                    job.error = "explore produced no page; see the log"
+                    return
+                job.report_url = (
+                    f"/reports/{job.job_id}/{pages[0].parent.name}/index.html"
+                )
+        except Exception as exc:
+            job.error = f"{type(exc).__name__}: {exc}"
+        finally:
+            if job.cleanup_source:
+                Path(job.source).unlink(missing_ok=True)
+
+    return run

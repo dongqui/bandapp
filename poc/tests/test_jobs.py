@@ -198,3 +198,96 @@ def test_wait_idle_never_lies_while_work_is_outstanding():
             f"{snapshot_finished}/{submitted} jobs had finished"
         )
     assert submitted == 500
+
+
+import numpy as np
+import soundfile as sf
+
+from bandpoc.audio import WORK_SR
+from bandpoc.jobs import make_runner
+
+
+def write_wav(path, seconds=40.0):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    t = np.arange(int(WORK_SR * seconds)) / WORK_SR
+    tone = 0.3 * np.sin(2 * np.pi * 220 * t)
+    tone[: int(WORK_SR * seconds / 2)] *= 0.01  # quiet half, loud half
+    sf.write(str(path), tone.astype(np.float32), WORK_SR)
+    return path
+
+
+def test_runner_walks_add_session_then_run_then_explore(tmp_path):
+    src = write_wav(tmp_path / "src" / "take.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    job = Job(job_id="j1", source=str(src), detectors=("dsp_baseline:default",))
+
+    runner(job)
+
+    assert job.error is None, job.error
+    assert job.session_id == "take"
+    assert (tmp_path / "data" / "scenes" / "take.wav").exists()
+    assert list((tmp_path / "data" / "cache").glob("*.npz"))
+    assert job.report_url and job.report_url.startswith("/reports/j1/")
+    served = tmp_path / "reports" / job.report_url[len("/reports/"):]
+    assert served.is_file()
+
+
+def test_runner_puts_pipeline_output_in_the_job_log(tmp_path):
+    src = write_wav(tmp_path / "src" / "take.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    job = Job(job_id="j2", source=str(src), detectors=("dsp_baseline:default",))
+
+    runner(job)
+
+    assert any("[done]" in line for line in job.log), job.log
+
+
+def test_runner_honours_an_explicit_session_id(tmp_path):
+    src = write_wav(tmp_path / "src" / "take.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    job = Job(job_id="j3", source=str(src), detectors=("dsp_baseline:default",),
+              session_id="my_session")
+
+    runner(job)
+
+    assert job.session_id == "my_session"
+    assert (tmp_path / "data" / "scenes" / "my_session.wav").exists()
+
+
+def test_runner_reports_a_duplicate_session_as_an_error(tmp_path):
+    src = write_wav(tmp_path / "src" / "take.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    runner(Job(job_id="j4", source=str(src), detectors=("dsp_baseline:default",)))
+
+    second = Job(job_id="j5", source=str(src), detectors=("dsp_baseline:default",))
+    runner(second)
+
+    assert second.error and "already exists" in second.error
+    assert second.report_url is None
+
+
+def test_runner_deletes_an_uploaded_source_when_asked(tmp_path):
+    src = write_wav(tmp_path / "src" / "upload.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    job = Job(job_id="j6", source=str(src), detectors=("dsp_baseline:default",),
+              cleanup_source=True)
+
+    runner(job)
+
+    assert job.error is None, job.error
+    assert not src.exists(), "the temporary upload must not be left behind"
+
+
+def test_runner_deletes_an_uploaded_source_even_on_failure(tmp_path):
+    src = write_wav(tmp_path / "src" / "upload.wav")
+    runner = make_runner(tmp_path / "data", tmp_path / "reports")
+    runner(Job(job_id="j7", source=str(src), detectors=("dsp_baseline:default",),
+               session_id="taken"))
+    again = write_wav(tmp_path / "src" / "upload.wav")
+
+    job = Job(job_id="j8", source=str(again), detectors=("dsp_baseline:default",),
+              session_id="taken", cleanup_source=True)
+    runner(job)
+
+    assert job.error
+    assert not again.exists()

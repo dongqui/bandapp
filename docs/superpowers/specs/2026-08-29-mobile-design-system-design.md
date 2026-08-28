@@ -31,19 +31,17 @@ Rehearsal App 프로토타입의 디자인을 apps/mobile(Expo)에 옮긴다.
 
 ## 확정된 결정
 
-1. **expo-router** — 파일 기반 라우팅. 라우트 파일이 곧 화면 본체다
-   (별도 XxxScreen 래퍼 없음). expo-router는 app/ 아래 모든 파일을
-   라우트로 취급하므로, 라우트가 될 수 없는 도메인 자산(컴포넌트·훅)만
-   feature 폴더에 둔다.
+1. **expo-router** — 파일 기반 라우팅. expo-router는 app/ 아래 모든
+   파일을 라우트로 취급하므로 app/에는 얇은 래퍼(re-export)만 두고,
+   화면 본체는 도메인 feature 폴더에 co-locate한다.
 2. **토큰 + StyleSheet** — 추가 스타일링 의존성 없음. `theme/tokens.ts`만
    고치면 전체 반영. accent는 런타임 교체 가능(기본 `#5B9DFF`,
    옵션 `#4ADE80 #FFB454 #FF5C5C`).
 3. **Mock 구현체 포함** — `RehearsalApiClient` 인터페이스의 MockApiClient가
    프로토타입과 동일한 시드 데이터를 제공. 실제 클라이언트는 나중에
    인터페이스만 구현해 교체.
-4. **도메인 co-location** — 화면은 app/ 라우트 파일에, 그 화면이 쓰는
-   컴포넌트·훅은 같은 도메인의 feature 폴더에 모은다.
-   `theme/`, `ui/`는 전 도메인 공유 계층이라 예외.
+4. **도메인 co-location** — 화면·컴포넌트·훅을 도메인 feature 폴더에
+   모은다. `theme/`, `ui/`는 전 도메인 공유 계층이라 예외.
 5. **컴포넌트는 apps/mobile 내부에** — 모바일 앱 하나뿐이므로
    packages/ui 분리는 하지 않는다(YAGNI).
 
@@ -65,23 +63,24 @@ apps/mobile/
   app/
     _layout.tsx                    # ThemeProvider + ApiProvider + ToastProvider + 폰트
     (tabs)/_layout.tsx             # 커스텀 탭바 (SESSIONS · ⊕ FAB · BAND)
-    (tabs)/index.tsx               # Sessions 화면 본체
-    (tabs)/band.tsx                # Band 화면 본체
-    record.tsx                     # Recording 화면 본체
-    processing.tsx                 # Processing 화면 본체
-    session/[id]/index.tsx         # Session Detail 화면 본체
-    session/[id]/take/[takeId].tsx # Take Feedback 화면 본체
+    (tabs)/index.tsx               # → features/sessions/SessionsScreen re-export
+    (tabs)/band.tsx                # → features/band/BandScreen
+    record.tsx                     # → features/recording/RecordingScreen
+    processing.tsx                 # → features/recording/ProcessingScreen
+    session/[id]/index.tsx         # → features/takes/SessionDetailScreen
+    session/[id]/take/[takeId].tsx # → features/takes/TakePlayerScreen
   src/
     theme/     tokens.ts, ThemeProvider.tsx, useTheme.ts
     ui/        AppText, MonoLabel, Screen, Chip, Avatar, BottomSheet,
                SheetActionRow, TabBar, Fab, StaticWaveform, LiveWaveform,
                PlayerWaveform, ProgressBar, Toast(Provider+useToast),
                StatusDot, IconCircle, PressableOpacity
-    features/                      # 라우트가 될 수 없는 도메인 자산만
-      sessions/   SessionRow, NewSessionSheet, useSessions
-      recording/  useRecordingTimer
-      takes/      TakeRow, CommentRow, CommentInput, usePlayback(모의), useTakes, useComments
-      band/       MemberRow, BandSwitchSheet, InviteSheet, useBand
+    features/                      # 도메인별 co-location: 화면 + 컴포넌트 + 훅
+      sessions/   SessionsScreen, SessionRow, NewSessionSheet, useSessions
+      recording/  RecordingScreen, ProcessingScreen, useRecordingTimer
+      takes/      SessionDetailScreen, TakePlayerScreen, TakeRow,
+                  CommentRow, CommentInput, usePlayback(모의), useTakes, useComments
+      band/       BandScreen, MemberRow, BandSwitchSheet, InviteSheet, useBand
     api/       ApiProvider.tsx, useApi.ts   # 인터페이스에만 의존
     lib/       time.ts (fmtClock, fmtDuration, endTime), seed.ts (시드 웨이브폼)
 ```

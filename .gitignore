@@ -1,1 +1,9 @@
 .superpowers/
+node_modules/
+dist/
+.turbo/
+.expo/
+.venv/
+__pycache__/
+*.tsbuildinfo
+.DS_Store

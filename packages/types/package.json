@@ -9,6 +9,6 @@
   },
   "devDependencies": {
     "@bandapp/config": "workspace:*",
-    "typescript": "^5.6.0"
+    "typescript": "^6.0.2"
   }
 }

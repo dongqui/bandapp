@@ -1,4 +1,4 @@
-import { HealthController } from "./health.controller";
+import { HealthController } from "./health.controller.js";
 
 describe("HealthController", () => {
   it("returns ok", () => {

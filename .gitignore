@@ -7,3 +7,4 @@ dist/
 __pycache__/
 *.tsbuildinfo
 .DS_Store
+*.egg-info/

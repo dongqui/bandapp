@@ -3,7 +3,7 @@ name = "bandapp-audio-worker"
 version = "0.0.1"
 description = "밴드 합주 녹음 분석 워커 (뼈대)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["boto3>=1.35"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

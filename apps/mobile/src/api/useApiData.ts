@@ -1,5 +1,5 @@
 import type { RehearsalApiClient } from "@bandapp/api-client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "./ApiProvider";
 
 export function useApiData<T>(
@@ -8,22 +8,20 @@ export function useApiData<T>(
 ): { data: T | undefined; reload: () => void } {
   const api = useApi();
   const [data, setData] = useState<T | undefined>(undefined);
+  const requestIdRef = useRef(0);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const loadCb = useCallback(load, deps);
   const reload = useCallback(() => {
-    let cancelled = false;
-    loadCb(api).then((d) => {
-      if (!cancelled) setData(d);
+    const id = ++requestIdRef.current;
+    void loadCb(api).then((d) => {
+      if (requestIdRef.current === id) setData(d);
     });
-    return () => {
-      cancelled = true;
-    };
   }, [api, loadCb]);
   useEffect(() => {
-    const cancel = reload();
+    reload();
     const off = api.subscribe(() => reload());
     return () => {
-      cancel();
+      requestIdRef.current++; // cancel any in-flight request on unmount/dep change
       off();
     };
   }, [api, reload]);

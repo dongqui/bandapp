@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: band
+      POSTGRES_USER: band
+      POSTGRES_PASSWORD: band
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U band -d band"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:latest
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: ap-northeast-2
+      DEBUG: 0
+    volumes:
+      - ./docker/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+      - localstack-data:/var/lib/localstack
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    # @bandapp/types는 dist를 배포하는 패키지라 dev 기동 전에 빌드가 필요하다.
+    command: sh -c "pnpm --filter @bandapp/types build && pnpm --filter @bandapp/api start:api:dev"
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://band:band@postgres:5432/band
+      SQS_ENDPOINT: http://localstack:4566
+      TSC_WATCHFILE: DynamicPriorityPolling
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/mobile/node_modules
+      - /app/packages/types/node_modules
+      - /app/packages/config/node_modules
+      - /app/packages/api-client/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    command: sh -c "pnpm --filter @bandapp/types build && pnpm --filter @bandapp/api start:worker:dev"
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://band:band@postgres:5432/band
+      SQS_ENDPOINT: http://localstack:4566
+      TSC_WATCHFILE: DynamicPriorityPolling
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/mobile/node_modules
+      - /app/packages/types/node_modules
+      - /app/packages/config/node_modules
+      - /app/packages/api-client/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_started
+
+  audio-worker:
+    build:
+      context: .
+      dockerfile: apps/audio-worker/Dockerfile
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      SQS_ENDPOINT: http://localstack:4566
+    volumes:
+      - ./apps/audio-worker/src:/app/src
+    depends_on:
+      localstack:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  localstack-data:

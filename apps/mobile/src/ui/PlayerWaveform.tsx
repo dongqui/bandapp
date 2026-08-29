@@ -42,7 +42,7 @@ export function PlayerWaveform({
           style={{
             position: "absolute",
             top: 0,
-            left: `${(sec / durationSec) * 100}%`,
+            left: `${durationSec ? (sec / durationSec) * 100 : 0}%`,
             width: 6,
             height: 6,
             borderRadius: 3,

@@ -1,4 +1,3 @@
-import { View } from "react-native";
 import { useTheme } from "@/theme";
 import { AppText, Avatar, BottomSheet, SheetActionRow } from "@/ui";
 import { useToast } from "@/ui";
@@ -26,7 +25,6 @@ export function BandSwitchSheet({ visible, onClose }: { visible: boolean; onClos
           toast.show("Not in this prototype");
         }}
       />
-      <View style={{ height: 0 }} />
     </BottomSheet>
   );
 }

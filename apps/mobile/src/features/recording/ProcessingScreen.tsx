@@ -5,7 +5,7 @@ import { useApi, useApiData } from "@/api";
 import { useCurrentBand } from "@/features/band/useCurrentBand";
 import { fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
-import { AppText, MonoLabel, ProgressBar, Screen } from "@/ui";
+import { AppText, MonoLabel, ProgressBar, Screen, useToast } from "@/ui";
 
 const ANALYSIS_MS = 4500;
 
@@ -19,6 +19,7 @@ export function ProcessingScreen() {
   const router = useRouter();
   const { band } = useCurrentBand();
   const { colors } = useTheme();
+  const toast = useToast();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const startedRef = useRef(false);
@@ -28,7 +29,8 @@ export function ProcessingScreen() {
     startedRef.current = true;
     void api.sessions
       .create(band.id, { durationSec, source: source ?? "recording" })
-      .then((s) => setSessionId(s.id));
+      .then((s) => setSessionId(s.id))
+      .catch(() => toast.show("Something went wrong"));
   }, [api, band, durationSec, source]);
 
   useEffect(() => {

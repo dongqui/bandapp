@@ -33,7 +33,8 @@ export function SessionsScreen() {
 
   const onRowPress = (s: Session) => {
     if (s.status === "ready") router.push(`/session/${s.id}`);
-    else if (s.status === "failed") void api.sessions.retryAnalysis(s.id);
+    else if (s.status === "failed")
+      void api.sessions.retryAnalysis(s.id).catch(() => toast.show("Something went wrong"));
     else toast.show("Still finding takes…");
   };
 

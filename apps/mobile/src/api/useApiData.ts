@@ -13,9 +13,13 @@ export function useApiData<T>(
   const loadCb = useCallback(load, deps);
   const reload = useCallback(() => {
     const id = ++requestIdRef.current;
-    void loadCb(api).then((d) => {
-      if (requestIdRef.current === id) setData(d);
-    });
+    void loadCb(api)
+      .then((d) => {
+        if (requestIdRef.current === id) setData(d);
+      })
+      .catch((e) => {
+        if (requestIdRef.current === id) console.warn("useApiData load failed", e);
+      });
   }, [api, loadCb]);
   useEffect(() => {
     reload();

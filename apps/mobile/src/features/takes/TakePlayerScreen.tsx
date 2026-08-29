@@ -5,7 +5,7 @@ import { useApi } from "@/api";
 import { seedOf } from "@/lib/seed";
 import { fmtClock, fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
-import { AppText, MonoLabel, PlayerWaveform, PressableOpacity, Screen } from "@/ui";
+import { AppText, MonoLabel, PlayerWaveform, PressableOpacity, Screen, useToast } from "@/ui";
 import { CommentInput } from "./CommentInput";
 import { CommentRow } from "./CommentRow";
 import { useComments } from "./useComments";
@@ -19,6 +19,7 @@ export function TakePlayerScreen() {
   const { data: takes } = useTakes(id);
   const router = useRouter();
   const api = useApi();
+  const toast = useToast();
   const { colors } = useTheme();
 
   const isOriginal = takeId === "orig";
@@ -123,7 +124,8 @@ export function TakePlayerScreen() {
           onSubmit={(text) => {
             void api.comments
               .create(take.commentKey, { atSec: Math.floor(playback.positionSec), text })
-              .then(() => reload());
+              .then(() => reload())
+              .catch(() => toast.show("Something went wrong"));
           }}
         />
       </KeyboardAvoidingView>

@@ -6,7 +6,10 @@ import {
 } from "@expo-google-fonts/jetbrains-mono";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ApiProvider } from "@/api";
 import { ThemeProvider, color } from "@/theme";
+import { ToastProvider } from "@/ui";
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -16,14 +19,20 @@ export default function RootLayout() {
   });
   if (!fontsLoaded) return null;
   return (
-    <ThemeProvider>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: color.bg },
-        }}
-      />
-    </ThemeProvider>
+    <SafeAreaProvider>
+      <ThemeProvider>
+        <ApiProvider>
+          <ToastProvider>
+            <StatusBar style="light" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: color.bg },
+              }}
+            />
+          </ToastProvider>
+        </ApiProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
   );
 }

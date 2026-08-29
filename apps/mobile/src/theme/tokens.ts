@@ -7,6 +7,7 @@ export const color = {
   surfaceSunken: "#0F1114",
   surfaceRaised: "#1A1C20",
   toastBg: "#22252B",
+  toastText: "#E8EAEE",
   border: "#1D2025",
   borderStrong: "#23262B",
   borderStronger: "#2A2D33",
@@ -17,6 +18,7 @@ export const color = {
   textFaint: "#5A5F68",
   recording: "#FF4545",
   danger: "#E0736B",
+  tabBarBg: "rgba(11,12,14,0.92)",
 } as const;
 
 export const accentOptions = ["#5B9DFF", "#4ADE80", "#FFB454", "#FF5C5C"] as const;

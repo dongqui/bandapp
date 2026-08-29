@@ -28,6 +28,11 @@ services:
     volumes:
       - ./docker/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
       - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/init/ready | grep -q '\"completed\": true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   api:
     build:
@@ -35,7 +40,7 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     # @bandapp/types는 dist를 배포하는 패키지라 dev 기동 전에 빌드가 필요하다.
-    command: sh -c "pnpm --filter @bandapp/types build && pnpm --filter @bandapp/api start:api:dev"
+    command: sh -c "pnpm --filter @bandapp/types build && exec pnpm --filter @bandapp/api start:api:dev"
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql://band:band@postgres:5432/band
@@ -55,14 +60,14 @@ services:
       postgres:
         condition: service_healthy
       localstack:
-        condition: service_started
+        condition: service_healthy
 
   worker:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
-    command: sh -c "pnpm --filter @bandapp/types build && pnpm --filter @bandapp/api start:worker:dev"
+    command: sh -c "pnpm --filter @bandapp/types build && exec pnpm --filter @bandapp/api start:worker:dev"
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql://band:band@postgres:5432/band
@@ -80,7 +85,7 @@ services:
       postgres:
         condition: service_healthy
       localstack:
-        condition: service_started
+        condition: service_healthy
 
   audio-worker:
     build:

@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.git
+.env
+.venv
+**/.venv
+**/__pycache__
+.turbo
+**/.turbo
+.expo
+**/.expo
+.superpowers
+**/dist
+*.tsbuildinfo

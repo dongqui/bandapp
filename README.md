@@ -30,3 +30,15 @@ audio-worker는 `apps/audio-worker/`에서 별도 설치:
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -e ".[dev]"
 ```
+
+## 로컬 개발 환경
+
+```bash
+cp .env.example .env   # 최초 1회
+docker compose up --build -d
+```
+
+- API: http://localhost:3000 (health: `GET /health`)
+- 분석 요청: `curl -X POST http://localhost:3000/recordings/<id>/analysis` → worker 컨테이너 로그로 수신 확인
+- 큐: LocalStack SQS (`recording-analysis`, `recording-analysis-python`, `recording-analysis-dlq`)
+- 종료: `docker compose down`

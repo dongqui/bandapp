@@ -33,7 +33,7 @@ export function ProcessingScreen() {
 
   useEffect(() => {
     const t = setInterval(() => {
-      setProgress((p) => Math.min(0.95, p + 200 / ANALYSIS_MS));
+      setProgress((p) => (p >= 1 ? p : Math.min(0.95, p + 200 / ANALYSIS_MS)));
     }, 200);
     return () => clearInterval(t);
   }, []);

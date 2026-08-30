@@ -14,7 +14,7 @@ export function OnboardingScreen() {
   const router = useRouter();
   const toast = useToast();
   const { colors } = useTheme();
-  const { setCurrentBand } = useCurrentBandContext();
+  const { setCurrentBand, refreshBands } = useCurrentBandContext();
   const [mode, setMode] = useState<Mode>("menu");
   const [name, setName] = useState("");
   const [inviteInput, setInviteInput] = useState("");
@@ -27,6 +27,7 @@ export function OnboardingScreen() {
     try {
       const band = await api.bands.create(trimmed);
       setCurrentBand(band.id);
+      await refreshBands(); // bandGate가 새 밴드를 보고 온보딩으로 되돌리지 않도록 리스트를 먼저 갱신
       router.replace("/");
     } catch {
       toast.show("팀 만들기에 실패했어요. 다시 시도해 주세요.");

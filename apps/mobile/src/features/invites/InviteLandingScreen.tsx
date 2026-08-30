@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { View } from "react-native";
 import { useApi } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { useCurrentBandContext } from "@/features/band/CurrentBandProvider";
 import { AppText, PressableOpacity, Screen, useToast } from "@/ui";
 import { savePendingInviteToken } from "./pendingInvite";
 
@@ -13,10 +14,12 @@ export function InviteLandingScreen() {
   const router = useRouter();
   const toast = useToast();
   const { state } = useAuth();
+  const { setCurrentBand, refreshBands } = useCurrentBandContext();
   const [preview, setPreview] = useState<InvitePreview | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [joining, setJoining] = useState(false);
   const [alreadyMember, setAlreadyMember] = useState(false);
+  const [joinedBandId, setJoinedBandId] = useState<string | null>(null);
 
   // useApiData는 오류를 상태로 노출하지 않으므로(콘솔 경고 후 data만 유지) 만료 안내(기획서 13장)를
   // 보여주려면 직접 로드해서 실패를 구분해야 한다.
@@ -48,10 +51,13 @@ export function InviteLandingScreen() {
     setJoining(true);
     try {
       const result = await api.invites.join(token);
+      setJoinedBandId(result.bandId);
       if (result.alreadyMember) {
         setAlreadyMember(true); // "이미 멤버예요" 상태로 전환 (기획서 15장)
         return;
       }
+      setCurrentBand(result.bandId); // 참가한 밴드가 현재 밴드로 (기획서 14장)
+      await refreshBands(); // bandGate가 새 밴드를 보고 온보딩으로 되돌리지 않도록 리스트를 먼저 갱신
       toast.show(`${preview?.band.name ?? "팀"}에 참가했어요.`);
       router.replace("/");
     } catch {
@@ -79,7 +85,12 @@ export function InviteLandingScreen() {
         {alreadyMember ? (
           <>
             <AppText>이미 {preview.band.name}의 멤버예요.</AppText>
-            <PressableOpacity onPress={() => router.replace("/")}>
+            <PressableOpacity
+              onPress={() => {
+                if (joinedBandId) setCurrentBand(joinedBandId);
+                router.replace("/");
+              }}
+            >
               <AppText>팀으로 이동</AppText>
             </PressableOpacity>
           </>

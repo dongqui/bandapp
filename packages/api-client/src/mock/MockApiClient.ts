@@ -94,7 +94,8 @@ export class MockApiClient implements RehearsalApiClient {
     },
     createInvite: async (bandId: string): Promise<BandInvite> => ({
       id: `i${this.nextId++}`,
-      url: `https://band.app/invite/mock-${bandId}`,
+      // parseInviteToken은 토큰을 16~64자로 요구한다 — bandId만으로는 짧아서 온보딩 붙여넣기가 항상 실패했다.
+      url: `https://band.app/invite/${this.mockInviteToken(bandId)}`,
       expiresAt: week(),
     }),
   };
@@ -119,12 +120,21 @@ export class MockApiClient implements RehearsalApiClient {
     },
   };
 
-  /** mock 토큰 형식: mock-<bandId>. 그 외에는 첫 밴드로 처리한다. */
+  /**
+   * mock 토큰 형식: mock-<bandId>-invite-0000 (parseInviteToken의 16자 최소 길이를 만족시키려는 패딩).
+   * 구버전 mock-<bandId> 형식도 하위 호환으로 계속 허용한다. 그 외에는 첫 밴드로 처리한다.
+   */
   private bandFromInviteToken(token: string): Band {
-    const bandId = token.startsWith("mock-") ? token.slice(5) : undefined;
+    const padded = /^mock-(.+)-invite-\d+$/.exec(token);
+    const bandId = padded ? padded[1] : token.startsWith("mock-") ? token.slice(5) : undefined;
     const band = this.state.bands.find((b) => b.id === bandId) ?? this.state.bands[0];
     if (!band) throw new Error("초대장을 찾을 수 없어요.");
     return band;
+  }
+
+  /** parseInviteToken의 16~64자 최소 길이 요구를 만족하도록 결정적으로 패딩한 mock 초대 토큰. */
+  private mockInviteToken(bandId: string): string {
+    return `mock-${bandId}-invite-0000`;
   }
 
   sessions = {

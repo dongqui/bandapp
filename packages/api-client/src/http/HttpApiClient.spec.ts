@@ -104,6 +104,30 @@ describe("HttpApiClient", () => {
     });
   });
 
+  it("logout 중 access token이 만료돼 refresh가 회전되면 새 refresh token으로 재-revoke한다", async () => {
+    const tokens = memoryTokens({ accessToken: "stale", refreshToken: "r1" });
+    const logoutBodies: string[] = [];
+    let logoutCalls = 0;
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/auth/refresh")) return json(201, { accessToken: "a2", refreshToken: "r2" });
+      if (u.endsWith("/auth/logout")) {
+        logoutCalls += 1;
+        const body = JSON.parse(String(init?.body)) as { refreshToken: string };
+        logoutBodies.push(body.refreshToken);
+        // 1번째 호출: access token 만료로 401 (내부 request()가 refresh 후 옛 refreshToken(r1)으로 자동 재시도)
+        // 2번째 호출: 그 자동 재시도 — 여전히 r1(회전 전 토큰)을 실어 보내고 204로 성공
+        // 3번째 호출: 우리가 추가한 재-revoke — storage에서 다시 읽은 새 refreshToken(r2)을 실어 보낸다
+        return logoutCalls === 1 ? json(401, { message: "unauthorized" }) : new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected url ${u}`);
+    });
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.auth.logout();
+    expect(logoutBodies).toEqual(["r1", "r1", "r2"]);
+    expect(tokens.state).toEqual({});
+  });
+
   it("preview는 인증 헤더 없이 호출된다", async () => {
     const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
     const fetchFn = vi.fn(async () =>

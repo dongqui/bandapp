@@ -124,6 +124,8 @@ export class HttpApiClient implements RehearsalApiClient {
   }
 
   private async errorMessage(res: Response): Promise<string> {
+    // 429는 서버(ThrottlerException)가 영문 메시지를 내려주므로 본문을 읽지 않고 바로 한국어로 대체한다.
+    if (res.status === 429) return "잠시 후 다시 시도해 주세요.";
     try {
       const body = (await res.json()) as { message?: string | string[] };
       const message = Array.isArray(body.message) ? body.message[0] : body.message;
@@ -156,6 +158,13 @@ export class HttpApiClient implements RehearsalApiClient {
       if (refreshToken) {
         try {
           await this.request<void>("POST", "/auth/logout", { refreshToken });
+          // access token이 만료된 상태였다면 위 요청이 401 → refresh(rotation) → 재시도 경로를 탔을 수 있다.
+          // 그 경우 서버에 전달된 refreshToken은 이미 회전되어 무효화된 옛 토큰이라 revoke가 아무 세션도 지우지 못한다.
+          // 저장소를 다시 읽어 회전이 일어났는지 확인하고, 일어났다면 새 refresh token으로 한 번 더 revoke한다.
+          const current = await this.opts.tokens.getRefreshToken();
+          if (current && current !== refreshToken) {
+            await this.request<void>("POST", "/auth/logout", { refreshToken: current });
+          }
         } catch {
           // 서버 revoke가 실패해도 로컬 토큰은 지운다 — 다음 로그인에서 새 세션
         }

@@ -154,3 +154,8 @@ packages/api-client/src/   client.ts 확장, http/HttpApiClient.ts, mock 확장
 - refresh 토큰 재사용 감지 시 세션 패밀리 일괄 revoke — 현재는 재사용된 refresh 요청을 401로만 거부하고, 같은 패밀리의 다른 세션은 살려둔다.
 - AuthGuard의 사용자 존재(soft-delete) 확인이 요청당 PK 조회를 1회 추가한다 — 부하가 커지면 캐시 적용 여부를 검토한다.
 - `@nestjs/throttler`의 Nest 12 peer 지원 릴리스 트래킹 — 현재는 peer 경고를 감수하고 쓰는 상태다.
+- POST /auth/logout의 AuthGuard 제거 검토 — refresh token 소지 자체가 증명이라 rotation 우회 revoke가 단순해짐 (현재는 클라이언트가 회전 감지 후 재-revoke)
+- InviteSheet를 owner에게만 노출 (현재 member에게 403으로 빈 시트)
+- pendingInviteToken 만료 처리 (저장 후 장기간 지나면 폐기)
+- Android 실빌드 시 Google 콘솔에 SHA-1 등록된 Android OAuth client 필요 (코드 변경 없음, 콘솔 설정)
+- 실서버 모드에서 sessions/takes/comments는 Mock 위임이라 실제 밴드 UUID와 시드가 어긋나 목록이 비어 보임 — sessions API 랜딩 시 해소 (스펙 결정 13)

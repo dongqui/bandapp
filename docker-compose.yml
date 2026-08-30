@@ -17,7 +17,7 @@ services:
       retries: 10
 
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:4
     restart: unless-stopped
     ports:
       - "4566:4566"
@@ -47,7 +47,7 @@ services:
       SQS_ENDPOINT: http://localstack:4566
       TSC_WATCHFILE: DynamicPriorityPolling
     ports:
-      - "3000:3000"
+      - "${API_PORT:-3000}:3000"
     volumes:
       - .:/app
       - /app/node_modules

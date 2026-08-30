@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gate } from "./authGate";
+import { bandGate, gate } from "./authGate";
 
 describe("gate", () => {
   it("복원 중에는 리다이렉트하지 않는다 (스플래시 유지)", () => {
@@ -18,5 +18,17 @@ describe("gate", () => {
     expect(gate("authenticated", "login")).toEqual({ redirect: "/" });
     expect(gate("authenticated", "(tabs)")).toBeNull();
     expect(gate("authenticated", "invite")).toBeNull();
+  });
+});
+
+describe("bandGate", () => {
+  it("로딩 중이거나 밴드가 있으면 그대로", () => {
+    expect(bandGate(null, "(tabs)")).toBeNull();
+    expect(bandGate(2, "(tabs)")).toBeNull();
+  });
+  it("밴드 0개면 온보딩으로 (초대/온보딩/로그인 화면 제외)", () => {
+    expect(bandGate(0, "(tabs)")).toEqual({ redirect: "/onboarding" });
+    expect(bandGate(0, "onboarding")).toBeNull();
+    expect(bandGate(0, "invite")).toBeNull();
   });
 });

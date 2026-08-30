@@ -10,9 +10,24 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ApiProvider } from "@/api";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
-import { gate } from "@/features/auth/authGate";
+import { bandGate, gate } from "@/features/auth/authGate";
+import { CurrentBandProvider, useCurrentBandContext } from "@/features/band/CurrentBandProvider";
 import { ThemeProvider, color } from "@/theme";
 import { ToastProvider } from "@/ui";
+
+function BandGate({ authenticated, children }: { authenticated: boolean; children: ReactNode }) {
+  const { bands, loading } = useCurrentBandContext();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!authenticated) return; // guest는 authGate가 이미 /login으로 보낸다
+    const decision = bandGate(loading ? null : bands.length, segments[0]);
+    if (decision) router.replace(decision.redirect);
+  }, [authenticated, loading, bands.length, segments, router]);
+
+  return <>{children}</>;
+}
 
 function AuthGate({ children }: { children: ReactNode }) {
   const { state } = useAuth();
@@ -25,7 +40,11 @@ function AuthGate({ children }: { children: ReactNode }) {
   }, [state.status, segments, router]);
 
   if (state.status === "restoring") return null; // 폰트 로딩과 동일한 스플래시 처리
-  return <>{children}</>;
+  return (
+    <CurrentBandProvider>
+      <BandGate authenticated={state.status === "authenticated"}>{children}</BandGate>
+    </CurrentBandProvider>
+  );
 }
 
 export default function RootLayout() {

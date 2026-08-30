@@ -16,10 +16,11 @@ export function InviteSheet({
 }) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
-  const { data: link } = useApiData((api) => api.bands.inviteLink(bandId), [bandId]);
+  const { data: invite } = useApiData((api) => api.bands.createInvite(bandId), [bandId]);
+  const link = invite?.url;
   const copy = async () => {
     if (!link) return;
-    await Clipboard.setStringAsync(`https://${link}`);
+    await Clipboard.setStringAsync(link);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };

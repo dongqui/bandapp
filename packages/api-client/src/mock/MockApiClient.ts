@@ -1,7 +1,21 @@
-import type { Band, BandMember, Session, Take, TakeComment } from "@bandapp/types";
+import type {
+  Band,
+  BandInvite,
+  BandMember,
+  InvitePreview,
+  JoinInviteResult,
+  LoginResponse,
+  Session,
+  Take,
+  TakeComment,
+  User,
+} from "@bandapp/types";
 import type { CreateCommentInput, CreateSessionInput, RehearsalApiClient } from "../client";
 import { seededUnit } from "./rand";
 import { createSeedState, generateTakes, type MockState } from "./seed";
+
+const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
+const week = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
 export class MockApiClient implements RehearsalApiClient {
   private state: MockState = createSeedState();
@@ -45,15 +59,73 @@ export class MockApiClient implements RehearsalApiClient {
     }, this.analysisDelayMs);
   }
 
+  auth = {
+    loginWithGoogle: async (): Promise<LoginResponse> => this.loginResult(),
+    loginWithApple: async (_idToken: string, displayName?: string): Promise<LoginResponse> =>
+      this.loginResult(displayName),
+    logout: async (): Promise<void> => {},
+    me: async (): Promise<User> => ({ ...MOCK_USER }),
+    deleteAccount: async (): Promise<void> => {},
+  };
+
+  private loginResult(displayName?: string): LoginResponse {
+    return {
+      accessToken: "mock-access",
+      refreshToken: "mock-refresh",
+      user: { ...MOCK_USER, displayName: displayName ?? MOCK_USER.displayName },
+      isNewUser: false,
+    };
+  }
+
   bands = {
     list: async (): Promise<Band[]> => [...this.state.bands],
     members: async (bandId: string): Promise<BandMember[]> => [...(this.state.members[bandId] ?? [])],
-    inviteLink: async (bandId: string): Promise<string> => {
-      const band = this.state.bands.find((b) => b.id === bandId);
-      if (!band) throw new Error(`band not found: ${bandId}`);
-      return `band.app/join/${band.id}`;
+    create: async (name: string): Promise<Band> => {
+      const band: Band = { id: `b${this.nextId++}`, name, memberCount: 1 };
+      this.state.bands.push(band);
+      this.state.members[band.id] = [{ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner" }];
+      this.emit();
+      return { ...band };
+    },
+    leave: async (bandId: string): Promise<void> => {
+      this.state.bands = this.state.bands.filter((b) => b.id !== bandId);
+      delete this.state.members[bandId];
+      this.emit();
+    },
+    createInvite: async (bandId: string): Promise<BandInvite> => ({
+      id: `i${this.nextId++}`,
+      url: `https://band.app/invite/mock-${bandId}`,
+      expiresAt: week(),
+    }),
+  };
+
+  invites = {
+    preview: async (token: string): Promise<InvitePreview> => {
+      const band = this.bandFromInviteToken(token);
+      return {
+        band: { name: band.name, memberCount: band.memberCount },
+        invitedBy: { displayName: "Minsoo" },
+        expiresAt: week(),
+      };
+    },
+    join: async (token: string): Promise<JoinInviteResult> => {
+      const band = this.bandFromInviteToken(token);
+      const members = (this.state.members[band.id] ??= []);
+      if (members.some((m) => m.id === MOCK_USER.id)) return { bandId: band.id, alreadyMember: true };
+      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member" });
+      band.memberCount = members.length;
+      this.emit();
+      return { bandId: band.id, alreadyMember: false };
     },
   };
+
+  /** mock 토큰 형식: mock-<bandId>. 그 외에는 첫 밴드로 처리한다. */
+  private bandFromInviteToken(token: string): Band {
+    const bandId = token.startsWith("mock-") ? token.slice(5) : undefined;
+    const band = this.state.bands.find((b) => b.id === bandId) ?? this.state.bands[0];
+    if (!band) throw new Error("초대장을 찾을 수 없어요.");
+    return band;
+  }
 
   sessions = {
     list: async (bandId: string): Promise<Session[]> =>

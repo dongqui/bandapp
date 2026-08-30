@@ -5,14 +5,19 @@ import {
   SQSClient,
   type Message,
 } from "@aws-sdk/client-sqs";
+import type { RecordingAnalysisResult } from "@bandapp/types";
 import { SQS_CLIENT } from "../queue/queue.constants.js";
+import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 
 @Injectable()
 export class AnalysisConsumer {
   private readonly logger = new Logger(AnalysisConsumer.name);
   private running = false;
 
-  constructor(@Inject(SQS_CLIENT) private readonly sqs: SQSClient) {}
+  constructor(
+    @Inject(SQS_CLIENT) private readonly sqs: SQSClient,
+    private readonly gemini: GeminiService,
+  ) {}
 
   async start(): Promise<void> {
     this.running = true;
@@ -51,7 +56,7 @@ export class AnalysisConsumer {
 
     for (const message of messages) {
       try {
-        this.handleMessage(message);
+        await this.handleMessage(message);
         await this.sqs.send(
           new DeleteMessageCommand({
             QueueUrl: queueUrl,
@@ -70,8 +75,29 @@ export class AnalysisConsumer {
     }
   }
 
-  private handleMessage(message: Message): void {
-    const job = JSON.parse(message.Body ?? "") as { recordingId: string };
+  private async handleMessage(message: Message): Promise<void> {
+    const job = JSON.parse(message.Body ?? "") as {
+      recordingId: string;
+      audioPath?: string;
+    };
     this.logger.log(`received analysis job: recordingId=${job.recordingId}`);
+
+    if (!job.audioPath) {
+      return;
+    }
+    if (!process.env.GEMINI_API_KEY) {
+      this.logger.warn(
+        `skipping gemini analysis for recordingId=${job.recordingId}: GEMINI_API_KEY is not set`,
+      );
+      return;
+    }
+
+    const takes = await this.gemini.analyzeAudio(job.audioPath);
+    const result: RecordingAnalysisResult = {
+      recordingId: job.recordingId,
+      model: process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
+      takes,
+    };
+    this.logger.log(`analysis result: ${JSON.stringify(result)}`);
   }
 }

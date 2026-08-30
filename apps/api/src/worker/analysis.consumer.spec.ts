@@ -3,6 +3,7 @@ import type {
   ReceiveMessageCommand,
   SQSClient,
 } from "@aws-sdk/client-sqs";
+import type { GeminiService } from "../analysis/gemini.service.js";
 import { AnalysisConsumer } from "./analysis.consumer.js";
 
 describe("AnalysisConsumer", () => {
@@ -14,10 +15,15 @@ describe("AnalysisConsumer", () => {
 
   afterEach(() => {
     delete process.env.SQS_ANALYSIS_QUEUE_URL;
+    delete process.env.GEMINI_API_KEY;
   });
 
-  function makeConsumer(send: ReturnType<typeof vi.fn>) {
-    return new AnalysisConsumer({ send } as unknown as SQSClient);
+  function makeConsumer(
+    send: ReturnType<typeof vi.fn>,
+    analyzeAudio: ReturnType<typeof vi.fn> = vi.fn(),
+  ) {
+    const gemini = { analyzeAudio } as unknown as GeminiService;
+    return new AnalysisConsumer({ send } as unknown as SQSClient, gemini);
   }
 
   it("logs and deletes each received message", async () => {
@@ -66,5 +72,87 @@ describe("AnalysisConsumer", () => {
     await consumer.start();
 
     expect(send).toHaveBeenCalled();
+  });
+
+  it("does not call gemini for messages without audioPath", async () => {
+    const analyzeAudio = vi.fn();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Messages: [
+          { Body: JSON.stringify({ recordingId: "rec_1" }), ReceiptHandle: "rh-1" },
+        ],
+      })
+      .mockResolvedValueOnce({});
+    const consumer = makeConsumer(send, analyzeAudio);
+
+    await consumer.pollOnce();
+
+    expect(analyzeAudio).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2); // receive + delete
+  });
+
+  it("analyzes and deletes when audioPath is present and key is set", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    const analyzeAudio = vi
+      .fn()
+      .mockResolvedValue([{ startMs: 0, endMs: 4000, type: "PERFORMANCE", confidence: 0.9 }]);
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Messages: [
+          {
+            Body: JSON.stringify({ recordingId: "rec_1", audioPath: "poc/data/a.wav" }),
+            ReceiptHandle: "rh-1",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({});
+    const consumer = makeConsumer(send, analyzeAudio);
+
+    await consumer.pollOnce();
+
+    expect(analyzeAudio).toHaveBeenCalledWith("poc/data/a.wav");
+    expect(send).toHaveBeenCalledTimes(2); // receive + delete
+  });
+
+  it("leaves the message when analysis fails", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    const analyzeAudio = vi.fn().mockRejectedValue(new Error("gemini down"));
+    const send = vi.fn().mockResolvedValueOnce({
+      Messages: [
+        {
+          Body: JSON.stringify({ recordingId: "rec_1", audioPath: "poc/data/a.wav" }),
+          ReceiptHandle: "rh-1",
+        },
+      ],
+    });
+    const consumer = makeConsumer(send, analyzeAudio);
+
+    await consumer.pollOnce();
+
+    expect(send).toHaveBeenCalledTimes(1); // receive만, delete 없음
+  });
+
+  it("skips analysis but deletes the message when GEMINI_API_KEY is missing", async () => {
+    delete process.env.GEMINI_API_KEY;
+    const analyzeAudio = vi.fn();
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Messages: [
+          {
+            Body: JSON.stringify({ recordingId: "rec_1", audioPath: "poc/data/a.wav" }),
+            ReceiptHandle: "rh-1",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({});
+    const consumer = makeConsumer(send, analyzeAudio);
+
+    await consumer.pollOnce();
+
+    expect(analyzeAudio).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2); // receive + delete
   });
 });

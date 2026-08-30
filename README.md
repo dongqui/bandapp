@@ -39,7 +39,7 @@ docker compose up --build -d
 ```
 
 - API: http://localhost:3000 (health: `GET /health`)
-- 분석 요청: `curl -X POST http://localhost:3000/recordings/<id>/analysis` → worker 컨테이너 로그로 수신 확인
+- 분석 요청: `curl -X POST http://localhost:3000/recordings/<id>/analysis` (Gemini 분석은 body에 `{"audioPath":"poc/data/....wav"}` 추가, `.env`에 `GEMINI_API_KEY` 필요) → worker 컨테이너 로그로 수신/분석 결과 확인
 - 큐: LocalStack SQS (`recording-analysis`, `recording-analysis-python`, `recording-analysis-dlq`)
 - 종료: `docker compose down`
 - 의존성 추가/변경 후에는 `docker compose up --build -V`로 anonymous node_modules 볼륨을 재생성해야 반영된다.

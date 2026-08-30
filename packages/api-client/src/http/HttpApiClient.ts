@@ -106,7 +106,10 @@ export class HttpApiClient implements RehearsalApiClient {
 
   private async doRefresh(): Promise<boolean> {
     const refreshToken = await this.opts.tokens.getRefreshToken();
-    if (!refreshToken) return false;
+    if (!refreshToken) {
+      await this.opts.tokens.clear();
+      return false;
+    }
     const res = await this.fetchFn(`${this.opts.baseUrl}/auth/refresh`, {
       method: "POST",
       headers: { "content-type": "application/json" },

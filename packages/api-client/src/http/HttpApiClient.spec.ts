@@ -84,6 +84,16 @@ describe("HttpApiClient", () => {
     expect(onSessionExpired).toHaveBeenCalledOnce();
   });
 
+  it("refresh 토큰이 없으면 401 응답에서도 저장된 access token을 지운다", async () => {
+    const tokens = memoryTokens({ accessToken: "stale" }); // refreshToken 없음 (부분 손상된 저장소)
+    const onSessionExpired = vi.fn();
+    const fetchFn = vi.fn(async () => json(401, { message: "unauthorized" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn, onSessionExpired });
+    await expect(client.auth.me()).rejects.toBeInstanceOf(ApiError);
+    expect(tokens.state).toEqual({});
+    expect(onSessionExpired).toHaveBeenCalledOnce();
+  });
+
   it("서버 오류 메시지를 ApiError로 전달한다", async () => {
     const tokens = memoryTokens();
     const fetchFn = vi.fn(async () => json(409, { message: "관리자로 있는 팀이 있어요." }));

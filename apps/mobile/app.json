@@ -8,9 +8,12 @@
     "scheme": "bandapp",
     "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bandapp.app",
+      "usesAppleSignIn": true
     },
     "android": {
+      "package": "com.bandapp.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -24,7 +27,9 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      "expo-secure-store",
+      "expo-apple-authentication"
     ]
   }
 }

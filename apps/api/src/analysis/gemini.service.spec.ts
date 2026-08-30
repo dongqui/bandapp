@@ -1,4 +1,25 @@
-import { GeminiService, audioMimeType, parseTakes, type GenAiClient } from "./gemini.service.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  GeminiService,
+  audioMimeType,
+  parseTakes,
+  resolveAudioPath,
+  type GenAiClient,
+} from "./gemini.service.js";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../");
+
+describe("resolveAudioPath", () => {
+  it("resolves a repo-root-relative path to an absolute path, independent of process.cwd()", () => {
+    expect(resolveAudioPath("poc/data/test.wav")).toBe(join(repoRoot, "poc/data/test.wav"));
+  });
+
+  it("passes absolute paths through unchanged", () => {
+    const absolute = join(repoRoot, "poc/data/test.wav");
+    expect(resolveAudioPath(absolute)).toBe(absolute);
+  });
+});
 
 describe("audioMimeType", () => {
   it("maps known audio extensions", () => {
@@ -74,7 +95,7 @@ describe("GeminiService.analyzeAudio", () => {
     const takes = await service.analyzeAudio("poc/data/test.wav");
 
     expect(client.files.upload).toHaveBeenCalledWith({
-      file: "poc/data/test.wav",
+      file: resolveAudioPath("poc/data/test.wav"),
       config: { mimeType: "audio/wav" },
     });
     expect(takes).toEqual([{ startMs: 0, endMs: 4000, type: "PERFORMANCE", confidence: 0.9 }]);

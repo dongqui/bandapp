@@ -1,4 +1,6 @@
-import { extname } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, extname, isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Logger, type Provider } from "@nestjs/common";
 import { GoogleGenAI, Type, createPartFromUri, createUserContent } from "@google/genai";
 import type { TakeCandidate } from "@bandapp/types";
@@ -18,6 +20,33 @@ export function audioMimeType(filePath: string): string {
     throw new Error(`unsupported audio extension: ${filePath}`);
   }
   return mime;
+}
+
+function findWorkspaceRoot(startDir: string): string {
+  let dir = startDir;
+  while (true) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(`could not locate workspace root (pnpm-workspace.yaml) from ${startDir}`);
+    }
+    dir = parent;
+  }
+}
+
+/**
+ * audioPath는 저장소 루트 기준 상대 경로(예: "poc/data/a.wav")로 전달된다.
+ * `pnpm --filter @bandapp/api ...`로 실행하면 process.cwd()가 apps/api로 바뀌므로
+ * cwd에 의존하지 않고 이 모듈 파일 위치를 기준으로 워크스페이스 루트를 찾아 절대 경로로 바꾼다.
+ */
+export function resolveAudioPath(filePath: string): string {
+  if (isAbsolute(filePath)) {
+    return filePath;
+  }
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  return join(findWorkspaceRoot(moduleDir), filePath);
 }
 
 const TAKE_TYPES = new Set(["PERFORMANCE", "PARTIAL_PRACTICE"]);
@@ -144,7 +173,7 @@ export class GeminiService {
     const model = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
 
     const uploaded = await client.files.upload({
-      file: filePath,
+      file: resolveAudioPath(filePath),
       config: { mimeType: audioMimeType(filePath) },
     });
     const active = await this.waitForActive(client, uploaded, deadline);

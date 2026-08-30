@@ -14,5 +14,8 @@ export default defineConfig({
       AUTH_THROTTLE_LIMIT: '1000',
     },
     globalSetup: ['./test/global-setup.ts'],
+    // e2e spec files share one real Postgres database and truncate it in beforeEach,
+    // so files must not run in parallel or they'll race each other's data.
+    fileParallelism: false,
   },
 });

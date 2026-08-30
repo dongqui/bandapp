@@ -35,25 +35,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // 앱 시작 시 세션 복원 (기획서 23장)
     let cancelled = false;
+    // restoring 상태일 때만 반영 — 복원 도중 완료된 로그인/로그아웃을 덮어쓰지 않는다
+    const settle = (next: AuthState) =>
+      setState((prev) => (prev.status === "restoring" ? next : prev));
     (async () => {
-      if (usingMock) {
-        // 서버 없이도 앱이 돌게 Mock에서는 로그인된 상태로 시작
-        const user = await api.auth.me();
-        if (!cancelled) setState({ status: "authenticated", user });
-        return;
-      }
-      const refreshToken = await tokenStorage.getRefreshToken();
-      if (!refreshToken) {
-        if (!cancelled) setState({ status: "guest" });
-        return;
-      }
       try {
-        // access는 메모리에 없으므로 me() 호출이 401 → 자동 refresh → 재시도로 복원된다
-        const user = await api.auth.me();
-        if (!cancelled) setState({ status: "authenticated", user });
-      } catch {
-        await tokenStorage.clear();
-        if (!cancelled) setState({ status: "guest" });
+        if (usingMock) {
+          // 서버 없이도 앱이 돌게 Mock에서는 로그인된 상태로 시작
+          const user = await api.auth.me();
+          if (!cancelled) settle({ status: "authenticated", user });
+          return;
+        }
+        const refreshToken = await tokenStorage.getRefreshToken();
+        if (!refreshToken) {
+          if (!cancelled) settle({ status: "guest" });
+          return;
+        }
+        try {
+          // access는 메모리에 없으므로 me() 호출이 401 → 자동 refresh → 재시도로 복원된다
+          const user = await api.auth.me();
+          if (!cancelled) settle({ status: "authenticated", user });
+        } catch {
+          await tokenStorage.clear().catch(() => {});
+          if (!cancelled) settle({ status: "guest" });
+        }
+      } catch (err) {
+        // SecureStore 손상 등 예기치 못한 실패 — 스플래시에 갇히지 않고 guest로 폴백
+        console.warn("session restore failed", err);
+        await tokenStorage.clear().catch(() => {});
+        if (!cancelled) settle({ status: "guest" });
       }
     })();
     return () => {

@@ -161,7 +161,7 @@ Expected: FAIL — 모듈 없음.
 
 ```ts
 import { extname } from "node:path";
-import { Injectable, Logger } from "@nestjs/common";
+import { Logger, type Provider } from "@nestjs/common";
 import { GoogleGenAI, Type, createPartFromUri, createUserContent } from "@google/genai";
 import type { TakeCandidate } from "@bandapp/types";
 
@@ -275,7 +275,8 @@ Return performance regions with start and end timestamps in milliseconds.
 Use type PERFORMANCE for full takes and PARTIAL_PRACTICE for partial run-throughs.
 `.trim();
 
-@Injectable()
+// 주의: 생성자 파라미터(함수/숫자)는 Nest가 주입할 수 없으므로 @Injectable을 붙이지 않고
+// 모듈에서는 아래 geminiServiceProvider(useFactory)로 등록한다.
 export class GeminiService {
   private readonly logger = new Logger(GeminiService.name);
 
@@ -347,6 +348,12 @@ export class GeminiService {
     return file;
   }
 }
+
+/** 모듈 등록용 provider — Nest가 생성자 파라미터를 주입하려 들지 않게 useFactory로 감싼다. */
+export const geminiServiceProvider: Provider = {
+  provide: GeminiService,
+  useFactory: () => new GeminiService(),
+};
 ```
 
 - [ ] **Step 4: 순수 함수 테스트 통과 확인**
@@ -583,10 +590,10 @@ export class AnalysisController {
 }
 ```
 
-`analysis.module.ts`의 providers에 `GeminiService` 추가 (import 포함):
+`analysis.module.ts`의 providers에 provider 추가 (`import { geminiServiceProvider } from "./gemini.service.js";`):
 
 ```ts
-providers: [AnalysisProducer, GeminiService],
+providers: [AnalysisProducer, geminiServiceProvider],
 ```
 
 - [ ] **Step 4: analysis 테스트 통과 확인**
@@ -745,7 +752,7 @@ import { GeminiService } from "../analysis/gemini.service.js";
   }
 ```
 
-호출부는 `this.handleMessage(message)` → `await this.handleMessage(message)`로 변경. `worker.module.ts`의 providers를 `[AnalysisConsumer, GeminiService]`로 교체 (import 추가).
+호출부는 `this.handleMessage(message)` → `await this.handleMessage(message)`로 변경. `worker.module.ts`의 providers를 `[AnalysisConsumer, geminiServiceProvider]`로 교체 (`import { geminiServiceProvider } from "../analysis/gemini.service.js";`).
 
 - [ ] **Step 8: 전체 테스트 + 커밋**
 

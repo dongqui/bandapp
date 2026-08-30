@@ -2,6 +2,7 @@ import { Body, Controller, HttpCode, Post, UseGuards } from "@nestjs/common";
 import { ThrottlerGuard } from "@nestjs/throttler";
 import type { AuthTokens, LoginResponse } from "@bandapp/types";
 import { optionalString, requireString } from "../common/validation.js";
+import { AuthGuard } from "./auth.guard.js";
 import { AuthService } from "./auth.service.js";
 
 @Controller("auth")
@@ -29,6 +30,7 @@ export class AuthController {
 
   @Post("logout")
   @HttpCode(204)
+  @UseGuards(AuthGuard)
   async logout(@Body() body: unknown): Promise<void> {
     await this.auth.logout(requireString(body, "refreshToken"));
   }

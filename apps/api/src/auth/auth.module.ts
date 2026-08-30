@@ -6,7 +6,9 @@ import { appleAuthServiceProvider } from "./apple-auth.service.js";
 import { authSessionsServiceProvider } from "./auth-sessions.service.js";
 import { AuthController } from "./auth.controller.js";
 import { authServiceProvider } from "./auth.service.js";
+import { AuthGuard, authGuardProvider } from "./auth.guard.js";
 import { googleAuthServiceProvider } from "./google-auth.service.js";
+import { MeController } from "./me.controller.js";
 import { tokenServiceProvider, TokenService } from "./token.service.js";
 
 @Module({
@@ -18,14 +20,15 @@ import { tokenServiceProvider, TokenService } from "./token.service.js";
       throttlers: [{ ttl: 60_000, limit: Number(process.env.AUTH_THROTTLE_LIMIT ?? 20) }],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, MeController],
   providers: [
     tokenServiceProvider,
     googleAuthServiceProvider,
     appleAuthServiceProvider,
     authSessionsServiceProvider,
     authServiceProvider,
+    authGuardProvider,
   ],
-  exports: [TokenService],
+  exports: [TokenService, AuthGuard],
 })
 export class AuthModule {}

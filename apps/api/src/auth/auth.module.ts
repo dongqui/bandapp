@@ -29,6 +29,8 @@ import { tokenServiceProvider, TokenService } from "./token.service.js";
     authServiceProvider,
     authGuardProvider,
   ],
-  exports: [TokenService, AuthGuard],
+  // BandsModule/InvitesModule 등 AuthModule만 import하는 소비 모듈에서도
+  // authGuardProvider(TokenService, UsersService 의존)가 해석되도록 UsersModule을 재노출한다.
+  exports: [TokenService, UsersModule, AuthGuard],
 })
 export class AuthModule {}

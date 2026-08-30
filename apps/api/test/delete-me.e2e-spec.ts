@@ -26,6 +26,8 @@ describe("DELETE /me", () => {
     await request(app.getHttpServer()).post("/auth/refresh").send({ refreshToken: me.refreshToken }).expect(401);
     // 잔여 access token으로도 /me는 401
     await request(app.getHttpServer()).get("/me").set(auth(me.accessToken)).expect(401);
+    // 잔여 access token으로 다른 라우트도 401 (AuthGuard가 탈퇴 여부를 확인해야 함)
+    await request(app.getHttpServer()).post("/bands").set(auth(me.accessToken)).send({ name: "GHOST" }).expect(401);
     const identities = await db.query.userIdentities.findMany({
       where: eq(userIdentities.userId, me.userId),
     });

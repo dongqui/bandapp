@@ -28,6 +28,8 @@ export function SettingsScreen() {
     setBusy(true);
     try {
       await signOut(); // 서버 refresh 세션 revoke + SecureStore 삭제 → 가드가 /login으로
+    } catch {
+      toast.show("로그아웃에 실패했어요. 다시 시도해 주세요.");
     } finally {
       setBusy(false);
     }

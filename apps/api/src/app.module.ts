@@ -4,6 +4,7 @@ import { AuthModule } from "./auth/auth.module.js";
 import { UsersModule } from "./users/users.module.js";
 import { BandsModule } from "./bands/bands.module.js";
 import { MembershipsModule } from "./memberships/memberships.module.js";
+import { InvitesModule } from "./invites/invites.module.js";
 import { SessionsModule } from "./sessions/sessions.module.js";
 import { RecordingsModule } from "./recordings/recordings.module.js";
 import { TakesModule } from "./takes/takes.module.js";
@@ -20,6 +21,7 @@ import { DbModule } from "./db/db.module.js";
     UsersModule,
     BandsModule,
     MembershipsModule,
+    InvitesModule,
     SessionsModule,
     RecordingsModule,
     TakesModule,

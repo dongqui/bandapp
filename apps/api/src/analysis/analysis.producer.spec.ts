@@ -32,4 +32,17 @@ describe("AnalysisProducer", () => {
       "SQS_ANALYSIS_QUEUE_URL",
     );
   });
+
+  it("includes audioPath in the message body when provided", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const producer = new AnalysisProducer({ send } as unknown as SQSClient);
+
+    await producer.enqueueAnalysis("rec_123", "poc/data/test.wav");
+
+    const command = send.mock.calls[0][0] as SendMessageCommand;
+    expect(JSON.parse(command.input.MessageBody!)).toEqual({
+      recordingId: "rec_123",
+      audioPath: "poc/data/test.wav",
+    });
+  });
 });

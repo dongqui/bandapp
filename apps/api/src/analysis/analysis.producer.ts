@@ -6,7 +6,7 @@ import { SQS_CLIENT } from "../queue/queue.constants.js";
 export class AnalysisProducer {
   constructor(@Inject(SQS_CLIENT) private readonly sqs: SQSClient) {}
 
-  async enqueueAnalysis(recordingId: string): Promise<void> {
+  async enqueueAnalysis(recordingId: string, audioPath?: string): Promise<void> {
     const queueUrl = process.env.SQS_ANALYSIS_QUEUE_URL;
     if (!queueUrl) {
       throw new Error("SQS_ANALYSIS_QUEUE_URL is not set");
@@ -14,7 +14,9 @@ export class AnalysisProducer {
     await this.sqs.send(
       new SendMessageCommand({
         QueueUrl: queueUrl,
-        MessageBody: JSON.stringify({ recordingId }),
+        MessageBody: JSON.stringify(
+          audioPath ? { recordingId, audioPath } : { recordingId },
+        ),
       }),
     );
   }

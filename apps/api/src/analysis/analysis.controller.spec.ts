@@ -8,9 +8,32 @@ describe("AnalysisController", () => {
       enqueueAnalysis,
     } as unknown as AnalysisProducer);
 
-    const result = await controller.requestAnalysis("rec_123");
+    const result = await controller.requestAnalysis("rec_123", undefined);
 
-    expect(enqueueAnalysis).toHaveBeenCalledWith("rec_123");
+    expect(enqueueAnalysis).toHaveBeenCalledWith("rec_123", undefined);
+    expect(result).toEqual({ recordingId: "rec_123", status: "QUEUED" });
+  });
+
+  it("passes audioPath from the body to the producer", async () => {
+    const enqueueAnalysis = vi.fn().mockResolvedValue(undefined);
+    const controller = new AnalysisController({
+      enqueueAnalysis,
+    } as unknown as AnalysisProducer);
+
+    await controller.requestAnalysis("rec_123", { audioPath: "poc/data/test.wav" });
+
+    expect(enqueueAnalysis).toHaveBeenCalledWith("rec_123", "poc/data/test.wav");
+  });
+
+  it("works without a body (audioPath undefined)", async () => {
+    const enqueueAnalysis = vi.fn().mockResolvedValue(undefined);
+    const controller = new AnalysisController({
+      enqueueAnalysis,
+    } as unknown as AnalysisProducer);
+
+    const result = await controller.requestAnalysis("rec_123", undefined);
+
+    expect(enqueueAnalysis).toHaveBeenCalledWith("rec_123", undefined);
     expect(result).toEqual({ recordingId: "rec_123", status: "QUEUED" });
   });
 });

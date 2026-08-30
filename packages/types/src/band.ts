@@ -4,7 +4,6 @@ export interface Band {
   id: string;
   name: string;
   memberCount: number;
-  inviteCode: string;
 }
 
 export interface BandMember {

@@ -108,7 +108,7 @@ export function createSeedState(): MockState {
   }
 
   return {
-    bands: [{ id: "b1", name: "FRIDAY NIGHT", memberCount: 4, inviteCode: "X7K2F9" }],
+    bands: [{ id: "b1", name: "FRIDAY NIGHT", memberCount: 4 }],
     members: {
       b1: [
         { id: "m1", name: "Dongjin Kim", role: "owner" },

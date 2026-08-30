@@ -51,7 +51,7 @@ export class MockApiClient implements RehearsalApiClient {
     inviteLink: async (bandId: string): Promise<string> => {
       const band = this.state.bands.find((b) => b.id === bandId);
       if (!band) throw new Error(`band not found: ${bandId}`);
-      return `band.app/join/${band.inviteCode}`;
+      return `band.app/join/${band.id}`;
     },
   };
 

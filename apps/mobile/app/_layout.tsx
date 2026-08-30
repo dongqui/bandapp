@@ -8,6 +8,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ApiProvider } from "@/api";
+import { AuthProvider } from "@/features/auth/AuthProvider";
 import { ThemeProvider, color } from "@/theme";
 import { ToastProvider } from "@/ui";
 
@@ -22,15 +23,17 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider>
         <ApiProvider>
-          <ToastProvider>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: color.bg },
-              }}
-            />
-          </ToastProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <StatusBar style="light" />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: color.bg },
+                }}
+              />
+            </ToastProvider>
+          </AuthProvider>
         </ApiProvider>
       </ThemeProvider>
     </SafeAreaProvider>

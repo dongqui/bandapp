@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, extname, isAbsolute, join } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Logger, type Provider } from "@nestjs/common";
 import { GoogleGenAI, Type, createPartFromUri, createUserContent } from "@google/genai";
@@ -13,6 +13,8 @@ const MIME_BY_EXT: Record<string, string> = {
   ".flac": "audio/flac",
   ".ogg": "audio/ogg",
 };
+
+export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
 
 export function audioMimeType(filePath: string): string {
   const mime = MIME_BY_EXT[extname(filePath).toLowerCase()];
@@ -43,10 +45,15 @@ function findWorkspaceRoot(startDir: string): string {
  */
 export function resolveAudioPath(filePath: string): string {
   if (isAbsolute(filePath)) {
-    return filePath;
+    throw new Error("audioPath must be relative to the workspace root");
   }
   const moduleDir = dirname(fileURLToPath(import.meta.url));
-  return join(findWorkspaceRoot(moduleDir), filePath);
+  const root = findWorkspaceRoot(moduleDir);
+  const resolved = resolve(root, filePath);
+  if (resolved !== root && !resolved.startsWith(root + sep)) {
+    throw new Error("audioPath escapes the workspace root");
+  }
+  return resolved;
 }
 
 const TAKE_TYPES = new Set(["PERFORMANCE", "PARTIAL_PRACTICE"]);
@@ -57,6 +64,9 @@ export function parseTakes(text: string): TakeCandidate[] {
     parsed = JSON.parse(text);
   } catch {
     throw new Error(`gemini response is not valid JSON: ${text.slice(0, 200)}`);
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    throw new Error("gemini response has no takes array");
   }
   const takes = (parsed as { takes?: unknown }).takes;
   if (!Array.isArray(takes)) {
@@ -170,7 +180,7 @@ export class GeminiService {
 
   private async doAnalyze(filePath: string, deadline: number): Promise<TakeCandidate[]> {
     const client = this.createClient();
-    const model = process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
+    const model = process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
 
     const uploaded = await client.files.upload({
       file: resolveAudioPath(filePath),

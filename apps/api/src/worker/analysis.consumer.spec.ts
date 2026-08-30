@@ -15,6 +15,7 @@ describe("AnalysisConsumer", () => {
 
   afterEach(() => {
     delete process.env.SQS_ANALYSIS_QUEUE_URL;
+    delete process.env.GEMINI_API_KEY;
   });
 
   function makeConsumer(
@@ -113,7 +114,6 @@ describe("AnalysisConsumer", () => {
 
     expect(analyzeAudio).toHaveBeenCalledWith("poc/data/a.wav");
     expect(send).toHaveBeenCalledTimes(2); // receive + delete
-    delete process.env.GEMINI_API_KEY;
   });
 
   it("leaves the message when analysis fails", async () => {
@@ -132,7 +132,6 @@ describe("AnalysisConsumer", () => {
     await consumer.pollOnce();
 
     expect(send).toHaveBeenCalledTimes(1); // receive만, delete 없음
-    delete process.env.GEMINI_API_KEY;
   });
 
   it("skips analysis but deletes the message when GEMINI_API_KEY is missing", async () => {

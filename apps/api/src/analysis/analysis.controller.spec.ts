@@ -1,3 +1,4 @@
+import { BadRequestException } from "@nestjs/common";
 import { AnalysisController } from "./analysis.controller.js";
 import type { AnalysisProducer } from "./analysis.producer.js";
 
@@ -35,5 +36,17 @@ describe("AnalysisController", () => {
 
     expect(enqueueAnalysis).toHaveBeenCalledWith("rec_123", undefined);
     expect(result).toEqual({ recordingId: "rec_123", status: "QUEUED" });
+  });
+
+  it("rejects a non-string audioPath with 400", async () => {
+    const enqueueAnalysis = vi.fn().mockResolvedValue(undefined);
+    const controller = new AnalysisController({
+      enqueueAnalysis,
+    } as unknown as AnalysisProducer);
+
+    await expect(
+      controller.requestAnalysis("rec_123", { audioPath: 123 as unknown as string }),
+    ).rejects.toThrow(BadRequestException);
+    expect(enqueueAnalysis).not.toHaveBeenCalled();
   });
 });

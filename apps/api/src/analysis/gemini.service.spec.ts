@@ -15,9 +15,13 @@ describe("resolveAudioPath", () => {
     expect(resolveAudioPath("poc/data/test.wav")).toBe(join(repoRoot, "poc/data/test.wav"));
   });
 
-  it("passes absolute paths through unchanged", () => {
+  it("rejects absolute input paths", () => {
     const absolute = join(repoRoot, "poc/data/test.wav");
-    expect(resolveAudioPath(absolute)).toBe(absolute);
+    expect(() => resolveAudioPath(absolute)).toThrow("audioPath must be relative to the workspace root");
+  });
+
+  it("rejects paths that traverse outside the workspace root", () => {
+    expect(() => resolveAudioPath("../../etc/x.wav")).toThrow("audioPath escapes the workspace root");
   });
 });
 
@@ -49,6 +53,7 @@ describe("parseTakes", () => {
 
   it.each([
     ["not json", "not-json"],
+    ["top-level null", "null"],
     ["missing takes", JSON.stringify({})],
     ["startMs >= endMs", JSON.stringify({ takes: [{ startMs: 5, endMs: 5, type: "PERFORMANCE", confidence: 0.5 }] })],
     ["bad type enum", JSON.stringify({ takes: [{ startMs: 0, endMs: 5, type: "JAM", confidence: 0.5 }] })],
@@ -86,6 +91,12 @@ describe("GeminiService.analyzeAudio", () => {
   beforeEach(() => {
     delete process.env.GEMINI_MODEL;
     delete process.env.GEMINI_TIMEOUT_MS;
+  });
+
+  afterEach(() => {
+    delete process.env.GEMINI_MODEL;
+    delete process.env.GEMINI_TIMEOUT_MS;
+    delete process.env.GEMINI_API_KEY;
   });
 
   it("uploads the file and returns parsed takes", async () => {
@@ -144,6 +155,5 @@ describe("GeminiService.analyzeAudio", () => {
     const service = new GeminiService(() => client, 1);
 
     await expect(service.analyzeAudio("a.wav")).rejects.toThrow("timed out");
-    delete process.env.GEMINI_TIMEOUT_MS;
   });
 });

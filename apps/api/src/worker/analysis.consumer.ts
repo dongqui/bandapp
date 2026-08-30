@@ -7,7 +7,7 @@ import {
 } from "@aws-sdk/client-sqs";
 import type { RecordingAnalysisResult } from "@bandapp/types";
 import { SQS_CLIENT } from "../queue/queue.constants.js";
-import { GeminiService } from "../analysis/gemini.service.js";
+import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 
 @Injectable()
 export class AnalysisConsumer {
@@ -95,7 +95,7 @@ export class AnalysisConsumer {
     const takes = await this.gemini.analyzeAudio(job.audioPath);
     const result: RecordingAnalysisResult = {
       recordingId: job.recordingId,
-      model: process.env.GEMINI_MODEL ?? "gemini-3.6-flash",
+      model: process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
       takes,
     };
     this.logger.log(`analysis result: ${JSON.stringify(result)}`);

@@ -1,3 +1,4 @@
+import { useRouter } from "expo-router";
 import { useState } from "react";
 import { FlatList, View } from "react-native";
 import { useApiData } from "@/api";
@@ -15,12 +16,18 @@ export function BandScreen() {
   );
   const [inviteOpen, setInviteOpen] = useState(false);
   const { colors } = useTheme();
+  const router = useRouter();
   return (
     <Screen>
       <View style={{ paddingHorizontal: space.screenX, paddingBottom: 10, gap: 8 }}>
-        <MonoLabel color={colors.textMuted} style={{ letterSpacing: 1.8 }}>
-          YOUR BAND
-        </MonoLabel>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <MonoLabel color={colors.textMuted} style={{ letterSpacing: 1.8 }}>
+            YOUR BAND
+          </MonoLabel>
+          <PressableOpacity onPress={() => router.push("/settings")} style={{ padding: 4 }}>
+            <AppText style={{ fontSize: 16, color: colors.textMuted }}>⚙</AppText>
+          </PressableOpacity>
+        </View>
         <AppText variant="titleXL">{band?.name ?? ""}</AppText>
         <MonoLabel>{`MEMBERS · ${band?.memberCount ?? 0}`}</MonoLabel>
       </View>

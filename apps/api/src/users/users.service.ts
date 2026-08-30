@@ -1,8 +1,9 @@
 import type { Provider } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { ConflictException } from "@nestjs/common";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
-import { userIdentities, users } from "../db/schema.js";
+import { authSessions, bandMembers, bands, userIdentities, users } from "../db/schema.js";
 import type { VerifiedProviderToken } from "../auth/provider-token.js";
 
 export interface PublicUser {
@@ -61,6 +62,52 @@ export class UsersService {
 
   private toPublic(row: typeof users.$inferSelect): PublicUser {
     return { id: row.id, displayName: row.displayName, profileImageUrl: row.profileImageUrl };
+  }
+
+  /**
+   * 회원 탈퇴 (기획서 18장, 스펙 결정 9):
+   * - 다른 멤버가 있는 밴드의 유일한 owner면 409 (전체 롤백)
+   * - 혼자인 밴드는 삭제, member인 밴드는 탈퇴
+   * - 모든 세션 revoke, identity 삭제, user 비식별화(soft delete)
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const memberships = await tx.query.bandMembers.findMany({
+        where: eq(bandMembers.userId, userId),
+      });
+      for (const membership of memberships) {
+        const [count] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(bandMembers)
+          .where(eq(bandMembers.bandId, membership.bandId));
+        if ((count?.n ?? 0) === 1) {
+          await tx.delete(bands).where(eq(bands.id, membership.bandId));
+          continue;
+        }
+        if (membership.role === "owner") {
+          const owners = await tx.query.bandMembers.findMany({
+            where: and(eq(bandMembers.bandId, membership.bandId), eq(bandMembers.role, "owner")),
+          });
+          if (owners.every((o) => o.userId === userId)) {
+            throw new ConflictException(
+              "관리자로 있는 팀이 있어요. 먼저 소유권을 넘기거나 팀을 삭제해 주세요.",
+            );
+          }
+        }
+        await tx
+          .delete(bandMembers)
+          .where(and(eq(bandMembers.bandId, membership.bandId), eq(bandMembers.userId, userId)));
+      }
+      await tx
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
+      await tx.delete(userIdentities).where(eq(userIdentities.userId, userId));
+      await tx
+        .update(users)
+        .set({ displayName: null, profileImageUrl: null, deletedAt: new Date(), updatedAt: new Date() })
+        .where(eq(users.id, userId));
+    });
   }
 }
 

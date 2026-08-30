@@ -40,7 +40,8 @@ services:
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
     # @bandapp/types는 dist를 배포하는 패키지라 dev 기동 전에 빌드가 필요하다.
-    command: sh -c "pnpm --filter @bandapp/types build && exec pnpm --filter @bandapp/api start:api:dev"
+    # db:migrate(drizzle migrate)는 멱등이라 매 기동마다 실행해도 안전하다.
+    command: sh -c "pnpm --filter @bandapp/types build && pnpm --filter @bandapp/api db:migrate && exec pnpm --filter @bandapp/api start:api:dev"
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql://band:band@postgres:5432/band

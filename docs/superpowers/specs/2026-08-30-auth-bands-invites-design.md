@@ -145,3 +145,12 @@ packages/api-client/src/   client.ts 확장, http/HttpApiClient.ts, mock 확장
 ## 검증 기준
 
 기획서 26장의 완료 조건 10개를 그대로 사용한다. 이 중 1–2(실제 Provider 가입)와 3(실기기 세션 복원), 7–8(딥링크 왕복)은 사용자 env 제공 + dev build 후 수동 검증 항목이고, 나머지는 e2e 테스트로 자동 검증한다.
+
+## 후속 작업
+
+이번 범위에서는 다루지 않지만, 리뷰 과정에서 확인된 항목:
+
+- `auth_sessions` 만료 행 주기적 삭제(purge) — `expires_at < now`인 행은 죽은 무게(dead weight)로 테이블에 계속 쌓인다. 워커 또는 크론으로 정리하는 작업이 필요하다.
+- refresh 토큰 재사용 감지 시 세션 패밀리 일괄 revoke — 현재는 재사용된 refresh 요청을 401로만 거부하고, 같은 패밀리의 다른 세션은 살려둔다.
+- AuthGuard의 사용자 존재(soft-delete) 확인이 요청당 PK 조회를 1회 추가한다 — 부하가 커지면 캐시 적용 여부를 검토한다.
+- `@nestjs/throttler`의 Nest 12 peer 지원 릴리스 트래킹 — 현재는 peer 경고를 감수하고 쓰는 상태다.

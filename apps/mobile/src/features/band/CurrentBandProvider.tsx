@@ -65,10 +65,18 @@ export function CurrentBandProvider({ children }: { children: ReactNode }) {
   }, [api, authed, loadBands]);
 
   useEffect(() => {
-    secureStorage.get("lastBandId").then((saved) => {
-      setCurrentBandId(saved);
-      setRestored(true);
-    });
+    secureStorage
+      .get("lastBandId")
+      .then((saved) => {
+        setCurrentBandId(saved);
+        setRestored(true);
+      })
+      .catch((err) => {
+        // SecureStore 읽기 실패 — restored를 못 세우면 loading이 영원히 true로 고정되어
+        // bandGate가 작동하지 않고 스플래시에 갇힌다. 저장된 밴드 없이 계속 진행.
+        console.warn("lastBandId restore failed", err);
+        setRestored(true);
+      });
   }, []);
 
   function setCurrentBand(bandId: string): void {

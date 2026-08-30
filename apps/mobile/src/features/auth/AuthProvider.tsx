@@ -1,3 +1,4 @@
+import { ApiError } from "@bandapp/api-client";
 import type { LoginResponse, User } from "@bandapp/types";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useApi } from "@/api";
@@ -55,8 +56,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // access는 메모리에 없으므로 me() 호출이 401 → 자동 refresh → 재시도로 복원된다
           const user = await api.auth.me();
           if (!cancelled) settle({ status: "authenticated", user });
-        } catch {
-          await tokenStorage.clear().catch(() => {});
+        } catch (err) {
+          // 세션이 실제로 죽었다고 증명된 경우(401/403)에만 토큰을 지운다.
+          // 오프라인/일시적 오류 등 다른 실패는 refresh token을 보존 — 다음 실행에서 복원 재시도 (완료 조건 3)
+          if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+            await tokenStorage.clear().catch(() => {});
+          }
           if (!cancelled) settle({ status: "guest" });
         }
       } catch (err) {
@@ -72,13 +77,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [api]);
 
   async function signInWithGoogle(): Promise<LoginResponse> {
-    const idToken = await googleIdToken();
-    const res = await api.auth.loginWithGoogle(idToken);
+    // Mock 모드(Expo Go)에는 google-signin 네이티브 모듈이 없어 googleIdToken()이 던진다 —
+    // 네이티브 어댑터를 건너뛰고 바로 mock 로그인해서 Expo Go에서도 logout→login 왕복이 되게 한다.
+    const res = usingMock
+      ? await api.auth.loginWithGoogle("mock")
+      : await api.auth.loginWithGoogle(await googleIdToken());
     setState({ status: "authenticated", user: res.user });
     return res;
   }
 
   async function signInWithApple(): Promise<LoginResponse> {
+    // Mock 모드(Expo Go)에는 apple-authentication 네이티브 모듈이 없어 appleCredential()이 던진다 —
+    // 네이티브 어댑터를 건너뛰고 바로 mock 로그인해서 Expo Go에서도 logout→login 왕복이 되게 한다.
+    if (usingMock) {
+      const res = await api.auth.loginWithApple("mock");
+      setState({ status: "authenticated", user: res.user });
+      return res;
+    }
     const { idToken, displayName } = await appleCredential();
     const res = await api.auth.loginWithApple(idToken, displayName);
     setState({ status: "authenticated", user: res.user });

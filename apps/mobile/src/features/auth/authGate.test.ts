@@ -26,9 +26,13 @@ describe("bandGate", () => {
     expect(bandGate(null, "(tabs)")).toBeNull();
     expect(bandGate(2, "(tabs)")).toBeNull();
   });
-  it("밴드 0개면 온보딩으로 (초대/온보딩/로그인 화면 제외)", () => {
+  it("밴드 0개면 온보딩으로 (초대/온보딩/로그인/설정 화면 제외)", () => {
     expect(bandGate(0, "(tabs)")).toEqual({ redirect: "/onboarding" });
     expect(bandGate(0, "onboarding")).toBeNull();
     expect(bandGate(0, "invite")).toBeNull();
+  });
+
+  it("밴드 0개여도 설정 화면은 예외 — 로그아웃/탈퇴 경로가 막히지 않게", () => {
+    expect(bandGate(0, "settings")).toBeNull();
   });
 });

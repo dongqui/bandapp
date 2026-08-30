@@ -11,7 +11,7 @@ export function gate(status: GateStatus, firstSegment: string | undefined): { re
   return null;
 }
 
-const BAND_EXEMPT_SEGMENTS = new Set(["onboarding", "invite", "login"]);
+const BAND_EXEMPT_SEGMENTS = new Set(["onboarding", "invite", "login", "settings"]);
 
 /**
  * 밴드 0개인 인증 사용자를 온보딩으로 보낸다 (기획서 10장).

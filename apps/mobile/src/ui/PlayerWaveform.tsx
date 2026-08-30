@@ -25,7 +25,9 @@ export function PlayerWaveform({
   const onLayout = (e: LayoutChangeEvent) => {
     width.current = e.nativeEvent.layout.width;
   };
-  const onPress = (e: GestureResponderEvent) => {
+  // locationX is relative to the touch target, so children must not become the
+  // target (pointerEvents="none" below) for this math to hold during a drag.
+  const seekAt = (e: GestureResponderEvent) => {
     const f = Math.max(0, Math.min(1, e.nativeEvent.locationX / width.current));
     onSeek(f * durationSec);
   };
@@ -33,12 +35,17 @@ export function PlayerWaveform({
     <View
       onLayout={onLayout}
       onStartShouldSetResponder={() => true}
-      onResponderRelease={onPress}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={seekAt}
+      onResponderMove={seekAt}
+      onResponderRelease={seekAt}
+      onResponderTerminationRequest={() => false}
       style={{ width: "100%", height: height + 12, justifyContent: "flex-end" }}
     >
       {markers.map((sec, i) => (
         <View
           key={`m${i}`}
+          pointerEvents="none"
           style={{
             position: "absolute",
             top: 0,
@@ -51,7 +58,7 @@ export function PlayerWaveform({
           }}
         />
       ))}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 2, height }}>
+      <View pointerEvents="none" style={{ flexDirection: "row", alignItems: "center", gap: 2, height }}>
         {Array.from({ length: bars }, (_, i) => (
           <View
             key={i}

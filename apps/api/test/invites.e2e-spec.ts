@@ -117,4 +117,20 @@ describe("invites API", () => {
     const invite = await createInvite();
     await request(app.getHttpServer()).post(`/invites/${invite.token}/join`).expect(401);
   });
+
+  it("동시에 두 번 join해도 500 없이 멤버는 한 명만 추가된다 (race-safe)", async () => {
+    const invite = await createInvite();
+    const member = await memberLogin();
+    const [first, second] = await Promise.all([
+      request(app.getHttpServer()).post(`/invites/${invite.token}/join`).set(auth(member.accessToken)),
+      request(app.getHttpServer()).post(`/invites/${invite.token}/join`).set(auth(member.accessToken)),
+    ]);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const members = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(owner.accessToken))
+      .expect(200);
+    expect(members.body).toHaveLength(2);
+  });
 });

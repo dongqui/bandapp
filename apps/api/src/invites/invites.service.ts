@@ -52,14 +52,22 @@ export class InvitesService {
       where: and(eq(bandMembers.bandId, invite.bandId), eq(bandMembers.userId, userId)),
     });
     if (existing) return { bandId: invite.bandId, alreadyMember: true };
-    await this.db.transaction(async (tx) => {
-      await tx.insert(bandMembers).values({ bandId: invite.bandId, userId, role: "member" });
+    // findFirst 이후 실제 insert 사이에 동시 요청이 끼어들 수 있으므로
+    // (band_id, user_id) PK 충돌을 onConflictDoNothing으로 흡수해 race-safe하게 만든다.
+    const inserted = await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(bandMembers)
+        .values({ bandId: invite.bandId, userId, role: "member" })
+        .onConflictDoNothing()
+        .returning();
+      if (!row) return false;
       await tx
         .update(bandInvites)
         .set({ usedCount: sql`${bandInvites.usedCount} + 1` })
         .where(eq(bandInvites.id, invite.id));
+      return true;
     });
-    return { bandId: invite.bandId, alreadyMember: false };
+    return { bandId: invite.bandId, alreadyMember: !inserted };
   }
 
   async revoke(bandId: string, inviteId: string, userId: string): Promise<void> {

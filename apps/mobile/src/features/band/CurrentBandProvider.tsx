@@ -38,8 +38,12 @@ export function CurrentBandProvider({ children }: { children: ReactNode }) {
     try {
       const list = await api.bands.list();
       if (requestIdRef.current === id) setBands(list);
-    } catch {
-      if (requestIdRef.current === id) setBands([]);
+    } catch (err) {
+      console.warn("band list load failed", err);
+      if (requestIdRef.current === id) {
+        // 이미 불러온 목록이 있으면 유지 — 일시적 네트워크 오류로 온보딩으로 튕기지 않게
+        setBands((prev) => prev ?? []);
+      }
     }
   }, [api]);
 

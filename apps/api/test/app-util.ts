@@ -3,6 +3,7 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../src/app.module.js";
 import { AppleAuthService } from "../src/auth/apple-auth.service.js";
+import { AppleTokenService } from "../src/auth/apple-token.service.js";
 import { GoogleAuthService } from "../src/auth/google-auth.service.js";
 import type { VerifiedProviderToken } from "../src/auth/provider-token.js";
 
@@ -31,13 +32,18 @@ export function providerUser(subject: string, displayName: string | null = "Dong
 export async function createTestApp(overrides?: {
   google?: ProviderStub;
   apple?: ProviderStub;
+  appleTokens?: Pick<AppleTokenService, "exchangeAuthorizationCode" | "revokeAll">;
 }): Promise<INestApplication> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+  let builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GoogleAuthService)
     .useValue(overrides?.google ?? rejecting)
     .overrideProvider(AppleAuthService)
-    .useValue(overrides?.apple ?? rejecting)
-    .compile();
+    .useValue(overrides?.apple ?? rejecting);
+  // 오버라이드가 없으면 실제 서비스가 돈다. e2e env에는 Apple 자격증명이 없어 no-op이다.
+  if (overrides?.appleTokens) {
+    builder = builder.overrideProvider(AppleTokenService).useValue(overrides.appleTokens);
+  }
+  const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();
   return app;

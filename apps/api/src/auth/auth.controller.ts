@@ -17,10 +17,11 @@ export class AuthController {
 
   @Post("apple")
   apple(@Body() body: unknown): Promise<LoginResponse> {
-    return this.auth.loginWithApple(
-      requireString(body, "idToken"),
-      optionalString(body, "displayName"),
-    );
+    return this.auth.loginWithApple({
+      idToken: requireString(body, "idToken"),
+      displayName: optionalString(body, "displayName"),
+      authorizationCode: optionalString(body, "authorizationCode"),
+    });
   }
 
   @Post("refresh")

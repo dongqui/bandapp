@@ -3,6 +3,7 @@ import { ThrottlerModule } from "@nestjs/throttler";
 import { DbModule } from "../db/db.module.js";
 import { UsersModule } from "../users/users.module.js";
 import { appleAuthServiceProvider } from "./apple-auth.service.js";
+import { appleTokenServiceProvider } from "./apple-token.service.js";
 import { authSessionsServiceProvider } from "./auth-sessions.service.js";
 import { AuthController } from "./auth.controller.js";
 import { authServiceProvider } from "./auth.service.js";
@@ -33,6 +34,7 @@ import { tokenServiceProvider, TokenService } from "./token.service.js";
     tokenServiceProvider,
     googleAuthServiceProvider,
     appleAuthServiceProvider,
+    appleTokenServiceProvider,
     authSessionsServiceProvider,
     authServiceProvider,
     authGuardProvider,

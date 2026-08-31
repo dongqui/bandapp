@@ -3,6 +3,7 @@ import type { Provider } from "@nestjs/common";
 import type { AuthTokens, LoginResponse } from "@bandapp/types";
 import { UsersService } from "../users/users.service.js";
 import { AppleAuthService } from "./apple-auth.service.js";
+import { AppleTokenService } from "./apple-token.service.js";
 import { AuthSessionsService } from "./auth-sessions.service.js";
 import { GoogleAuthService } from "./google-auth.service.js";
 import type { VerifiedProviderToken } from "./provider-token.js";
@@ -14,6 +15,7 @@ export class AuthService {
   constructor(
     private readonly google: GoogleAuthService,
     private readonly apple: AppleAuthService,
+    private readonly appleTokens: AppleTokenService,
     private readonly users: UsersService,
     private readonly sessions: AuthSessionsService,
     private readonly tokens: TokenService,
@@ -24,10 +26,36 @@ export class AuthService {
     return this.login("GOOGLE", verified);
   }
 
-  async loginWithApple(idToken: string, displayName?: string): Promise<LoginResponse> {
-    const verified = await this.verifyOrThrow(() => this.apple.verifyIdToken(idToken));
+  async loginWithApple(input: {
+    idToken: string;
+    displayName?: string;
+    authorizationCode?: string;
+  }): Promise<LoginResponse> {
+    const verified = await this.verifyOrThrow(() => this.apple.verifyIdToken(input.idToken));
     // Apple 이름은 토큰에 없다 — 최초 가입일 때만 클라이언트 전달값이 저장된다
-    return this.login("APPLE", { ...verified, displayName: displayName ?? verified.displayName });
+    const res = await this.login("APPLE", {
+      ...verified,
+      displayName: input.displayName ?? verified.displayName,
+    });
+    if (input.authorizationCode) {
+      await this.storeAppleRefreshToken(res.user.id, input.authorizationCode);
+    }
+    return res;
+  }
+
+  /**
+   * 탈퇴 시 Apple 인가를 revoke하려면 refresh token이 필요한데, 그걸 얻을 수 있는
+   * authorizationCode는 5분 1회용이라 로그인 시점에 교환해 둬야 한다.
+   * 이미 저장돼 있으면 건너뛰고, 실패해도 로그인을 막지 않는다 (다음 로그인에 재시도된다).
+   */
+  private async storeAppleRefreshToken(userId: string, authorizationCode: string): Promise<void> {
+    try {
+      if (await this.users.hasProviderRefreshToken(userId, "APPLE")) return;
+      const refreshToken = await this.appleTokens.exchangeAuthorizationCode(authorizationCode);
+      if (refreshToken) await this.users.saveProviderRefreshToken(userId, "APPLE", refreshToken);
+    } catch (err) {
+      this.logger.warn(`apple refresh token 저장 실패: ${(err as Error).message}`);
+    }
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -71,9 +99,17 @@ export const authServiceProvider: Provider = {
   useFactory: (
     google: GoogleAuthService,
     apple: AppleAuthService,
+    appleTokens: AppleTokenService,
     users: UsersService,
     sessions: AuthSessionsService,
     tokens: TokenService,
-  ) => new AuthService(google, apple, users, sessions, tokens),
-  inject: [GoogleAuthService, AppleAuthService, UsersService, AuthSessionsService, TokenService],
+  ) => new AuthService(google, apple, appleTokens, users, sessions, tokens),
+  inject: [
+    GoogleAuthService,
+    AppleAuthService,
+    AppleTokenService,
+    UsersService,
+    AuthSessionsService,
+    TokenService,
+  ],
 };

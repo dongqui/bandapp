@@ -1,4 +1,5 @@
 import type {
+  AppleLoginCredential,
   Band,
   BandInvite,
   BandMember,
@@ -61,8 +62,8 @@ export class MockApiClient implements RehearsalApiClient {
 
   auth = {
     loginWithGoogle: async (): Promise<LoginResponse> => this.loginResult(),
-    loginWithApple: async (_idToken: string, displayName?: string): Promise<LoginResponse> =>
-      this.loginResult(displayName),
+    loginWithApple: async (credential: AppleLoginCredential): Promise<LoginResponse> =>
+      this.loginResult(credential.displayName),
     logout: async (): Promise<void> => {},
     me: async (): Promise<User> => ({ ...MOCK_USER }),
     deleteAccount: async (): Promise<void> => {},

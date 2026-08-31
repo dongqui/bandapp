@@ -1,7 +1,8 @@
+import type { AppleLoginCredential } from "@bandapp/types";
 import * as AppleAuthentication from "expo-apple-authentication";
 import { AuthCancelledError } from "../errors";
 
-export async function appleCredential(): Promise<{ idToken: string; displayName?: string }> {
+export async function appleCredential(): Promise<AppleLoginCredential> {
   try {
     const credential = await AppleAuthentication.signInAsync({
       requestedScopes: [
@@ -15,7 +16,11 @@ export async function appleCredential(): Promise<{ idToken: string; displayName?
     const displayName = [credential.fullName?.familyName, credential.fullName?.givenName]
       .filter(Boolean)
       .join("");
-    return { idToken, displayName: displayName || undefined };
+    return {
+      idToken,
+      displayName: displayName || undefined,
+      authorizationCode: credential.authorizationCode ?? undefined,
+    };
   } catch (err) {
     if ((err as { code?: string }).code === "ERR_REQUEST_CANCELED") throw new AuthCancelledError();
     throw err;

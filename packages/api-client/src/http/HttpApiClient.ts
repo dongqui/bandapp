@@ -1,4 +1,5 @@
 import type {
+  AppleLoginCredential,
   AuthTokens,
   Band,
   BandInvite,
@@ -149,9 +150,9 @@ export class HttpApiClient implements RehearsalApiClient {
       this.request<LoginResponse>("POST", "/auth/google", { idToken }, { auth: false }).then((r) =>
         this.saveLogin(r),
       ),
-    loginWithApple: (idToken: string, displayName?: string): Promise<LoginResponse> =>
-      this.request<LoginResponse>("POST", "/auth/apple", { idToken, displayName }, { auth: false }).then(
-        (r) => this.saveLogin(r),
+    loginWithApple: (credential: AppleLoginCredential): Promise<LoginResponse> =>
+      this.request<LoginResponse>("POST", "/auth/apple", credential, { auth: false }).then((r) =>
+        this.saveLogin(r),
       ),
     logout: async (): Promise<void> => {
       const refreshToken = await this.opts.tokens.getRefreshToken();

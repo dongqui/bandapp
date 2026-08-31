@@ -1,4 +1,5 @@
 import type {
+  AppleLoginCredential,
   AuthTokens,
   Band,
   BandInvite,
@@ -33,7 +34,7 @@ export interface TokenStorage {
 export interface RehearsalApiClient {
   auth: {
     loginWithGoogle(idToken: string): Promise<LoginResponse>;
-    loginWithApple(idToken: string, displayName?: string): Promise<LoginResponse>;
+    loginWithApple(credential: AppleLoginCredential): Promise<LoginResponse>;
     /** 서버 refresh 세션 revoke + 로컬 토큰 삭제. 인자 없음 — 구현이 보관소에서 읽는다. */
     logout(): Promise<void>;
     me(): Promise<User>;

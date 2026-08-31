@@ -90,12 +90,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Mock 모드(Expo Go)에는 apple-authentication 네이티브 모듈이 없어 appleCredential()이 던진다 —
     // 네이티브 어댑터를 건너뛰고 바로 mock 로그인해서 Expo Go에서도 logout→login 왕복이 되게 한다.
     if (usingMock) {
-      const res = await api.auth.loginWithApple("mock");
+      const res = await api.auth.loginWithApple({ idToken: "mock" });
       setState({ status: "authenticated", user: res.user });
       return res;
     }
-    const { idToken, displayName } = await appleCredential();
-    const res = await api.auth.loginWithApple(idToken, displayName);
+    const credential = await appleCredential();
+    const res = await api.auth.loginWithApple(credential);
     setState({ status: "authenticated", user: res.user });
     return res;
   }

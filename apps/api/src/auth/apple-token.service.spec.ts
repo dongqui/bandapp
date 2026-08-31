@@ -130,4 +130,20 @@ describe("AppleTokenService", () => {
     await expect(new AppleTokenService().exchangeAuthorizationCode("code-1")).resolves.toBe("rt-1");
     expect(fn).toHaveBeenCalledTimes(1);
   });
+
+  it("교환 요청에 AbortSignal 타임아웃을 건다", async () => {
+    const fn = mockFetch({ ok: true, status: 200, body: { refresh_token: "rt-1" } });
+    await new AppleTokenService().exchangeAuthorizationCode("code-1");
+
+    const init = fn.mock.calls[0]![1] as { signal?: AbortSignal };
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("revoke 요청에도 AbortSignal 타임아웃을 건다", async () => {
+    const fn = mockFetch({ ok: true, status: 200 });
+    await new AppleTokenService().revokeAll(["rt-1"]);
+
+    const init = fn.mock.calls[0]![1] as { signal?: AbortSignal };
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
 });

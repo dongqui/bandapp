@@ -72,6 +72,9 @@ export class AppleTokenService {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(form),
+      // Apple이 연결만 받고 응답을 안 주는 경우 undici 기본 헤더 타임아웃(300s)까지 무한정
+      // 기다리게 되므로, 여기서 짧게 끊어 준다 — 실패 시 catch에서 이미 no-op 처리한다
+      signal: AbortSignal.timeout(5000),
     });
   }
 

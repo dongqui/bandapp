@@ -17,6 +17,11 @@ const rejecting: ProviderStub = {
   },
 };
 
+const noopAppleTokens: Pick<AppleTokenService, "exchangeAuthorizationCode" | "revokeAll"> = {
+  exchangeAuthorizationCode: async () => null,
+  revokeAll: async () => undefined,
+};
+
 export function providerUser(subject: string, displayName: string | null = "Dongjin"): ProviderStub {
   return {
     verifyIdToken: async () => ({
@@ -34,15 +39,15 @@ export async function createTestApp(overrides?: {
   apple?: ProviderStub;
   appleTokens?: Pick<AppleTokenService, "exchangeAuthorizationCode" | "revokeAll">;
 }): Promise<INestApplication> {
-  let builder = Test.createTestingModule({ imports: [AppModule] })
+  const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GoogleAuthService)
     .useValue(overrides?.google ?? rejecting)
     .overrideProvider(AppleAuthService)
-    .useValue(overrides?.apple ?? rejecting);
-  // 오버라이드가 없으면 실제 서비스가 돈다. e2e env에는 Apple 자격증명이 없어 no-op이다.
-  if (overrides?.appleTokens) {
-    builder = builder.overrideProvider(AppleTokenService).useValue(overrides.appleTokens);
-  }
+    .useValue(overrides?.apple ?? rejecting)
+    // 항상 오버라이드한다 — 실 서비스는 오늘은 자격증명 부재로 no-op이지만, .p8이 들어오는 순간
+    // 이 기본값이 없으면 테스트가 실제 appleid.apple.com에 요청을 보내게 된다.
+    .overrideProvider(AppleTokenService)
+    .useValue(overrides?.appleTokens ?? noopAppleTokens);
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();

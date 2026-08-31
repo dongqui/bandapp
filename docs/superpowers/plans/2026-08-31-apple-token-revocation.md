@@ -443,7 +443,7 @@ pnpm --filter @bandapp/api db:generate
 `apps/api/src/users/users.service.ts`의 `toPublic` 아래, `deleteAccount` 주석 위에 넣는다:
 
 ```ts
-  /** 해당 provider identity에 Apple refresh token이 이미 저장돼 있는지. */
+  /** 해당 provider identity에 refresh token이 이미 저장돼 있는지. */
   async hasProviderRefreshToken(userId: string, provider: "GOOGLE" | "APPLE"): Promise<boolean> {
     const row = await this.db.query.userIdentities.findFirst({
       where: and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)),

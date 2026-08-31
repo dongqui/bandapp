@@ -64,7 +64,7 @@ export class UsersService {
     return { id: row.id, displayName: row.displayName, profileImageUrl: row.profileImageUrl };
   }
 
-  /** 해당 provider identity에 Apple refresh token이 이미 저장돼 있는지. */
+  /** 해당 provider identity에 refresh token이 이미 저장돼 있는지. */
   async hasProviderRefreshToken(userId: string, provider: "GOOGLE" | "APPLE"): Promise<boolean> {
     const row = await this.db.query.userIdentities.findFirst({
       where: and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)),
@@ -72,6 +72,7 @@ export class UsersService {
     return typeof row?.providerRefreshToken === "string" && row.providerRefreshToken.length > 0;
   }
 
+  /** 해당 provider identity에 refresh token을 저장한다. */
   async saveProviderRefreshToken(
     userId: string,
     provider: "GOOGLE" | "APPLE",

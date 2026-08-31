@@ -165,3 +165,16 @@ Apple 응답 본문의 오류 문자열은 클라이언트에 노출하지 않�
 ## 검증 제약
 
 `.p8` 키 발급은 **Apple Developer Program 멤버십이 활성화된 뒤에야** 가능하다 (2026-08-31 기준 갱신 결제 완료·반영 대기). 따라서 이번 구현은 목킹된 단위·e2e 테스트까지만 검증하고, 실제 Apple 서버 왕복 확인은 키 발급 후 별도로 수행한다. 결정 5(자격증명 없으면 no-op) 덕분에 그 사이에도 로그인·탈퇴는 정상 동작한다.
+
+## 후속 작업 (구현 후 리뷰에서 deferred로 판정된 것들)
+
+구현은 끝났고 아래는 의도적으로 미룬 항목이다. 전부 최종 전체 브랜치 리뷰에서 "지금 고치지 않아도 된다"고 판정됐지만, 관련 작업을 할 때 함께 처리한다.
+
+1. **`deleteAccount`의 `provider === "APPLE"` 필터에 커버리지가 없다.** 오늘 이 필터를 지워도 모든 테스트가 통과한다 — GOOGLE identity가 refresh token을 들고 있는 픽스처가 없기 때문. `saveProviderRefreshToken`은 이미 provider 무관이고 컬럼도 Google revoke를 염두에 두고 만들었으므로, **Google revoke를 붙일 때 반드시 이 픽스처를 먼저 추가한다.** (`users.service.ts`, `delete-me.e2e-spec.ts`)
+2. **Apple 설정에서 사용자가 앱 연결을 끊으면 저장된 토큰이 죽는데 갱신되지 않는다.** `AuthService.storeAppleRefreshToken`은 토큰이 있으면 조기 반환하므로 죽은 토큰이 영구히 남는다. 실제 피해는 없지만(무효화하려던 인가가 이미 사라진 상태), 무효화 신호가 도착하는 곳이 server-to-server notifications이므로 **그 스펙에서 함께 다룬다.**
+3. **`revokeAll`이 토큰마다 `client_secret`을 재서명한다.** 계정당 Apple identity는 하나라 실제로는 항상 1회. 루프 밖으로 빼려면 파라미터를 넘기거나 만료 관리가 붙는 캐시가 필요해 그대로 둔다.
+4. **`storeAppleRefreshToken`의 warn 로그에 `userId`가 없다.** 장애 분류 시 계정 특정이 어렵다. `auth.service.ts`를 다음에 만질 때 함께 넣는다.
+5. **`saveProviderRefreshToken`은 매칭되는 행이 없어도 조용히 통과한다.** 현재 흐름에서는 직전에 identity를 만들어 도달 불가능하지만, 호출 순서를 바꾸는 사람에게는 실패 대신 침묵이 돌아간다.
+6. **`HttpApiClient`가 `AppleLoginCredential` 객체를 그대로 wire body로 보낸다.** 클라이언트 인자 타입과 전송 계약이 한 타입에 묶여 있어, 나중에 클라이언트 전용 필드를 추가하면 서버로 새어 나간다.
+7. **`expo-dev-client` 플러그인이 프로덕션 프로파일에도 붙는다.** Expo가 릴리스 빌드에서 dev launcher를 제외하므로 문제없을 가능성이 높지만, **첫 프로덕션 빌드 전에 SDK 57 문서로 한 번 확인한다.**
+8. **테스트 출력에 로그 노이즈가 있다.** `AppleTokenService`의 실패 경로 테스트와 기존 `AnalysisConsumer`/`GeminiService`가 warn/error를 찍는다. 이 브랜치 이전부터 있던 문제라 여기서 고치지 않는다. 제대로 된 해법은 vitest setup 파일에서 `Logger.overrideLogger(false)`를 거는 리포 전역 작업이다.

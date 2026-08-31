@@ -1,7 +1,7 @@
 import type { INestApplication } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import request from "supertest";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bandMembers, bands, userIdentities, users } from "../src/db/schema.js";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
@@ -13,9 +13,22 @@ describe("DELETE /me", () => {
 
   const auth = (token: string) => ({ authorization: `Bearer ${token}` });
 
+  let appleTokens: {
+    exchangeAuthorizationCode: ReturnType<typeof vi.fn>;
+    revokeAll: ReturnType<typeof vi.fn>;
+  };
+
   beforeEach(async () => {
     await truncateAll(db);
-    app = await createTestApp({ google: providerUser("g-1") });
+    appleTokens = {
+      exchangeAuthorizationCode: vi.fn(async () => "rt-from-apple"),
+      revokeAll: vi.fn(async () => undefined),
+    };
+    app = await createTestApp({
+      google: providerUser("g-1"),
+      apple: providerUser("apple-1"),
+      appleTokens,
+    });
     me = await loginAs(app);
   });
   afterEach(() => app.close());
@@ -63,5 +76,37 @@ describe("DELETE /me", () => {
     await request(app.getHttpServer()).delete("/me").set(auth(me.accessToken)).expect(409);
     // 아무것도 지워지지 않았어야 한다
     await request(app.getHttpServer()).get("/me").set(auth(me.accessToken)).expect(200);
+  });
+
+  it("Apple로 가입한 계정은 탈퇴 시 Apple 토큰을 revoke한다", async () => {
+    const apple = await request(app.getHttpServer())
+      .post("/auth/apple")
+      .send({ idToken: "stubbed", authorizationCode: "code-1" })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete("/me")
+      .set(auth(apple.body.accessToken))
+      .expect(204);
+
+    expect(appleTokens.revokeAll).toHaveBeenCalledWith(["rt-from-apple"]);
+  });
+
+  it("Apple 토큰이 없으면 revoke할 것도 없다", async () => {
+    await request(app.getHttpServer()).delete("/me").set(auth(me.accessToken)).expect(204);
+    expect(appleTokens.revokeAll).toHaveBeenCalledWith([]);
+  });
+
+  it("409로 롤백되면 revoke하지 않는다", async () => {
+    const band = await request(app.getHttpServer())
+      .post("/bands")
+      .set(auth(me.accessToken))
+      .send({ name: "FRIDAY NIGHT" })
+      .expect(201);
+    const [other] = await db.insert(users).values({ displayName: "Minsoo" }).returning();
+    await db.insert(bandMembers).values({ bandId: band.body.id, userId: other!.id, role: "member" });
+
+    await request(app.getHttpServer()).delete("/me").set(auth(me.accessToken)).expect(409);
+    expect(appleTokens.revokeAll).not.toHaveBeenCalled();
   });
 });

@@ -89,9 +89,11 @@ export class UsersService {
    * - 다른 멤버가 있는 밴드의 유일한 owner면 409 (전체 롤백)
    * - 혼자인 밴드는 삭제, member인 밴드는 탈퇴
    * - 모든 세션 revoke, identity 삭제, user 비식별화(soft delete)
+   * - 삭제된 identity의 Apple refresh token을 돌려준다. 실제 revoke는 호출자가
+   *   트랜잭션 커밋 후에 한다 (외부 HTTP를 트랜잭션 안에서 하지 않는다).
    */
-  async deleteAccount(userId: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+  async deleteAccount(userId: string): Promise<{ appleRefreshTokens: string[] }> {
+    return this.db.transaction(async (tx) => {
       const memberships = await tx.query.bandMembers.findMany({
         where: eq(bandMembers.userId, userId),
       });
@@ -122,11 +124,20 @@ export class UsersService {
         .update(authSessions)
         .set({ revokedAt: new Date() })
         .where(and(eq(authSessions.userId, userId), isNull(authSessions.revokedAt)));
-      await tx.delete(userIdentities).where(eq(userIdentities.userId, userId));
+      const deletedIdentities = await tx
+        .delete(userIdentities)
+        .where(eq(userIdentities.userId, userId))
+        .returning();
       await tx
         .update(users)
         .set({ displayName: null, profileImageUrl: null, deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(users.id, userId));
+      return {
+        appleRefreshTokens: deletedIdentities
+          .filter((i) => i.provider === "APPLE")
+          .map((i) => i.providerRefreshToken)
+          .filter((t): t is string => typeof t === "string" && t.length > 0),
+      };
     });
   }
 }

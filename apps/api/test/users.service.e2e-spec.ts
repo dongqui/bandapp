@@ -39,4 +39,19 @@ describe("UsersService", () => {
   it("findById는 없는 id에 null을 준다", async () => {
     expect(await service.findById("00000000-0000-0000-0000-000000000000")).toBeNull();
   });
+
+  it("provider refresh token은 최초에 없고, 저장하면 있다고 보고한다", async () => {
+    const { user } = await service.findOrCreateByIdentity("APPLE", verified("apple-rt-1"));
+
+    await expect(service.hasProviderRefreshToken(user.id, "APPLE")).resolves.toBe(false);
+    await service.saveProviderRefreshToken(user.id, "APPLE", "rt-stored");
+    await expect(service.hasProviderRefreshToken(user.id, "APPLE")).resolves.toBe(true);
+  });
+
+  it("provider refresh token은 provider별로 별개다", async () => {
+    const { user } = await service.findOrCreateByIdentity("APPLE", verified("apple-rt-2"));
+
+    await service.saveProviderRefreshToken(user.id, "APPLE", "rt-stored");
+    await expect(service.hasProviderRefreshToken(user.id, "GOOGLE")).resolves.toBe(false);
+  });
 });

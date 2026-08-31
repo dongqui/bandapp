@@ -64,6 +64,25 @@ export class UsersService {
     return { id: row.id, displayName: row.displayName, profileImageUrl: row.profileImageUrl };
   }
 
+  /** 해당 provider identity에 Apple refresh token이 이미 저장돼 있는지. */
+  async hasProviderRefreshToken(userId: string, provider: "GOOGLE" | "APPLE"): Promise<boolean> {
+    const row = await this.db.query.userIdentities.findFirst({
+      where: and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)),
+    });
+    return typeof row?.providerRefreshToken === "string" && row.providerRefreshToken.length > 0;
+  }
+
+  async saveProviderRefreshToken(
+    userId: string,
+    provider: "GOOGLE" | "APPLE",
+    token: string,
+  ): Promise<void> {
+    await this.db
+      .update(userIdentities)
+      .set({ providerRefreshToken: token, updatedAt: new Date() })
+      .where(and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)));
+  }
+
   /**
    * 회원 탈퇴 (기획서 18장, 스펙 결정 9):
    * - 다른 멤버가 있는 밴드의 유일한 owner면 409 (전체 롤백)

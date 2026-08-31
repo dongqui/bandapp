@@ -38,6 +38,9 @@ export const userIdentities = pgTable(
     providerSubject: text("provider_subject").notNull(),
     email: text("email"),
     emailVerified: boolean("email_verified"),
+    // Apple /auth/revoke에 필요한 refresh token. id_token으로는 revoke가 안 되고,
+    // authorizationCode는 5분 1회용이라 로그인 때 교환해 보관해야 한다.
+    providerRefreshToken: text("provider_refresh_token"),
     ...timestamps,
   },
   (t) => [uniqueIndex("user_identities_provider_subject_uq").on(t.provider, t.providerSubject)],

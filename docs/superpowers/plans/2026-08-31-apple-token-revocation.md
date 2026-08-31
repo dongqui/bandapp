@@ -811,22 +811,6 @@ import { vi } from "vitest";
     expect(appleTokens.revokeAll).toHaveBeenCalledWith([]);
   });
 
-  it("revoke가 실패해도 탈퇴는 204다", async () => {
-    appleTokens.revokeAll.mockRejectedValue(new Error("apple down"));
-    const apple = await request(app.getHttpServer())
-      .post("/auth/apple")
-      .send({ idToken: "stubbed", authorizationCode: "code-1" })
-      .expect(201);
-
-    await request(app.getHttpServer())
-      .delete("/me")
-      .set(auth(apple.body.accessToken))
-      .expect(204);
-
-    // 실패했어도 로컬 삭제는 끝나 있어야 한다
-    await request(app.getHttpServer()).get("/me").set(auth(apple.body.accessToken)).expect(401);
-  });
-
   it("409로 롤백되면 revoke하지 않는다", async () => {
     const band = await request(app.getHttpServer())
       .post("/bands")
@@ -914,14 +898,12 @@ import { AppleTokenService } from "./apple-token.service.js";
   @HttpCode(204)
   async deleteMe(@CurrentUserId() userId: string): Promise<void> {
     const { appleRefreshTokens } = await this.users.deleteAccount(userId);
-    // 트랜잭션 커밋 후 best-effort. 실패해도 탈퇴는 이미 끝났다.
-    try {
-      await this.appleTokens.revokeAll(appleRefreshTokens);
-    } catch {
-      // revokeAll은 자체적으로 삼키지만, 스텁/미래 구현이 던져도 탈퇴가 깨지면 안 된다
-    }
+    // 트랜잭션 커밋 후 best-effort. revokeAll이 실패를 자체적으로 삼키므로 여기서 감싸지 않는다.
+    await this.appleTokens.revokeAll(appleRefreshTokens);
   }
 ```
+
+여기서 `try/catch`로 감싸지 **않는다.** `revokeAll`의 계약이 "절대 throw하지 않는다"이고 Task 1에 그걸 검증하는 테스트가 있다. 호출부에서 또 방어하면 계약이 두 군데로 흩어지고 빈 catch 블록이 남는다.
 
 - [ ] **Step 5: 테스트 통과 확인**
 

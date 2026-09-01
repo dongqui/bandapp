@@ -9,11 +9,11 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.taken.app",
+      "bundleIdentifier": "com.projectn.taken",
       "usesAppleSignIn": true
     },
     "android": {
-      "package": "com.taken.app",
+      "package": "com.projectn.taken",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

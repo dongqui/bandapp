@@ -36,7 +36,7 @@ App Store 심사에서 Sign in with Apple + 계정 삭제를 함께 제공하는
 | `authorizationCode` 수명 | 5분, 1회용 |
 | `authorizationCode` 제공 시점 | **매 로그인마다.** `fullName`과 달리 최초 1회 제한이 없다 (expo-apple-authentication SDK 57 `AppleAuthenticationCredential.authorizationCode: string \| null`) |
 | `client_secret` | ES256 JWT. `kid`=Key ID, `iss`=Team ID, `sub`=client_id, `aud`=`https://appleid.apple.com`, `exp` 최대 6개월 |
-| `client_id` | App ID(`com.taken.app`). **Team ID를 포함하면 안 된다** |
+| `client_id` | App ID(`com.projectn.taken`). **Team ID를 포함하면 안 된다** |
 | revoke 응답 | 성공 또는 "이미 무효" 모두 200. 본문 없음 |
 
 `authorizationCode`가 매 로그인마다 온다는 점이 설계를 단순하게 만든다 — 최초 로그인을 놓치면 영영 못 얻는 값이 아니라서, 교환 실패 시 다음 로그인에 자연스럽게 재시도된다.
@@ -134,7 +134,7 @@ APPLE_KEY_ID=
 APPLE_PRIVATE_KEY=
 ```
 
-`APPLE_BUNDLE_ID`는 2026-09-01에 `com.bandapp.app`(placeholder)에서 **`com.taken.app`으로 확정**했다 — 제품명이 "Take N"이고, Bundle ID는 App Store 출시 후 변경이 불가능해 출시 전에 확정했다. Apple 포털의 App ID, `app.json`의 `ios.bundleIdentifier`/`android.package`, 서버 `APPLE_BUNDLE_ID`가 모두 이 값으로 일치해야 한다.
+`APPLE_BUNDLE_ID`는 2026-09-01에 `com.bandapp.app`(placeholder)에서 **`com.projectn.taken`으로 확정**했다 — 제품명이 "Take N"이고, Bundle ID는 App Store 출시 후 변경이 불가능해 출시 전에 확정했다. Apple 포털의 App ID, `app.json`의 `ios.bundleIdentifier`/`android.package`, 서버 `APPLE_BUNDLE_ID`가 모두 이 값으로 일치해야 한다.
 
 `APPLE_PRIVATE_KEY`는 `.p8` 파일 내용(PEM)을 그대로 넣되 개행을 `\n`으로 이스케이프한다. 서비스가 읽을 때 복원한다.
 

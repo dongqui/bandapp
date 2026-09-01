@@ -1,19 +1,19 @@
 {
   "expo": {
-    "name": "bandapp",
-    "slug": "bandapp",
+    "name": "Take N",
+    "slug": "taken",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "bandapp",
+    "scheme": "taken",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.bandapp.app",
+      "bundleIdentifier": "com.taken.app",
       "usesAppleSignIn": true
     },
     "android": {
-      "package": "com.bandapp.app",
+      "package": "com.taken.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",

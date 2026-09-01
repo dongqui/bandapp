@@ -7,7 +7,7 @@ async function setAppleEnv(): Promise<void> {
   process.env.APPLE_TEAM_ID = "TEAM123456";
   process.env.APPLE_KEY_ID = "KEY1234567";
   process.env.APPLE_PRIVATE_KEY = await exportPKCS8(privateKey);
-  process.env.APPLE_BUNDLE_ID = "com.bandapp.app";
+  process.env.APPLE_BUNDLE_ID = "com.taken.app";
 }
 
 function mockFetch(res: { ok: boolean; status: number; body?: unknown }) {
@@ -44,14 +44,14 @@ describe("AppleTokenService", () => {
     expect(decodeProtectedHeader(secret)).toMatchObject({ alg: "ES256", kid: "KEY1234567" });
     const claims = decodeJwt(secret);
     expect(claims.iss).toBe("TEAM123456");
-    expect(claims.sub).toBe("com.bandapp.app");
+    expect(claims.sub).toBe("com.taken.app");
     expect(claims.aud).toBe("https://appleid.apple.com");
   });
 
   it("client_id에 Team ID를 섞지 않는다", async () => {
     const fn = mockFetch({ ok: true, status: 200, body: { refresh_token: "rt-1" } });
     await new AppleTokenService().exchangeAuthorizationCode("code-1");
-    expect(formOf(fn).get("client_id")).toBe("com.bandapp.app");
+    expect(formOf(fn).get("client_id")).toBe("com.taken.app");
   });
 
   it("authorization code를 refresh token으로 교환한다", async () => {

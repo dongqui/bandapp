@@ -76,7 +76,7 @@ describe("GoogleAuthService", () => {
 
 describe("AppleAuthService", () => {
   beforeEach(() => {
-    process.env.APPLE_BUNDLE_ID = "com.bandapp.app";
+    process.env.APPLE_BUNDLE_ID = "com.taken.app";
   });
   afterEach(() => {
     delete process.env.APPLE_BUNDLE_ID;
@@ -87,7 +87,7 @@ describe("AppleAuthService", () => {
     const service = new AppleAuthService(jwks);
     const token = await sign(
       { email: "hide@privaterelay.appleid.com", email_verified: "true" },
-      { iss: "https://appleid.apple.com", aud: "com.bandapp.app", sub: "apple-sub-1" },
+      { iss: "https://appleid.apple.com", aud: "com.taken.app", sub: "apple-sub-1" },
     );
     await expect(service.verifyIdToken(token)).resolves.toEqual({
       subject: "apple-sub-1",

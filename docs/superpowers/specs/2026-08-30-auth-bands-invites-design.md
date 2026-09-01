@@ -103,7 +103,7 @@ INVITE_LINK_BASE_URL      초대 URL 프리픽스, 예: https://app.example.com
 # apps/mobile
 EXPO_PUBLIC_API_URL              예: http://<LAN IP>:3001 (호스트 포트는 3001)
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID GoogleSignin.configure의 webClientId
-app.json: ios.bundleIdentifier / android.package (미정 — placeholder com.bandapp.app 사용, 출시 전 확정)
+app.json: ios.bundleIdentifier / android.package (2026-09-01 com.taken.app으로 확정)
 ```
 
 ## 디렉토리 구조

@@ -9,7 +9,7 @@ describe("parseInviteToken", () => {
   });
 
   it("커스텀 스킴 딥링크도 처리한다", () => {
-    expect(parseInviteToken("bandapp://invite/AbC123_-xyz9AbC12345")).toBe("AbC123_-xyz9AbC12345");
+    expect(parseInviteToken("taken://invite/AbC123_-xyz9AbC12345")).toBe("AbC123_-xyz9AbC12345");
   });
 
   it("생 토큰은 그대로 반환한다", () => {

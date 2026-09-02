@@ -1,7 +1,7 @@
 # Apple 토큰 revoke · 계정 삭제 연동 설계
 
 - **날짜:** 2026-08-31
-- **상태:** 검토 대기
+- **상태:** 구현·검증 완료 (2026-09-01)
 - **선행 문서:** [2026-08-30-auth-bands-invites-design.md](2026-08-30-auth-bands-invites-design.md) (스펙 결정 8·9가 이 문서의 출발점)
 
 ## 목적
@@ -164,9 +164,23 @@ Apple 응답 본문의 오류 문자열은 클라이언트에 노출하지 않�
 - `deleteAccount`가 삭제된 identity에서 Apple 토큰을 회수하는지 (e2e)
 - revoke가 실패해도 `DELETE /me`가 204인지
 
-## 검증 제약
+## 검증 (2026-09-01 완료)
 
-`.p8` 키 발급은 **Apple Developer Program 멤버십이 활성화된 뒤에야** 가능하다 (2026-08-31 기준 갱신 결제 완료·반영 대기). 따라서 이번 구현은 목킹된 단위·e2e 테스트까지만 검증하고, 실제 Apple 서버 왕복 확인은 키 발급 후 별도로 수행한다. 결정 5(자격증명 없으면 no-op) 덕분에 그 사이에도 로그인·탈퇴는 정상 동작한다.
+구현 당시에는 멤버십 갱신 대기로 `.p8`이 없어 목킹된 단위·e2e 테스트까지만 검증했다. **2026-09-01에 실제 Apple 서버 상대로 전 구간을 확인했다.**
+
+환경: macOS 로컬 빌드(`expo prebuild` + Xcode), iPhone 17 Pro 시뮬레이터(iOS 26.5), API는 Windows 호스트의 docker compose.
+
+| 단계 | 확인 방법 | 결과 |
+|---|---|---|
+| `authorizationCode` 교환 | 로그인 후 `user_identities.provider_refresh_token` 조회 | 채워짐 — Apple이 `.p8` 서명을 검증하고 refresh token을 발급했다는 뜻 |
+| 이름 최초 저장 (결정 8) | `users.display_name` | Apple이 최초 인증에만 주는 이름이 저장됨 |
+| 탈퇴 트랜잭션 | identity 삭제 + `users.deleted_at` 세팅, `display_name` NULL | 정상 |
+| revoke 호출 | API 로그에 `apple token revoke failed/error` 없음 (실패 시에만 로깅하므로 침묵 = 2xx) | 성공 |
+| **Apple 측 인가 해제** | 기기 설정 › Apple 계정 › 로그인 및 보안 › Apple로 로그인 | **Take N이 목록에서 사라짐** |
+
+마지막 행이 이 스펙의 목적 그 자체다 — 서버 로그가 아니라 Apple 쪽 상태로 확인했다.
+
+빌드 과정에서 별개 문제 하나를 발견해 함께 고쳤다: `react-native-reanimated`가 전이 의존으로 `react-native-worklets` 0.12.x를 끌어와 `expo-modules-core`(^0.10.0 이하)와 충돌, `ExpoWorkletsBridgeProvider`가 `executeSync` 미존재로 컴파일 실패했다. 둘을 직접 의존으로 명시해 SDK 57 매트릭스 버전(reanimated 4.5.1 / worklets 0.10.1)으로 고정했다.
 
 ## 후속 작업 (구현 후 리뷰에서 deferred로 판정된 것들)
 

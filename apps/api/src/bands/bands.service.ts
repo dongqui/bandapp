@@ -77,6 +77,22 @@ export class BandsService {
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
   }
 
+  /** 본인 파트만 쓴다 — 타인의 파트를 쓰는 경로는 없다 (스펙 결정 3). */
+  async setPart(bandId: string, userId: string, part: BandPart | null): Promise<BandMember> {
+    await this.memberships.assertMember(bandId, userId);
+    await this.db
+      .update(bandMembers)
+      .set({ part })
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+    const [row] = await this.db
+      .select(memberColumns)
+      .from(bandMembers)
+      .innerJoin(users, eq(users.id, bandMembers.userId))
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+    if (!row) throw new Error("member vanished between update and read");
+    return toBandMember(row);
+  }
+
   private async countMembers(bandId: string): Promise<number> {
     const [row] = await this.db
       .select({ n: sql<number>`count(*)::int` })

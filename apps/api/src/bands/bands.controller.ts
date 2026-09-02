@@ -6,13 +6,14 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from "@nestjs/common";
 import type { Band, BandMember } from "@bandapp/types";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
-import { requireString, requireUuidParam } from "../common/validation.js";
+import { requireBandPartOrNull, requireString, requireUuidParam } from "../common/validation.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
 import { BandsService } from "./bands.service.js";
 
@@ -46,6 +47,16 @@ export class BandsController {
     requireUuidParam(bandId, "bandId");
     await this.memberships.assertMember(bandId, userId);
     return this.bandsService.members(bandId);
+  }
+
+  @Patch(":bandId/members/me")
+  setMyPart(
+    @CurrentUserId() userId: string,
+    @Param("bandId") bandId: string,
+    @Body() body: unknown,
+  ): Promise<BandMember> {
+    requireUuidParam(bandId, "bandId");
+    return this.bandsService.setPart(bandId, userId, requireBandPartOrNull(body, "part"));
   }
 
   @Delete(":bandId/members/me")

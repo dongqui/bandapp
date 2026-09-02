@@ -116,6 +116,43 @@ describe("bands API", () => {
     expect(mine.body).toHaveLength(0);
   });
 
+  it("본인 파트를 설정하고 해제한다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const set = await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: "guitar" })
+      .expect(200);
+    expect(set.body).toMatchObject({ id: owner.userId, role: "owner", part: "guitar" });
+
+    const cleared = await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: null })
+      .expect(200);
+    expect(cleared.body.part).toBeNull();
+  });
+
+  it("정의되지 않은 파트는 400, 비멤버는 403", async () => {
+    const bandId = await createBand(owner.accessToken);
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: "trumpet" })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({})
+      .expect(400);
+    const stranger = await secondUser("stranger-part");
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(stranger.accessToken))
+      .send({ part: "bass" })
+      .expect(403);
+  });
+
   it("이름이 비면 400, 토큰 없으면 401", async () => {
     await request(app.getHttpServer()).post("/bands").set(auth(owner.accessToken)).send({ name: "  " }).expect(400);
     await request(app.getHttpServer()).get("/bands").expect(401);

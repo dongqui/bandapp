@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { NotFoundException } from "@nestjs/common";
+import { GoneException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import type { BandInvite, InvitePreview, JoinInviteResult } from "@bandapp/types";
@@ -7,6 +7,7 @@ import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { bandInvites, bandMembers, bands, users } from "../db/schema.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
+import { inviteError } from "./invite-errors.js";
 
 // MVP 정책 (기획서 11장): 링크 방식, 7일, MEMBER, owner 생성
 const INVITE_TTL_DAYS = 7;
@@ -32,7 +33,7 @@ export class InvitesService {
   async preview(token: string): Promise<InvitePreview> {
     const invite = await this.findValid(token);
     const band = await this.db.query.bands.findFirst({ where: eq(bands.id, invite.bandId) });
-    if (!band) throw new NotFoundException("초대장을 찾을 수 없어요.");
+    if (!band) throw new NotFoundException(inviteError("invite_not_found"));
     const creator = await this.db.query.users.findFirst({ where: eq(users.id, invite.createdBy) });
     const [count] = await this.db
       .select({ n: sql<number>`count(*)::int` })
@@ -77,7 +78,7 @@ export class InvitesService {
       .set({ revokedAt: new Date() })
       .where(and(eq(bandInvites.id, inviteId), eq(bandInvites.bandId, bandId)))
       .returning();
-    if (!row) throw new NotFoundException("초대장을 찾을 수 없어요.");
+    if (!row) throw new NotFoundException(inviteError("invite_not_found"));
   }
 
   private inviteUrl(token: string): string {
@@ -86,17 +87,21 @@ export class InvitesService {
     return `${base.replace(/\/+$/, "")}/invite/${token}`;
   }
 
-  /** 미존재/만료/취소/소진을 구분하지 않고 404 — 토큰 존재 여부를 노출하지 않는다. */
+  /**
+   * 찾지 못한 토큰은 사유를 밝히지 않는다. 찾은 토큰은 이미 그 문자열을 쥔 사람에게만
+   * 응답하는 것이라 사유를 알려도 새로 새는 정보가 없다 (스펙 결정 7).
+   * 취소가 만료보다 먼저다 — 둘 다 해당해도 "취소됨"이 더 정확한 설명이다.
+   */
   private async findValid(token: string): Promise<typeof bandInvites.$inferSelect> {
     const invite = await this.db.query.bandInvites.findFirst({
       where: eq(bandInvites.token, token),
     });
-    const valid =
-      invite &&
-      !invite.revokedAt &&
-      invite.expiresAt > new Date() &&
-      (invite.maxUses === null || invite.usedCount < invite.maxUses);
-    if (!valid) throw new NotFoundException("초대장을 찾을 수 없어요. 링크가 만료됐을 수 있어요.");
+    if (!invite) throw new NotFoundException(inviteError("invite_not_found"));
+    if (invite.revokedAt) throw new GoneException(inviteError("invite_revoked"));
+    if (invite.expiresAt <= new Date()) throw new GoneException(inviteError("invite_expired"));
+    if (invite.maxUses !== null && invite.usedCount >= invite.maxUses) {
+      throw new GoneException(inviteError("invite_exhausted"));
+    }
     return invite;
   }
 }

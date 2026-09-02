@@ -97,20 +97,41 @@ describe("invites API", () => {
     expect(members.body[1]).toMatchObject({ role: "member", name: "Minsoo" });
   });
 
-  it("만료/취소/미존재 초대는 404", async () => {
-    await request(app.getHttpServer()).get("/invites/does-not-exist-token-x").expect(404);
+  it("없는 토큰은 404 invite_not_found", async () => {
+    const res = await request(app.getHttpServer()).get("/invites/does-not-exist-token-x").expect(404);
+    expect(res.body.code).toBe("invite_not_found");
+  });
+
+  it("만료된 초대는 410 invite_expired", async () => {
     const invite = await createInvite();
     await db
       .update(bandInvites)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(bandInvites.id, invite.id));
-    await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(404);
-    const revoked = await createInvite();
+    const res = await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(410);
+    expect(res.body.code).toBe("invite_expired");
+    const join = await request(app.getHttpServer())
+      .post(`/invites/${invite.token}/join`)
+      .set(auth(owner.accessToken))
+      .expect(410);
+    expect(join.body.code).toBe("invite_expired");
+  });
+
+  it("취소된 초대는 410 invite_revoked이고, 만료까지 겹치면 revoked가 이긴다", async () => {
+    const invite = await createInvite();
     await request(app.getHttpServer())
-      .delete(`/bands/${bandId}/invites/${revoked.id}`)
+      .delete(`/bands/${bandId}/invites/${invite.id}`)
       .set(auth(owner.accessToken))
       .expect(204);
-    await request(app.getHttpServer()).get(`/invites/${revoked.token}`).expect(404);
+    const res = await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(410);
+    expect(res.body.code).toBe("invite_revoked");
+
+    await db
+      .update(bandInvites)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(bandInvites.id, invite.id));
+    const both = await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(410);
+    expect(both.body.code).toBe("invite_revoked");
   });
 
   it("비로그인 join은 401", async () => {

@@ -15,6 +15,20 @@
       "when": 1788165648763,
       "tag": "0001_gifted_the_captain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788319042840,
+      "tag": "0002_new_human_robot",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788319060203,
+      "tag": "0003_groovy_leo",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,15 @@ import {
 export const authProvider = pgEnum("auth_provider", ["GOOGLE", "APPLE"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
+// @bandapp/types의 BandPart와 값을 일치시킨다. 표시 문자열은 클라이언트 책임이다 (스펙 결정 2)
+export const bandPart = pgEnum("band_part", [
+  "vocal",
+  "guitar",
+  "bass",
+  "drums",
+  "keyboard",
+  "other",
+]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -76,6 +85,8 @@ export const bandMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: bandRole("role").notNull(),
+    // null = 미설정. 초대 과정에서 파트를 묻지 않으므로 갓 참여한 멤버는 항상 null이다 (스펙 결정 4)
+    part: bandPart("part"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.bandId, t.userId] })],
@@ -86,7 +97,8 @@ export const bandInvites = pgTable("band_invites", {
   bandId: uuid("band_id")
     .notNull()
     .references(() => bands.id, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull().unique(),
+  // 평문 저장 — 활성 초대를 재사용하려면 URL을 복원할 수 있어야 한다 (스펙 결정 6)
+  token: text("token").notNull().unique(),
   createdBy: uuid("created_by")
     .notNull()
     .references(() => users.id),

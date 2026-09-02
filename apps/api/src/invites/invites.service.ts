@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
@@ -23,7 +23,7 @@ export class InvitesService {
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
     const [row] = await this.db
       .insert(bandInvites)
-      .values({ bandId, tokenHash: this.hash(token), createdBy: userId, expiresAt })
+      .values({ bandId, token, createdBy: userId, expiresAt })
       .returning();
     if (!row) throw new Error("failed to insert invite");
     return { id: row.id, url: this.inviteUrl(token), expiresAt: expiresAt.toISOString() };
@@ -80,10 +80,6 @@ export class InvitesService {
     if (!row) throw new NotFoundException("초대장을 찾을 수 없어요.");
   }
 
-  private hash(token: string): string {
-    return createHash("sha256").update(token).digest("hex");
-  }
-
   private inviteUrl(token: string): string {
     const base = process.env.INVITE_LINK_BASE_URL;
     if (!base) throw new Error("INVITE_LINK_BASE_URL is not set");
@@ -93,7 +89,7 @@ export class InvitesService {
   /** 미존재/만료/취소/소진을 구분하지 않고 404 — 토큰 존재 여부를 노출하지 않는다. */
   private async findValid(token: string): Promise<typeof bandInvites.$inferSelect> {
     const invite = await this.db.query.bandInvites.findFirst({
-      where: eq(bandInvites.tokenHash, this.hash(token)),
+      where: eq(bandInvites.token, token),
     });
     const valid =
       invite &&

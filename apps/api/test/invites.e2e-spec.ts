@@ -49,9 +49,9 @@ describe("invites API", () => {
   it("owner는 초대를 만들고 URL은 INVITE_LINK_BASE_URL/invite/<token>", async () => {
     const invite = await createInvite();
     expect(invite.url).toMatch(/^https:\/\/invite\.test\/invite\/[A-Za-z0-9_-]{20,}$/);
-    // 원문 토큰은 DB에 저장되지 않는다
+    // 재사용을 위해 토큰을 평문으로 저장한다 (스펙 결정 6)
     const rows = await db.query.bandInvites.findMany({ where: eq(bandInvites.bandId, bandId) });
-    expect(rows[0]!.tokenHash).not.toBe(invite.token);
+    expect(rows[0]!.token).toBe(invite.token);
   });
 
   it("member는 초대를 만들 수 없다 (403)", async () => {

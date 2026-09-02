@@ -152,6 +152,17 @@ describe("HttpApiClient", () => {
     });
   });
 
+  it("message 없이 code만 있는 오류도 ApiError.code로 전달한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(410, { code: "invite_expired" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await expect(client.invites.preview("tok123")).rejects.toMatchObject({
+      status: 410,
+      code: "invite_expired",
+      message: "요청에 실패했어요.",
+    });
+  });
+
   it("code 없는 오류는 ApiError.code가 undefined다", async () => {
     const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
     const fetchFn = vi.fn(async () => json(400, { message: "name must be 1-50 characters" }));

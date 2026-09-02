@@ -63,4 +63,29 @@ describe("MockApiClient", () => {
     expect(notified).toBeGreaterThan(0);
     off();
   });
+
+  describe("bands.removeMember", () => {
+    it("존재하지 않는 밴드면 거부한다", async () => {
+      const api = new MockApiClient();
+      await expect(api.bands.removeMember("no-such-band", "m2")).rejects.toThrow();
+    });
+
+    it("현재 사용자가 owner가 아니면 거부한다 (시드 b1에는 참여하지 않은 상태)", async () => {
+      const api = new MockApiClient();
+      await expect(api.bands.removeMember("b1", "m2")).rejects.toThrow();
+    });
+
+    it("대상이 멤버가 아니면 거부한다", async () => {
+      const api = new MockApiClient();
+      const band = await api.bands.create("New Band");
+      await expect(api.bands.removeMember(band.id, "no-such-user")).rejects.toThrow();
+    });
+
+    it("자기 자신은 내보낼 수 없다", async () => {
+      const api = new MockApiClient();
+      const band = await api.bands.create("New Band");
+      const me = (await api.bands.members(band.id))[0]!;
+      await expect(api.bands.removeMember(band.id, me.id)).rejects.toThrow();
+    });
+  });
 });

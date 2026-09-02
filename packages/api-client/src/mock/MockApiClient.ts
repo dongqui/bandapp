@@ -100,7 +100,15 @@ export class MockApiClient implements RehearsalApiClient {
     },
     removeMember: async (bandId: string, userId: string): Promise<void> => {
       const members = this.state.members[bandId];
-      if (!members) return;
+      if (!members) throw new Error("이 밴드를 찾을 수 없어요.");
+      const me = members.find((m) => m.id === MOCK_USER.id);
+      if (!me || me.role !== "owner") throw new Error("밴드 관리자만 할 수 있어요.");
+      const target = members.find((m) => m.id === userId);
+      if (!target) throw new Error("팀원을 찾을 수 없어요.");
+      if (userId === MOCK_USER.id) {
+        throw new Error("자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.");
+      }
+      if (target.role === "owner") throw new Error("팀장은 내보낼 수 없어요.");
       this.state.members[bandId] = members.filter((m) => m.id !== userId);
       const band = this.state.bands.find((b) => b.id === bandId);
       if (band) band.memberCount = this.state.members[bandId]!.length;

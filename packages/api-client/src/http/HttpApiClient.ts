@@ -136,7 +136,9 @@ export class HttpApiClient implements RehearsalApiClient {
     try {
       const body = (await res.json()) as { message?: string | string[]; code?: string };
       const message = Array.isArray(body.message) ? body.message[0] : body.message;
+      // message가 없어도 code는 읽는다 — 둘은 body에 독립적으로 실릴 수 있다.
       if (message) return { message, code: body.code };
+      return { message: res.status >= 500 ? "잠시 후 다시 시도해 주세요." : "요청에 실패했어요.", code: body.code };
     } catch {
       // JSON이 아니면 아래 기본 문구
     }

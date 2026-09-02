@@ -154,4 +154,57 @@ describe("invites API", () => {
       .expect(200);
     expect(members.body).toHaveLength(2);
   });
+
+  it("활성 초대가 있으면 재발급하지 않고 같은 링크를 준다", async () => {
+    const first = await createInvite();
+    const second = await createInvite();
+    expect(second.url).toBe(first.url);
+    expect(second.id).toBe(first.id);
+    const rows = await db.query.bandInvites.findMany({ where: eq(bandInvites.bandId, bandId) });
+    expect(rows).toHaveLength(1);
+    // 재사용된 링크가 실제로 조회된다 — 평문 저장 왕복 확인
+    await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
+  });
+
+  it("취소된 뒤에는 새 링크가 발급된다", async () => {
+    const first = await createInvite();
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/invites/${first.id}`)
+      .set(auth(owner.accessToken))
+      .expect(204);
+    const second = await createInvite();
+    expect(second.url).not.toBe(first.url);
+    await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
+  });
+
+  it("만료된 초대만 있으면 새 링크가 발급된다", async () => {
+    const first = await createInvite();
+    await db
+      .update(bandInvites)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(bandInvites.id, first.id));
+    const second = await createInvite();
+    expect(second.id).not.toBe(first.id);
+    await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
+  });
+
+  it("팀원을 내보낸 뒤 발급하면 이전과 다른 링크가 나온다", async () => {
+    const before = await createInvite();
+    const member = await memberLogin("kicked-then-reinvited");
+    await request(app.getHttpServer())
+      .post(`/invites/${before.token}/join`)
+      .set(auth(member.accessToken))
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${member.userId}`)
+      .set(auth(owner.accessToken))
+      .expect(204);
+
+    // 내보내기가 활성 초대를 전부 무효화했으므로 재사용 대상이 없다 (스펙 결정 5·6)
+    const after = await createInvite();
+    expect(after.url).not.toBe(before.url);
+    await request(app.getHttpServer()).get(`/invites/${before.token}`).expect(410);
+    await request(app.getHttpServer()).get(`/invites/${after.token}`).expect(200);
+  });
 });

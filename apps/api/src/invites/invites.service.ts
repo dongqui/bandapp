@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { GoneException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import type { BandInvite, InvitePreview, JoinInviteResult } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
@@ -20,6 +20,11 @@ export class InvitesService {
 
   async create(bandId: string, userId: string): Promise<BandInvite> {
     await this.memberships.assertOwner(bandId, userId);
+    // 화면 진입마다 새 링크가 생기지 않도록 살아있는 초대를 재사용한다 (스펙 결정 6).
+    // 동시 요청이 둘 다 "없음"으로 판정해 2개가 생길 수 있으나, revoke가 활성 초대를
+    // 전부 무효화하므로 보장이 깨지지 않는다. 밴드 단위 락은 얻는 것에 비해 비싸다.
+    const active = await this.findActive(bandId);
+    if (active) return this.toBandInvite(active);
     const token = randomBytes(24).toString("base64url"); // 32자 — 충분히 긴 random token
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
     const [row] = await this.db
@@ -27,7 +32,29 @@ export class InvitesService {
       .values({ bandId, token, createdBy: userId, expiresAt })
       .returning();
     if (!row) throw new Error("failed to insert invite");
-    return { id: row.id, url: this.inviteUrl(token), expiresAt: expiresAt.toISOString() };
+    return this.toBandInvite(row);
+  }
+
+  /** "활성"의 정의는 findValid와 같다. 여럿이면 가장 최근 것. */
+  private async findActive(bandId: string): Promise<typeof bandInvites.$inferSelect | null> {
+    const [row] = await this.db
+      .select()
+      .from(bandInvites)
+      .where(
+        and(
+          eq(bandInvites.bandId, bandId),
+          isNull(bandInvites.revokedAt),
+          gt(bandInvites.expiresAt, new Date()),
+          or(isNull(bandInvites.maxUses), lt(bandInvites.usedCount, bandInvites.maxUses)),
+        ),
+      )
+      .orderBy(desc(bandInvites.createdAt))
+      .limit(1);
+    return row ?? null;
+  }
+
+  private toBandInvite(row: typeof bandInvites.$inferSelect): BandInvite {
+    return { id: row.id, url: this.inviteUrl(row.token), expiresAt: row.expiresAt.toISOString() };
   }
 
   async preview(token: string): Promise<InvitePreview> {

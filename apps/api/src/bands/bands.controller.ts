@@ -65,4 +65,16 @@ export class BandsController {
     requireUuidParam(bandId, "bandId");
     await this.bandsService.leave(bandId, userId);
   }
+
+  @Delete(":bandId/members/:userId")
+  @HttpCode(204)
+  async removeMember(
+    @CurrentUserId() actorId: string,
+    @Param("bandId") bandId: string,
+    @Param("userId") userId: string,
+  ): Promise<void> {
+    requireUuidParam(bandId, "bandId");
+    requireUuidParam(userId, "userId");
+    await this.bandsService.removeMember(bandId, actorId, userId);
+  }
 }

@@ -11,6 +11,9 @@ import { inviteError } from "./invite-errors.js";
 
 // MVP 정책 (기획서 11장): 링크 방식, 7일, MEMBER, owner 생성
 const INVITE_TTL_DAYS = 7;
+// 재사용 가능한 최소 잔여 수명 (스펙 결정 6). 이 밑으로는 재사용하지 않는다 —
+// 리허설 룸 보면대에 붙여둔 QR이 몇 분 뒤 죽어버리는 걸 막기 위함.
+const REUSE_MIN_REMAINING_MS = 24 * 60 * 60 * 1000;
 
 export class InvitesService {
   constructor(
@@ -23,6 +26,10 @@ export class InvitesService {
     // 화면 진입마다 새 링크가 생기지 않도록 살아있는 초대를 재사용한다 (스펙 결정 6).
     // 동시 요청이 둘 다 "없음"으로 판정해 2개가 생길 수 있으나, revoke가 활성 초대를
     // 전부 무효화하므로 보장이 깨지지 않는다. 밴드 단위 락은 얻는 것에 비해 비싸다.
+    // findActive는 트랜잭션 밖에서 읽으므로, 이 읽기와 반환 사이에 removeMember의 revoke가
+    // 커밋되면 이미 무효화된 URL을 돌려줄 수 있다 — 하지만 그 링크는 방금 내보낸 멤버가
+    // 이미 쥐고 있던 것과 같아 새는 정보가 없고, owner는 화면을 다시 열면 그만이라 락·재시도·
+    // 트랜잭션 없이 감수한다.
     const active = await this.findActive(bandId);
     if (active) return this.toBandInvite(active);
     const token = randomBytes(24).toString("base64url"); // 32자 — 충분히 긴 random token
@@ -35,7 +42,14 @@ export class InvitesService {
     return this.toBandInvite(row);
   }
 
-  /** "활성"의 정의는 findValid와 같다. 여럿이면 가장 최근 것. */
+  /**
+   * "활성"의 정의는 findValid와 같되, 만료까지 REUSE_MIN_REMAINING_MS 이상 남아있어야 한다.
+   * findActive가 findValid보다 느슨했다면 create가 preview/join에서는 이미 죽은 링크를
+   * 돌려줄 수 있었다 — 그래서 두 판정은 원래 의도적으로 동일했다. 여기서는 반대로 더
+   * 엄격하게 만든다: 잔여 수명이 하루 미만인 초대는 재사용하지 않는다. 이건 안전하다 —
+   * 재사용하지 않은 초대는 revoke되는 게 아니라 그냥 버려지고(방치), 하루 안에 스스로
+   * 만료되어 findValid 기준으로도 죽는다. 여럿이면 가장 최근 것.
+   */
   private async findActive(bandId: string): Promise<typeof bandInvites.$inferSelect | null> {
     const [row] = await this.db
       .select()
@@ -44,7 +58,7 @@ export class InvitesService {
         and(
           eq(bandInvites.bandId, bandId),
           isNull(bandInvites.revokedAt),
-          gt(bandInvites.expiresAt, new Date()),
+          gt(bandInvites.expiresAt, new Date(Date.now() + REUSE_MIN_REMAINING_MS)),
           or(isNull(bandInvites.maxUses), lt(bandInvites.usedCount, bandInvites.maxUses)),
         ),
       )
@@ -105,7 +119,7 @@ export class InvitesService {
       .set({ revokedAt: new Date() })
       .where(and(eq(bandInvites.id, inviteId), eq(bandInvites.bandId, bandId)))
       .returning();
-    if (!row) throw new NotFoundException(inviteError("invite_not_found"));
+    if (!row) throw new NotFoundException("초대장을 찾을 수 없어요.");
   }
 
   private inviteUrl(token: string): string {

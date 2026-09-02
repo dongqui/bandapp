@@ -188,6 +188,40 @@ describe("invites API", () => {
     await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
   });
 
+  it("잔여 수명이 하루 미만이면 재사용하지 않고 방치한 채 새로 발급한다", async () => {
+    const first = await createInvite();
+    await db
+      .update(bandInvites)
+      .set({ expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000) }) // 24시간 미만 남김
+      .where(eq(bandInvites.id, first.id));
+    const second = await createInvite();
+    expect(second.id).not.toBe(first.id);
+    // 방치된 것이지 revoke된 게 아니다 — 스스로 만료될 때까지는 여전히 유효하다.
+    await request(app.getHttpServer()).get(`/invites/${first.token}`).expect(200);
+    await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
+  });
+
+  it("활성 초대가 여러 개면 createdAt이 가장 최근인 것을 재사용한다", async () => {
+    const first = await createInvite();
+    const [second] = await db
+      .insert(bandInvites)
+      .values({
+        bandId,
+        token: "second-live-invite-token-000000",
+        createdBy: owner.userId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        createdAt: new Date(Date.now() + 60 * 1000), // first보다 나중
+      })
+      .returning();
+    const rows = await db.query.bandInvites.findMany({ where: eq(bandInvites.bandId, bandId) });
+    expect(rows).toHaveLength(2); // 둘 다 활성 — 결정 5/6이 다루는 그 상태
+
+    const reused = await createInvite();
+    expect(reused.id).toBe(second!.id);
+    expect(reused.token).toBe("second-live-invite-token-000000");
+    expect(reused.id).not.toBe(first.id);
+  });
+
   it("팀원을 내보낸 뒤 발급하면 이전과 다른 링크가 나온다", async () => {
     const before = await createInvite();
     const member = await memberLogin("kicked-then-reinvited");

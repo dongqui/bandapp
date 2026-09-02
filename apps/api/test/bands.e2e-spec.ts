@@ -1,4 +1,5 @@
 import type { INestApplication } from "@nestjs/common";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bandMembers } from "../src/db/schema.js";
@@ -42,7 +43,22 @@ describe("bands API", () => {
       .get(`/bands/${res.body.id}/members`)
       .set(auth(owner.accessToken))
       .expect(200);
-    expect(members.body).toEqual([{ id: owner.userId, name: "Dongjin", role: "owner" }]);
+    expect(members.body).toEqual([
+      { id: owner.userId, name: "Dongjin", role: "owner", part: null },
+    ]);
+  });
+
+  it("멤버 목록은 파트를 함께 준다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    await db
+      .update(bandMembers)
+      .set({ part: "guitar" })
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, owner.userId)));
+    const res = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(owner.accessToken))
+      .expect(200);
+    expect(res.body[0]).toMatchObject({ role: "owner", part: "guitar" });
   });
 
   it("GET /bands는 내가 속한 밴드만 memberCount와 함께 준다", async () => {

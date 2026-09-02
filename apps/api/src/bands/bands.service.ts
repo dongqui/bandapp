@@ -1,11 +1,27 @@
 import { ConflictException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
-import type { Band, BandMember } from "@bandapp/types";
+import type { Band, BandMember, BandPart, MemberRole } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { bandMembers, bands, users } from "../db/schema.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
+
+const memberColumns = {
+  id: users.id,
+  name: users.displayName,
+  role: bandMembers.role,
+  part: bandMembers.part,
+};
+
+function toBandMember(row: {
+  id: string;
+  name: string | null;
+  role: MemberRole;
+  part: BandPart | null;
+}): BandMember {
+  return { id: row.id, name: row.name ?? "탈퇴한 멤버", role: row.role, part: row.part };
+}
 
 export class BandsService {
   constructor(
@@ -37,12 +53,12 @@ export class BandsService {
 
   async members(bandId: string): Promise<BandMember[]> {
     const rows = await this.db
-      .select({ id: users.id, name: users.displayName, role: bandMembers.role })
+      .select(memberColumns)
       .from(bandMembers)
       .innerJoin(users, eq(users.id, bandMembers.userId))
       .where(eq(bandMembers.bandId, bandId))
       .orderBy(bandMembers.joinedAt);
-    return rows.map((r) => ({ id: r.id, name: r.name ?? "탈퇴한 멤버", role: r.role }));
+    return rows.map(toBandMember);
   }
 
   async leave(bandId: string, userId: string): Promise<void> {

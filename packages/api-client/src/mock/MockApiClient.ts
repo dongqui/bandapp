@@ -84,7 +84,9 @@ export class MockApiClient implements RehearsalApiClient {
     create: async (name: string): Promise<Band> => {
       const band: Band = { id: `b${this.nextId++}`, name, memberCount: 1 };
       this.state.bands.push(band);
-      this.state.members[band.id] = [{ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner" }];
+      this.state.members[band.id] = [
+        { id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner", part: null },
+      ];
       this.emit();
       return { ...band };
     },
@@ -114,7 +116,7 @@ export class MockApiClient implements RehearsalApiClient {
       const band = this.bandFromInviteToken(token);
       const members = (this.state.members[band.id] ??= []);
       if (members.some((m) => m.id === MOCK_USER.id)) return { bandId: band.id, alreadyMember: true };
-      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member" });
+      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member", part: null });
       band.memberCount = members.length;
       this.emit();
       return { bandId: band.id, alreadyMember: false };

@@ -188,11 +188,11 @@ describe("invites API", () => {
     await request(app.getHttpServer()).get(`/invites/${second.token}`).expect(200);
   });
 
-  it("잔여 수명이 하루 미만이면 재사용하지 않고 방치한 채 새로 발급한다", async () => {
+  it("잔여 수명이 6시간 미만이면 재사용하지 않고 방치한 채 새로 발급한다", async () => {
     const first = await createInvite();
     await db
       .update(bandInvites)
-      .set({ expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000) }) // 24시간 미만 남김
+      .set({ expiresAt: new Date(Date.now() + 3 * 60 * 60 * 1000) }) // 6시간 미만 남김
       .where(eq(bandInvites.id, first.id));
     const second = await createInvite();
     expect(second.id).not.toBe(first.id);

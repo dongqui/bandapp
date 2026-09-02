@@ -12,8 +12,10 @@ import { inviteError } from "./invite-errors.js";
 // MVP 정책 (기획서 11장): 링크 방식, 7일, MEMBER, owner 생성
 const INVITE_TTL_DAYS = 7;
 // 재사용 가능한 최소 잔여 수명 (스펙 결정 6). 이 밑으로는 재사용하지 않는다 —
-// 리허설 룸 보면대에 붙여둔 QR이 몇 분 뒤 죽어버리는 걸 막기 위함.
-const REUSE_MIN_REMAINING_MS = 24 * 60 * 60 * 1000;
+// 합주실 보면대에 띄워둔 QR이 몇 분 뒤 죽어버리는 걸 막기 위함.
+// INVITE_TTL_DAYS보다 충분히 작아야 한다 — 둘이 가까워지면 모든 발급이 하한에 걸려
+// 재사용이 사실상 죽는다.
+const REUSE_MIN_REMAINING_MS = 6 * 60 * 60 * 1000;
 
 export class InvitesService {
   constructor(
@@ -46,8 +48,8 @@ export class InvitesService {
    * "활성"의 정의는 findValid와 같되, 만료까지 REUSE_MIN_REMAINING_MS 이상 남아있어야 한다.
    * findActive가 findValid보다 느슨했다면 create가 preview/join에서는 이미 죽은 링크를
    * 돌려줄 수 있었다 — 그래서 두 판정은 원래 의도적으로 동일했다. 여기서는 반대로 더
-   * 엄격하게 만든다: 잔여 수명이 하루 미만인 초대는 재사용하지 않는다. 이건 안전하다 —
-   * 재사용하지 않은 초대는 revoke되는 게 아니라 그냥 버려지고(방치), 하루 안에 스스로
+   * 엄격하게 만든다: 잔여 수명이 6시간 미만인 초대는 재사용하지 않는다. 이건 안전하다 —
+   * 재사용하지 않은 초대는 revoke되는 게 아니라 그냥 버려지고(방치), 곧 스스로
    * 만료되어 findValid 기준으로도 죽는다. 여럿이면 가장 최근 것.
    */
   private async findActive(bandId: string): Promise<typeof bandInvites.$inferSelect | null> {

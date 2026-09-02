@@ -12,13 +12,14 @@ import type { BandInvite, InvitePreview, JoinInviteResult } from "@bandapp/types
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
 import { requireUuidParam } from "../common/validation.js";
+import { inviteError } from "./invite-errors.js";
 import { InvitesService } from "./invites.service.js";
 
 const INVITE_TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
 function requireInviteToken(token: string): string {
-  // 형식이 아예 다르면 조회 없이 404 (유효 토큰과 같은 응답)
-  if (!INVITE_TOKEN_RE.test(token)) throw new NotFoundException("초대장을 찾을 수 없어요.");
+  // 형식이 아예 다르면 조회 없이 404 (없는 토큰과 같은 응답)
+  if (!INVITE_TOKEN_RE.test(token)) throw new NotFoundException(inviteError("invite_not_found"));
   return token;
 }
 

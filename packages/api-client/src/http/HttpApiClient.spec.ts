@@ -138,4 +138,62 @@ describe("HttpApiClient", () => {
     const headers = fetchFn.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers?.authorization).toBeUndefined();
   });
+
+  it("오류 본문의 code를 ApiError.code로 전달한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () =>
+      json(410, { message: "초대가 만료되었어요.", code: "invite_expired" }),
+    );
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await expect(client.invites.preview("tok123")).rejects.toMatchObject({
+      status: 410,
+      code: "invite_expired",
+      message: "초대가 만료되었어요.",
+    });
+  });
+
+  it("message 없이 code만 있는 오류도 ApiError.code로 전달한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(410, { code: "invite_expired" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await expect(client.invites.preview("tok123")).rejects.toMatchObject({
+      status: 410,
+      code: "invite_expired",
+      message: "요청에 실패했어요.",
+    });
+  });
+
+  it("code 없는 오류는 ApiError.code가 undefined다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(400, { message: "name must be 1-50 characters" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const err = await client.bands.create("x").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBeUndefined();
+  });
+
+  it("본인 파트 설정은 PATCH .../members/me로 나간다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () =>
+      json(200, { id: "u1", name: "Dongjin", role: "owner", part: "guitar" }),
+    );
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const member = await client.bands.setMyPart("b1", "guitar");
+    expect(member.part).toBe("guitar");
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://api.test/bands/b1/members/me",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ part: "guitar" }) }),
+    );
+  });
+
+  it("팀원 내보내기는 DELETE .../members/<userId>로 나간다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.bands.removeMember("b1", "u2");
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://api.test/bands/b1/members/u2",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
 });

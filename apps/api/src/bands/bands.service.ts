@@ -1,11 +1,27 @@
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
-import { and, eq, sql } from "drizzle-orm";
-import type { Band, BandMember } from "@bandapp/types";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import type { Band, BandMember, BandPart, MemberRole } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
-import { bandMembers, bands, users } from "../db/schema.js";
+import { bandInvites, bandMembers, bands, users } from "../db/schema.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
+
+const memberColumns = {
+  id: users.id,
+  name: users.displayName,
+  role: bandMembers.role,
+  part: bandMembers.part,
+};
+
+function toBandMember(row: {
+  id: string;
+  name: string | null;
+  role: MemberRole;
+  part: BandPart | null;
+}): BandMember {
+  return { id: row.id, name: row.name ?? "탈퇴한 멤버", role: row.role, part: row.part };
+}
 
 export class BandsService {
   constructor(
@@ -37,12 +53,12 @@ export class BandsService {
 
   async members(bandId: string): Promise<BandMember[]> {
     const rows = await this.db
-      .select({ id: users.id, name: users.displayName, role: bandMembers.role })
+      .select(memberColumns)
       .from(bandMembers)
       .innerJoin(users, eq(users.id, bandMembers.userId))
       .where(eq(bandMembers.bandId, bandId))
       .orderBy(bandMembers.joinedAt);
-    return rows.map((r) => ({ id: r.id, name: r.name ?? "탈퇴한 멤버", role: r.role }));
+    return rows.map(toBandMember);
   }
 
   async leave(bandId: string, userId: string): Promise<void> {
@@ -59,6 +75,47 @@ export class BandsService {
     await this.db
       .delete(bandMembers)
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+  }
+
+  /**
+   * 검증 순서가 중요하다 — owner 확인이 먼저다. 권한 없는 사람이 404/409로
+   * 멤버십 존재 여부를 물어볼 수 있으면 안 된다.
+   */
+  async removeMember(bandId: string, actorId: string, targetUserId: string): Promise<void> {
+    await this.memberships.assertOwner(bandId, actorId);
+    const targetRole = await this.memberships.roleOf(bandId, targetUserId);
+    if (!targetRole) throw new NotFoundException("팀원을 찾을 수 없어요.");
+    if (targetUserId === actorId) {
+      throw new ConflictException("자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.");
+    }
+    if (targetRole === "owner") throw new ConflictException("팀장은 내보낼 수 없어요.");
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(bandMembers)
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, targetUserId)));
+      // 내보낸 사람이 폰에 남은 링크로 곧장 돌아오지 못하게 활성 초대를 전부 무효화한다 (스펙 결정 5)
+      await tx
+        .update(bandInvites)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(bandInvites.bandId, bandId), isNull(bandInvites.revokedAt)));
+    });
+  }
+
+  /** 본인 파트만 쓴다 — 타인의 파트를 쓰는 경로는 없다 (스펙 결정 3). */
+  async setPart(bandId: string, userId: string, part: BandPart | null): Promise<BandMember> {
+    await this.memberships.assertMember(bandId, userId);
+    await this.db
+      .update(bandMembers)
+      .set({ part })
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+    const [row] = await this.db
+      .select(memberColumns)
+      .from(bandMembers)
+      .innerJoin(users, eq(users.id, bandMembers.userId))
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+    // update와 read 사이에 동시 removeMember로 행이 사라졌을 수 있다 — assertMember와 같은 403.
+    if (!row) throw new ForbiddenException("이 밴드에 접근할 수 없어요.");
+    return toBandMember(row);
   }
 
   private async countMembers(bandId: string): Promise<number> {

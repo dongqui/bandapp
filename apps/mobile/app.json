@@ -32,11 +32,7 @@
       "expo-apple-authentication"
     ],
     "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "ad4bcafc-a8ff-42e4-841b-ac173b902a21"
-      }
-    },
-    "owner": "dongqui9"
+      "router": {}
+    }
   }
 }

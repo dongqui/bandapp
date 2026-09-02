@@ -111,10 +111,10 @@ export function createSeedState(): MockState {
     bands: [{ id: "b1", name: "FRIDAY NIGHT", memberCount: 4 }],
     members: {
       b1: [
-        { id: "m1", name: "Dongjin Kim", role: "owner" },
-        { id: "m2", name: "Minsu", role: "member" },
-        { id: "m3", name: "Jihoon", role: "member" },
-        { id: "m4", name: "Suhyun", role: "member" },
+        { id: "m1", name: "Dongjin Kim", role: "owner", part: "guitar" },
+        { id: "m2", name: "Minsu", role: "member", part: "vocal" },
+        { id: "m3", name: "Jihoon", role: "member", part: "bass" },
+        { id: "m4", name: "Suhyun", role: "member", part: null },
       ],
     },
     sessions,

@@ -6,13 +6,14 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from "@nestjs/common";
 import type { Band, BandMember } from "@bandapp/types";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
-import { requireString, requireUuidParam } from "../common/validation.js";
+import { requireBandPartOrNull, requireString, requireUuidParam } from "../common/validation.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
 import { BandsService } from "./bands.service.js";
 
@@ -48,10 +49,32 @@ export class BandsController {
     return this.bandsService.members(bandId);
   }
 
+  @Patch(":bandId/members/me")
+  setMyPart(
+    @CurrentUserId() userId: string,
+    @Param("bandId") bandId: string,
+    @Body() body: unknown,
+  ): Promise<BandMember> {
+    requireUuidParam(bandId, "bandId");
+    return this.bandsService.setPart(bandId, userId, requireBandPartOrNull(body, "part"));
+  }
+
   @Delete(":bandId/members/me")
   @HttpCode(204)
   async leave(@CurrentUserId() userId: string, @Param("bandId") bandId: string): Promise<void> {
     requireUuidParam(bandId, "bandId");
     await this.bandsService.leave(bandId, userId);
+  }
+
+  @Delete(":bandId/members/:userId")
+  @HttpCode(204)
+  async removeMember(
+    @CurrentUserId() actorId: string,
+    @Param("bandId") bandId: string,
+    @Param("userId") userId: string,
+  ): Promise<void> {
+    requireUuidParam(bandId, "bandId");
+    requireUuidParam(userId, "userId");
+    await this.bandsService.removeMember(bandId, actorId, userId);
   }
 }

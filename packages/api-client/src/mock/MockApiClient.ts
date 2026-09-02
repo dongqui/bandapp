@@ -3,6 +3,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  BandPart,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
@@ -84,9 +85,34 @@ export class MockApiClient implements RehearsalApiClient {
     create: async (name: string): Promise<Band> => {
       const band: Band = { id: `b${this.nextId++}`, name, memberCount: 1 };
       this.state.bands.push(band);
-      this.state.members[band.id] = [{ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner" }];
+      this.state.members[band.id] = [
+        { id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner", part: null },
+      ];
       this.emit();
       return { ...band };
+    },
+    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+      const me = (this.state.members[bandId] ?? []).find((m) => m.id === MOCK_USER.id);
+      if (!me) throw new Error("이 밴드의 멤버가 아니에요.");
+      me.part = part;
+      this.emit();
+      return { ...me };
+    },
+    removeMember: async (bandId: string, userId: string): Promise<void> => {
+      const members = this.state.members[bandId];
+      if (!members) throw new Error("이 밴드를 찾을 수 없어요.");
+      const me = members.find((m) => m.id === MOCK_USER.id);
+      if (!me || me.role !== "owner") throw new Error("밴드 관리자만 할 수 있어요.");
+      const target = members.find((m) => m.id === userId);
+      if (!target) throw new Error("팀원을 찾을 수 없어요.");
+      if (userId === MOCK_USER.id) {
+        throw new Error("자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.");
+      }
+      if (target.role === "owner") throw new Error("팀장은 내보낼 수 없어요.");
+      this.state.members[bandId] = members.filter((m) => m.id !== userId);
+      const band = this.state.bands.find((b) => b.id === bandId);
+      if (band) band.memberCount = this.state.members[bandId]!.length;
+      this.emit();
     },
     leave: async (bandId: string): Promise<void> => {
       this.state.bands = this.state.bands.filter((b) => b.id !== bandId);
@@ -99,6 +125,8 @@ export class MockApiClient implements RehearsalApiClient {
       url: `https://band.app/invite/${this.mockInviteToken(bandId)}`,
       expiresAt: week(),
     }),
+    // mock 토큰은 bandId에서 결정적으로 만들어지므로 무효화할 상태가 없다 — no-op.
+    revokeInvite: async (): Promise<void> => undefined,
   };
 
   invites = {
@@ -114,7 +142,7 @@ export class MockApiClient implements RehearsalApiClient {
       const band = this.bandFromInviteToken(token);
       const members = (this.state.members[band.id] ??= []);
       if (members.some((m) => m.id === MOCK_USER.id)) return { bandId: band.id, alreadyMember: true };
-      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member" });
+      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member", part: null });
       band.memberCount = members.length;
       this.emit();
       return { bandId: band.id, alreadyMember: false };

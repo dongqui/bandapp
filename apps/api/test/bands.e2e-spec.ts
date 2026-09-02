@@ -1,7 +1,8 @@
 import type { INestApplication } from "@nestjs/common";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bandMembers } from "../src/db/schema.js";
+import { bandInvites, bandMembers } from "../src/db/schema.js";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
@@ -42,7 +43,22 @@ describe("bands API", () => {
       .get(`/bands/${res.body.id}/members`)
       .set(auth(owner.accessToken))
       .expect(200);
-    expect(members.body).toEqual([{ id: owner.userId, name: "Dongjin", role: "owner" }]);
+    expect(members.body).toEqual([
+      { id: owner.userId, name: "Dongjin", role: "owner", part: null },
+    ]);
+  });
+
+  it("멤버 목록은 파트를 함께 준다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    await db
+      .update(bandMembers)
+      .set({ part: "guitar" })
+      .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, owner.userId)));
+    const res = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(owner.accessToken))
+      .expect(200);
+    expect(res.body[0]).toMatchObject({ role: "owner", part: "guitar" });
   });
 
   it("GET /bands는 내가 속한 밴드만 memberCount와 함께 준다", async () => {
@@ -98,6 +114,129 @@ describe("bands API", () => {
       .expect(204);
     const mine = await request(app.getHttpServer()).get("/bands").set(auth(owner.accessToken)).expect(200);
     expect(mine.body).toHaveLength(0);
+  });
+
+  it("owner는 팀원을 내보내고, 그 밴드의 활성 초대가 함께 무효화된다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const member = await secondUser("kick-target");
+    await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+    const invite = await request(app.getHttpServer())
+      .post(`/bands/${bandId}/invites`)
+      .set(auth(owner.accessToken))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${member.userId}`)
+      .set(auth(owner.accessToken))
+      .expect(204);
+
+    const members = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(owner.accessToken))
+      .expect(200);
+    expect(members.body).toHaveLength(1);
+
+    const rows = await db.query.bandInvites.findMany({ where: eq(bandInvites.bandId, bandId) });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.id).toBe(invite.body.id);
+    expect(rows[0]!.revokedAt).not.toBeNull();
+  });
+
+  it("다른 밴드의 초대는 내보내기에 영향받지 않는다", async () => {
+    const bandA = await createBand(owner.accessToken, "BAND A");
+    const bandB = await createBand(owner.accessToken, "BAND B");
+    const member = await secondUser("kick-target-2");
+    await db.insert(bandMembers).values({ bandId: bandA, userId: member.userId, role: "member" });
+    const inviteB = await request(app.getHttpServer())
+      .post(`/bands/${bandB}/invites`)
+      .set(auth(owner.accessToken))
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandA}/members/${member.userId}`)
+      .set(auth(owner.accessToken))
+      .expect(204);
+
+    const rows = await db.query.bandInvites.findMany({ where: eq(bandInvites.bandId, bandB) });
+    expect(rows[0]!.revokedAt).toBeNull();
+    expect(inviteB.body.id).toBe(rows[0]!.id);
+  });
+
+  it("내보내기 권한과 대상 검증", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const member = await secondUser("plain-member");
+    await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+    const other = await secondUser("another-member");
+    await db.insert(bandMembers).values({ bandId, userId: other.userId, role: "member" });
+
+    // member는 다른 member를 내보낼 수 없다
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${other.userId}`)
+      .set(auth(member.accessToken))
+      .expect(403);
+    // owner가 자기 자신을 내보내려 하면 409 — 팀 나가기를 써야 한다
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${owner.userId}`)
+      .set(auth(owner.accessToken))
+      .expect(409);
+    // 멤버가 아닌 사용자는 404
+    const stranger = await secondUser("not-a-member");
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${stranger.userId}`)
+      .set(auth(owner.accessToken))
+      .expect(404);
+    // UUID가 아니면 400
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/not-a-uuid`)
+      .set(auth(owner.accessToken))
+      .expect(400);
+  });
+
+  it("DELETE .../members/me는 여전히 탈퇴로 동작한다 (라우트 순서)", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const member = await secondUser("leaver");
+    await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/me`)
+      .set(auth(member.accessToken))
+      .expect(204);
+  });
+
+  it("본인 파트를 설정하고 해제한다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const set = await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: "guitar" })
+      .expect(200);
+    expect(set.body).toMatchObject({ id: owner.userId, role: "owner", part: "guitar" });
+
+    const cleared = await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: null })
+      .expect(200);
+    expect(cleared.body.part).toBeNull();
+  });
+
+  it("정의되지 않은 파트는 400, 비멤버는 403", async () => {
+    const bandId = await createBand(owner.accessToken);
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: "trumpet" })
+      .expect(400);
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({})
+      .expect(400);
+    const stranger = await secondUser("stranger-part");
+    await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(stranger.accessToken))
+      .send({ part: "bass" })
+      .expect(403);
   });
 
   it("이름이 비면 400, 토큰 없으면 401", async () => {

@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
+import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Band, BandMember, BandPart, MemberRole } from "@bandapp/types";
@@ -113,7 +113,8 @@ export class BandsService {
       .from(bandMembers)
       .innerJoin(users, eq(users.id, bandMembers.userId))
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
-    if (!row) throw new Error("member vanished between update and read");
+    // update와 read 사이에 동시 removeMember로 행이 사라졌을 수 있다 — assertMember와 같은 403.
+    if (!row) throw new ForbiddenException("이 밴드에 접근할 수 없어요.");
     return toBandMember(row);
   }
 

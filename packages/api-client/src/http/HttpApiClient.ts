@@ -4,6 +4,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  BandPart,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
@@ -24,6 +25,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** 서버가 본문에 실어 보낸 기계 판독용 사유. 없을 수 있다. */
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -92,7 +95,10 @@ export class HttpApiClient implements RehearsalApiClient {
       this.opts.onSessionExpired?.();
       throw new ApiError(401, "세션이 만료됐어요. 다시 로그인해 주세요.");
     }
-    if (!res.ok) throw new ApiError(res.status, await this.errorMessage(res));
+    if (!res.ok) {
+      const { message, code } = await this.errorFrom(res);
+      throw new ApiError(res.status, message, code);
+    }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
   }
@@ -124,17 +130,17 @@ export class HttpApiClient implements RehearsalApiClient {
     return true;
   }
 
-  private async errorMessage(res: Response): Promise<string> {
+  private async errorFrom(res: Response): Promise<{ message: string; code?: string }> {
     // 429는 서버(ThrottlerException)가 영문 메시지를 내려주므로 본문을 읽지 않고 바로 한국어로 대체한다.
-    if (res.status === 429) return "잠시 후 다시 시도해 주세요.";
+    if (res.status === 429) return { message: "잠시 후 다시 시도해 주세요." };
     try {
-      const body = (await res.json()) as { message?: string | string[] };
+      const body = (await res.json()) as { message?: string | string[]; code?: string };
       const message = Array.isArray(body.message) ? body.message[0] : body.message;
-      if (message) return message;
+      if (message) return { message, code: body.code };
     } catch {
       // JSON이 아니면 아래 기본 문구
     }
-    return res.status >= 500 ? "잠시 후 다시 시도해 주세요." : "요청에 실패했어요.";
+    return { message: res.status >= 500 ? "잠시 후 다시 시도해 주세요." : "요청에 실패했어요." };
   }
 
   private async saveLogin(login: LoginResponse): Promise<LoginResponse> {
@@ -188,12 +194,26 @@ export class HttpApiClient implements RehearsalApiClient {
     },
     members: (bandId: string): Promise<BandMember[]> =>
       this.request<BandMember[]>("GET", `/bands/${bandId}/members`),
+    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+      const member = await this.request<BandMember>("PATCH", `/bands/${bandId}/members/me`, {
+        part,
+      });
+      this.emit();
+      return member;
+    },
+    removeMember: async (bandId: string, userId: string): Promise<void> => {
+      await this.request<void>("DELETE", `/bands/${bandId}/members/${userId}`);
+      this.emit();
+    },
     leave: async (bandId: string): Promise<void> => {
       await this.request<void>("DELETE", `/bands/${bandId}/members/me`);
       this.emit();
     },
     createInvite: (bandId: string): Promise<BandInvite> =>
       this.request<BandInvite>("POST", `/bands/${bandId}/invites`),
+    revokeInvite: async (bandId: string, inviteId: string): Promise<void> => {
+      await this.request<void>("DELETE", `/bands/${bandId}/invites/${inviteId}`);
+    },
   };
 
   invites = {

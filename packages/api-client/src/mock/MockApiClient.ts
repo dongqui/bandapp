@@ -3,6 +3,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  BandPart,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
@@ -90,6 +91,21 @@ export class MockApiClient implements RehearsalApiClient {
       this.emit();
       return { ...band };
     },
+    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+      const me = (this.state.members[bandId] ?? []).find((m) => m.id === MOCK_USER.id);
+      if (!me) throw new Error("이 밴드의 멤버가 아니에요.");
+      me.part = part;
+      this.emit();
+      return { ...me };
+    },
+    removeMember: async (bandId: string, userId: string): Promise<void> => {
+      const members = this.state.members[bandId];
+      if (!members) return;
+      this.state.members[bandId] = members.filter((m) => m.id !== userId);
+      const band = this.state.bands.find((b) => b.id === bandId);
+      if (band) band.memberCount = this.state.members[bandId]!.length;
+      this.emit();
+    },
     leave: async (bandId: string): Promise<void> => {
       this.state.bands = this.state.bands.filter((b) => b.id !== bandId);
       delete this.state.members[bandId];
@@ -101,6 +117,8 @@ export class MockApiClient implements RehearsalApiClient {
       url: `https://band.app/invite/${this.mockInviteToken(bandId)}`,
       expiresAt: week(),
     }),
+    // mock 토큰은 bandId에서 결정적으로 만들어지므로 무효화할 상태가 없다 — no-op.
+    revokeInvite: async (): Promise<void> => undefined,
   };
 
   invites = {

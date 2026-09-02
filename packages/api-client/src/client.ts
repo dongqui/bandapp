@@ -4,6 +4,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  BandPart,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
@@ -44,8 +45,13 @@ export interface RehearsalApiClient {
     list(): Promise<Band[]>;
     create(name: string): Promise<Band>;
     members(bandId: string): Promise<BandMember[]>;
+    /** 본인 파트만 설정한다. null이면 해제. */
+    setMyPart(bandId: string, part: BandPart | null): Promise<BandMember>;
+    /** Owner 전용. 성공하면 서버가 그 밴드의 활성 초대를 함께 무효화한다. */
+    removeMember(bandId: string, userId: string): Promise<void>;
     leave(bandId: string): Promise<void>;
     createInvite(bandId: string): Promise<BandInvite>;
+    revokeInvite(bandId: string, inviteId: string): Promise<void>;
   };
   invites: {
     preview(token: string): Promise<InvitePreview>;

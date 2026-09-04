@@ -280,7 +280,7 @@ interface StorageService {
 
 env: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`. 엔드포인트는 `https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com`으로 유도하고 `R2_ENDPOINT`는 override용으로만 남긴다. region은 `auto`. 클라이언트는 lazy 생성이며 env가 비어 있으면 호출 시점에 throw한다(키 없이도 부팅 가능, Gemini와 같은 관례). `STORAGE_PROVIDER`는 쓰는 곳이 없으므로 `.env.example`에서 제거한다.
 
-R2 버킷 `band-rehearsal-dev`(계정 `a4ae56e6…`)는 설계 승인 후 대시보드에서 만든다. CORS: `AllowedOrigins: ["*"]`, `AllowedMethods: ["GET","PUT"]`, `AllowedHeaders: ["*"]`, `ExposeHeaders: ["ETag"]`. 웹 미리보기가 PUT 응답의 ETag를 읽으려면 `ExposeHeaders`가 필수다. API 토큰(Object Read & Write, 이 버킷 한정)은 사용자가 발급해 `.env`에 넣는다.
+R2 버킷은 `taken-rehearsal-dev`다(계정 `a4ae56e6…`, APAC). `band-rehearsal-dev`는 이름이 이미 점유돼 있어 쓸 수 없었다. 대시보드에서 생성했고 CORS도 적용했다: `AllowedOrigins: ["*"]`, `AllowedMethods: ["GET","PUT"]`, `AllowedHeaders: ["*"]`, `ExposeHeaders: ["ETag"]`. 네이티브 앱은 CORS를 검사하지 않으므로 이 설정은 Expo 웹 미리보기용이다. 웹에서 PUT 응답의 ETag를 읽으려면 `ExposeHeaders`가 필수다. 버킷 기본 수명주기 규칙이 미완료 multipart 업로드를 7일 뒤 자동 중단한다. API 토큰(Object Read & Write, 이 버킷 한정)은 사용자가 발급해 `.env`에 넣는다.
 
 ## 모바일
 
@@ -325,4 +325,4 @@ dev 로그인 → 밴드 생성(또는 첫 밴드) → `uploadRecording`(Node `f
 
 ## 후속 작업 (백로그로 이관)
 
-`docs/backlog.md`에 다음을 남긴다: 가져오기 원본 업로드+서버 변환, 검출기 전처리(Python 워커, `planChunks` 교체), 앱 종료 후 업로드 재개(로컬 `{sessionId, fileUri}` 보관), 3시간 백그라운드 녹음 안정성, Take 경계 편집, 실제 파형, 원본 녹음 코멘트, 대댓글 UI, `+MARK` 분석 힌트, gap-merge 옵션, 만료된 multipart 업로드 정리(abort 배치), 세션 삭제 API와 R2 객체 정리.
+`docs/backlog.md`에 다음을 남긴다: 가져오기 원본 업로드+서버 변환, 검출기 전처리(Python 워커, `planChunks` 교체), 앱 종료 후 업로드 재개(로컬 `{sessionId, fileUri}` 보관), 3시간 백그라운드 녹음 안정성, Take 경계 편집, 실제 파형, 원본 녹음 코멘트, 대댓글 UI, `+MARK` 분석 힌트, gap-merge 옵션, 세션 삭제 API와 R2 객체 정리.

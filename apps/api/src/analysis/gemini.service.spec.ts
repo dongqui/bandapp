@@ -1,29 +1,9 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   GeminiService,
   audioMimeType,
   parseTakes,
-  resolveAudioPath,
   type GenAiClient,
 } from "./gemini.service.js";
-
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../../../../");
-
-describe("resolveAudioPath", () => {
-  it("resolves a repo-root-relative path to an absolute path, independent of process.cwd()", () => {
-    expect(resolveAudioPath("poc/data/test.wav")).toBe(join(repoRoot, "poc/data/test.wav"));
-  });
-
-  it("rejects absolute input paths", () => {
-    const absolute = join(repoRoot, "poc/data/test.wav");
-    expect(() => resolveAudioPath(absolute)).toThrow("audioPath must be relative to the workspace root");
-  });
-
-  it("rejects paths that traverse outside the workspace root", () => {
-    expect(() => resolveAudioPath("../../etc/x.wav")).toThrow("audioPath escapes the workspace root");
-  });
-});
 
 describe("audioMimeType", () => {
   it("maps known audio extensions", () => {
@@ -63,7 +43,7 @@ describe("parseTakes", () => {
   });
 });
 
-describe("GeminiService.analyzeAudio", () => {
+describe("GeminiService.analyzeFile", () => {
   const validText = JSON.stringify({
     takes: [{ startMs: 0, endMs: 4000, type: "PERFORMANCE", confidence: 0.9 }],
   });
@@ -79,6 +59,7 @@ describe("GeminiService.analyzeAudio", () => {
           ...(overrides.uploadResult as object),
         }),
         get: (overrides.get as GenAiClient["files"]["get"]) ?? vi.fn(),
+        delete: (overrides.delete as GenAiClient["files"]["delete"]) ?? vi.fn().mockResolvedValue({}),
       },
       models: {
         generateContent:
@@ -103,10 +84,10 @@ describe("GeminiService.analyzeAudio", () => {
     const client = makeClient();
     const service = new GeminiService(() => client, 1);
 
-    const takes = await service.analyzeAudio("poc/data/test.wav");
+    const takes = await service.analyzeFile("/tmp/a.wav");
 
     expect(client.files.upload).toHaveBeenCalledWith({
-      file: resolveAudioPath("poc/data/test.wav"),
+      file: "/tmp/a.wav",
       config: { mimeType: "audio/wav" },
     });
     expect(takes).toEqual([{ startMs: 0, endMs: 4000, type: "PERFORMANCE", confidence: 0.9 }]);
@@ -120,7 +101,7 @@ describe("GeminiService.analyzeAudio", () => {
     const client = makeClient({ uploadResult: { state: "PROCESSING" }, get });
     const service = new GeminiService(() => client, 1);
 
-    await service.analyzeAudio("a.wav");
+    await service.analyzeFile("/tmp/a.wav");
 
     expect(get).toHaveBeenCalledTimes(2);
   });
@@ -130,21 +111,21 @@ describe("GeminiService.analyzeAudio", () => {
     const client = makeClient({ uploadResult: { state: "PROCESSING" }, get });
     const service = new GeminiService(() => client, 1);
 
-    await expect(service.analyzeAudio("a.wav")).rejects.toThrow("processing failed");
+    await expect(service.analyzeFile("/tmp/a.wav")).rejects.toThrow("processing failed");
   });
 
   it("throws when the response is empty", async () => {
     const client = makeClient({ generateContent: vi.fn().mockResolvedValue({ text: undefined }) });
     const service = new GeminiService(() => client, 1);
 
-    await expect(service.analyzeAudio("a.wav")).rejects.toThrow("empty response");
+    await expect(service.analyzeFile("/tmp/a.wav")).rejects.toThrow("empty response");
   });
 
   it("throws without calling the SDK when GEMINI_API_KEY is missing (default factory)", async () => {
     delete process.env.GEMINI_API_KEY;
     const service = new GeminiService();
 
-    await expect(service.analyzeAudio("a.wav")).rejects.toThrow("GEMINI_API_KEY");
+    await expect(service.analyzeFile("/tmp/a.wav")).rejects.toThrow("GEMINI_API_KEY");
   });
 
   it("times out when the analysis exceeds GEMINI_TIMEOUT_MS", async () => {
@@ -154,6 +135,14 @@ describe("GeminiService.analyzeAudio", () => {
     });
     const service = new GeminiService(() => client, 1);
 
-    await expect(service.analyzeAudio("a.wav")).rejects.toThrow("timed out");
+    await expect(service.analyzeFile("/tmp/a.wav")).rejects.toThrow("timed out");
+  });
+
+  it("deletes the uploaded file after analysis, even when generation fails", async () => {
+    process.env.GEMINI_API_KEY = "k";
+    const client = makeClient({ generateContent: vi.fn().mockRejectedValue(new Error("boom")) });
+    const service = new GeminiService(() => client, 0);
+    await expect(service.analyzeFile("/tmp/a.wav")).rejects.toThrow("boom");
+    expect(client.files.delete).toHaveBeenCalledWith({ name: "files/abc" });
   });
 });

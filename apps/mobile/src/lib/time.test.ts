@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clockRange, dateLabel, fmtClock, fmtDuration, monthLabel, startLabel } from "./time";
+import { toLocalIso } from "./time";
 
 describe("time", () => {
   it("fmtClock", () => {
@@ -20,5 +21,16 @@ describe("time", () => {
   });
   it("clockRange wraps past midnight", () => {
     expect(clockRange("2026-08-27T23:30:00", 3600)).toBe("23:30 – 00:30");
+  });
+});
+
+describe("toLocalIso", () => {
+  it("formats local wall-clock time with the device offset", () => {
+    const d = new Date(2026, 8, 4, 19, 3, 0);
+    const iso = toLocalIso(d);
+    expect(iso.startsWith("2026-09-04T19:03:00")).toBe(true);
+    expect(iso).toMatch(/[+-]\d{2}:\d{2}$/);
+    // 서버는 이 문자열을 다시 파싱해도 같은 순간이어야 한다
+    expect(new Date(iso).getTime()).toBe(d.getTime());
   });
 });

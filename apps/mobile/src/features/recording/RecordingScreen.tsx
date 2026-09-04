@@ -38,6 +38,8 @@ export function RecordingScreen() {
     });
     return () => {
       cancelled = true;
+      // 녹음 화면이 언마운트될 때 녹음 중이면 중지
+      if (recorder.isRecording) void recorder.stop().catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

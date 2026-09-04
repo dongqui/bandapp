@@ -63,6 +63,13 @@ describe("sessions API", () => {
     expect(session.durationSec).toBe(0);
   });
 
+  it("R2 multipart 생성이 실패하면 500이고 세션이 남지 않는다", async () => {
+    storage.failNextCreate = true;
+    await request(app.getHttpServer()).post(`/bands/${bandId}/sessions`).set(auth(owner.accessToken)).send(createInput()).expect(500);
+    const res = await request(app.getHttpServer()).get(`/bands/${bandId}/sessions`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body).toEqual([]);
+  });
+
   it.each([
     ["sizeBytes 0", { sizeBytes: 0 }],
     ["2GB 초과", { sizeBytes: 3 * 1024 * MB }],
@@ -123,6 +130,14 @@ describe("sessions API", () => {
   it("파트 수가 맞지 않으면 400이고 상태는 그대로다", async () => {
     const { session } = await createSession();
     await request(app.getHttpServer()).post(`/sessions/${session.id}/upload/complete`).set(auth(owner.accessToken)).send({ parts: [{ partNumber: 1, etag: "e1" }] }).expect(400);
+    const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id));
+    expect(row?.status).toBe("uploading");
+  });
+
+  it("완료 요청의 파트 번호가 범위를 벗어나면 400이고 상태는 그대로다", async () => {
+    const { session } = await createSession();
+    const parts = [1, 2, 4].map((partNumber) => ({ partNumber, etag: `e${partNumber}` }));
+    await request(app.getHttpServer()).post(`/sessions/${session.id}/upload/complete`).set(auth(owner.accessToken)).send({ parts }).expect(400);
     const [row] = await db.select().from(sessions).where(eq(sessions.id, session.id));
     expect(row?.status).toBe("uploading");
   });

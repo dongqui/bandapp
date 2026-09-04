@@ -43,9 +43,14 @@ export class FakeStorage extends StorageService {
   put: Array<{ key: string; path: string }> = [];
   deleted: string[] = [];
   downloads: Array<{ key: string; path: string }> = [];
+  failNextCreate = false;
   private seq = 0;
 
   async createMultipartUpload(key: string, contentType: string) {
+    if (this.failNextCreate) {
+      this.failNextCreate = false;
+      throw new Error("r2 down");
+    }
     const uploadId = `upload-${++this.seq}`;
     this.uploads.set(uploadId, { key, contentType, parts: [], completed: false });
     return { uploadId };

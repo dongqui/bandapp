@@ -48,8 +48,17 @@ export class SessionsService {
       })
       .returning({ id: sessions.id });
     if (!inserted) throw new Error("failed to insert session");
+    // objectKey가 sessionId를 필요로 해서 세션 행을 먼저 만들었다 — R2 쪽 호출이 실패하면
+    // recordings 없이 세션만 남아 이후 모든 조회가 404가 되고 retry도 닿지 못하니(uploading이라
+    // failed가 아님) 방금 만든 세션 행을 지워 보정한다.
     const key = originalKey(bandId, inserted.id);
-    const { uploadId } = await this.storage.createMultipartUpload(key, input.contentType);
+    let uploadId: string;
+    try {
+      ({ uploadId } = await this.storage.createMultipartUpload(key, input.contentType));
+    } catch (err) {
+      await this.db.delete(sessions).where(eq(sessions.id, inserted.id));
+      throw err;
+    }
     await this.db.insert(recordings).values({
       sessionId: inserted.id,
       objectKey: key,
@@ -91,11 +100,7 @@ export class SessionsService {
     if (partNumbers.length === 0 || partNumbers.length > MAX_PART_URLS_PER_REQUEST) {
       throw new BadRequestException(`partNumbers must contain 1-${MAX_PART_URLS_PER_REQUEST} entries`);
     }
-    for (const n of partNumbers) {
-      if (!Number.isInteger(n) || n < 1 || n > rec.partCount) {
-        throw new BadRequestException(`partNumbers must be within 1..${rec.partCount}`);
-      }
-    }
+    this.assertPartNumbers(partNumbers, rec.partCount);
     return Promise.all(
       partNumbers.map(async (partNumber) => ({
         partNumber,
@@ -119,6 +124,7 @@ export class SessionsService {
     if (parts.length !== rec.partCount || numbers.size !== rec.partCount) {
       throw new BadRequestException(`parts must contain exactly ${rec.partCount} distinct entries`);
     }
+    this.assertPartNumbers(parts.map((p) => p.partNumber), rec.partCount);
     await this.storage.completeMultipartUpload(rec.objectKey, rec.uploadId!, parts);
     await this.db.transaction(async (tx) => {
       await tx
@@ -169,6 +175,15 @@ export class SessionsService {
     const [row] = await this.db.select(SESSION_WITH_COUNTS).from(sessions).where(eq(sessions.id, id));
     if (!row) throw new NotFoundException("세션을 찾을 수 없어요.");
     return row;
+  }
+
+  /** partUrls/completeUpload가 공유하는 범위 검증 — 1..partCount를 벗어나면 400. */
+  private assertPartNumbers(numbers: number[], partCount: number): void {
+    for (const n of numbers) {
+      if (!Number.isInteger(n) || n < 1 || n > partCount) {
+        throw new BadRequestException(`partNumbers must be within 1..${partCount}`);
+      }
+    }
   }
 
   private async recordingOf(sessionId: string) {

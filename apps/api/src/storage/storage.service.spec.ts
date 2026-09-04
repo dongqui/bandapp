@@ -8,6 +8,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   ListPartsCommand,
   PutObjectCommand,
   UploadPartCommand,
@@ -130,6 +131,34 @@ describe("R2StorageService", () => {
     await service.deleteObjects(["a", "b"]);
     const cmd = send.mock.calls[0]![0] as DeleteObjectsCommand;
     expect(cmd.input.Delete).toEqual({ Objects: [{ Key: "a" }, { Key: "b" }], Quiet: true });
+  });
+
+  it("listKeys paginates and returns the concatenated keys under the prefix", async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Contents: [{ Key: "bands/b/sessions/s/takes/a.m4a" }, { Key: "bands/b/sessions/s/takes/b.m4a" }],
+        IsTruncated: true,
+        NextContinuationToken: "tok-1",
+      })
+      .mockResolvedValueOnce({
+        Contents: [{ Key: "bands/b/sessions/s/takes/c.m4a" }],
+        IsTruncated: false,
+      });
+    const { service } = makeService(send);
+    await expect(service.listKeys("bands/b/sessions/s/takes/")).resolves.toEqual([
+      "bands/b/sessions/s/takes/a.m4a",
+      "bands/b/sessions/s/takes/b.m4a",
+      "bands/b/sessions/s/takes/c.m4a",
+    ]);
+    const first = send.mock.calls[0]![0] as ListObjectsV2Command;
+    expect(first.input).toEqual({
+      Bucket: "taken-rehearsal-dev",
+      Prefix: "bands/b/sessions/s/takes/",
+      ContinuationToken: undefined,
+    });
+    const second = send.mock.calls[1]![0] as ListObjectsV2Command;
+    expect(second.input.ContinuationToken).toBe("tok-1");
   });
 
   it("abortMultipartUpload sends an AbortMultipartUploadCommand", async () => {

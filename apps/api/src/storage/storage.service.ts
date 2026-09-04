@@ -9,6 +9,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   ListPartsCommand,
   PutObjectCommand,
   S3Client,
@@ -33,6 +34,7 @@ export abstract class StorageService {
   abstract downloadToFile(key: string, path: string): Promise<void>;
   abstract putFile(key: string, path: string, contentType: string): Promise<void>;
   abstract deleteObjects(keys: string[]): Promise<void>;
+  abstract listKeys(prefix: string): Promise<string[]>;
 }
 
 /**
@@ -163,6 +165,21 @@ export class R2StorageService extends StorageService {
         }),
       );
     }
+  }
+
+  async listKeys(prefix: string): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const res = await this.s3.send(
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+      );
+      for (const obj of res.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+      continuationToken = res.IsTruncated && res.NextContinuationToken ? res.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return keys;
   }
 }
 

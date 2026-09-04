@@ -60,3 +60,8 @@ export function originalKey(bandId: string, sessionId: string): string {
 export function takeKey(bandId: string, sessionId: string, takeId: string): string {
   return `bands/${bandId}/sessions/${sessionId}/takes/${takeId}.m4a`;
 }
+
+/** takeKey가 만드는 객체 키들의 공통 접두어. DB 행 없이 R2에만 남은 take 객체를 찾을 때 쓴다. */
+export function takesPrefix(bandId: string, sessionId: string): string {
+  return `bands/${bandId}/sessions/${sessionId}/takes/`;
+}

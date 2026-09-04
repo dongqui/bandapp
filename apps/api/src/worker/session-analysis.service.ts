@@ -4,19 +4,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { TakeCandidate } from "@bandapp/types";
 import { mergeCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { recordings, sessions, takes } from "../db/schema.js";
-import { takeKey } from "../sessions/session-mapper.js";
+import { takeKey, takesPrefix } from "../sessions/session-mapper.js";
 import { StorageService } from "../storage/storage.service.js";
 import { ExecFfmpegRunner, type FfmpegRunner } from "./ffmpeg.js";
 
 const CHUNK_ATTEMPTS = 2;
 const TAKE_CONTENT_TYPE = "audio/mp4";
+
+/**
+ * 중복 전달 경합 방지용 마커 (다른 워커가 이미 이 세션을 처리해 status가 더 이상 analyzing이 아닌 경우).
+ * DB 오류가 아니라 "더 이상 내 세션이 아니다"라는 신호라 fail()을 호출하지 않고 조용히 넘어간다.
+ */
+class StaleSessionError extends Error {
+  constructor(sessionId: string) {
+    super(`session ${sessionId} is no longer analyzing (handled by another delivery), skipping ready update`);
+    this.name = "StaleSessionError";
+  }
+}
 
 export class SessionAnalysisService {
   private readonly logger = new Logger(SessionAnalysisService.name);
@@ -51,7 +62,7 @@ export class SessionAnalysisService {
 
     const workDir = await mkdtemp(join(this.tmpRoot, `session-${sessionId}-`));
     try {
-      await this.resetTakes(sessionId);
+      await this.resetTakes(session.bandId, sessionId);
 
       const original = join(workDir, "original.m4a");
       await this.storage.downloadToFile(recording.objectKey, original);
@@ -87,7 +98,10 @@ export class SessionAnalysisService {
 
       await this.db.transaction(async (tx) => {
         if (rows.length > 0) await tx.insert(takes).values(rows);
-        await tx
+        // 중복 전달 경합 방지: 이 실행이 시작됐을 때와 같은 analyzing 상태일 때만 ready로 바꾼다.
+        // 다른 워커가 먼저 끝냈다면(status가 이미 바뀌었다면) 0행이 반환되고, 그걸 throw로 알려
+        // 위 insert까지 통째로 롤백시킨다.
+        const updated = await tx
           .update(sessions)
           .set({
             status: "ready",
@@ -97,23 +111,34 @@ export class SessionAnalysisService {
             analysisModel: process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
             updatedAt: new Date(),
           })
-          .where(eq(sessions.id, sessionId));
+          .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")))
+          .returning({ id: sessions.id });
+        if (updated.length === 0) throw new StaleSessionError(sessionId);
       });
       this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks`);
     } catch (err) {
-      this.logger.error(`session ${sessionId} analysis failed: ${String(err)}`);
-      await this.fail(sessionId, err instanceof Error ? err.message : String(err));
+      if (err instanceof StaleSessionError) {
+        this.logger.warn(err.message);
+      } else {
+        this.logger.error(`session ${sessionId} analysis failed: ${String(err)}`);
+        await this.fail(sessionId, err instanceof Error ? err.message : String(err));
+      }
     } finally {
       await rm(workDir, { recursive: true, force: true });
     }
   }
 
-  /** 재시도 멱등성 (스펙 결정 9): 이전 실행이 남긴 take 행과 R2 객체를 지운다. */
-  private async resetTakes(sessionId: string): Promise<void> {
+  /**
+   * 재시도 멱등성 (스펙 결정 9): 이전 실행이 남긴 take 행과 R2 객체를 지운다.
+   * 이전 실행이 트랜잭션 커밋 전에 죽었다면 take 객체가 R2에는 올라갔는데 DB 행은 없는 상태로
+   * 남을 수 있다 — DB 행뿐 아니라 take 접두어 전체를 나열해 고아 객체까지 함께 지운다.
+   */
+  private async resetTakes(bandId: string, sessionId: string): Promise<void> {
     const existing = await this.db.query.takes.findMany({ where: eq(takes.sessionId, sessionId) });
-    if (existing.length === 0) return;
-    await this.storage.deleteObjects(existing.map((t) => t.objectKey));
-    await this.db.delete(takes).where(eq(takes.sessionId, sessionId));
+    const orphanKeys = await this.storage.listKeys(takesPrefix(bandId, sessionId));
+    const keys = [...new Set([...existing.map((t) => t.objectKey), ...orphanKeys])];
+    if (keys.length > 0) await this.storage.deleteObjects(keys);
+    if (existing.length > 0) await this.db.delete(takes).where(eq(takes.sessionId, sessionId));
   }
 
   private async analyzeChunk(original: string, chunk: Chunk, workDir: string): Promise<TakeCandidate[]> {
@@ -133,10 +158,11 @@ export class SessionAnalysisService {
   }
 
   private async fail(sessionId: string, message: string): Promise<void> {
+    // 다른 워커가 이미 이 세션을 끝냈다면(status가 더 이상 analyzing이 아니면) 덮어쓰지 않는다 — 중복 전달 경합 방지.
     await this.db
       .update(sessions)
       .set({ status: "failed", analysisError: message.slice(0, 500), updatedAt: new Date() })
-      .where(eq(sessions.id, sessionId));
+      .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")));
   }
 }
 

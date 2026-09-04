@@ -82,6 +82,9 @@ export class FakeStorage extends StorageService {
   async deleteObjects(keys: string[]) {
     this.deleted.push(...keys);
   }
+  async listKeys(prefix: string) {
+    return this.put.map((p) => p.key).filter((k) => k.startsWith(prefix));
+  }
 }
 
 export class FakeProducer {

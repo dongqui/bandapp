@@ -13,16 +13,30 @@ import { SessionAnalysisService } from "./session-analysis.service.js";
 
 /** 긴 분석 중 재전달을 막는다 (스펙 결정 8). 큐 기본 visibility(300초)와 같은 값으로 연장한다. */
 const VISIBILITY_TIMEOUT_SEC = 300;
+const DEFAULT_HEARTBEAT_MS = 60_000;
+// 3시간(60초 간격 180회) 넘게 heartbeat가 갱신되면 멈춰버린 분석으로 보고 더 연장하지 않는다 —
+// visibility가 만료되면 재전달되고, maxReceiveCount를 넘기면 DLQ로 빠진다.
+const MAX_HEARTBEATS = 180;
+
+export interface AnalysisConsumerOptions {
+  heartbeatMs?: number;
+  maxHeartbeats?: number;
+}
 
 export class AnalysisConsumer {
   private readonly logger = new Logger(AnalysisConsumer.name);
   private running = false;
+  private readonly heartbeatMs: number;
+  private readonly maxHeartbeats: number;
 
   constructor(
     private readonly sqs: SQSClient,
     private readonly analysis: SessionAnalysisService,
-    private readonly heartbeatMs = 60_000,
-  ) {}
+    { heartbeatMs = DEFAULT_HEARTBEAT_MS, maxHeartbeats = MAX_HEARTBEATS }: AnalysisConsumerOptions = {},
+  ) {
+    this.heartbeatMs = heartbeatMs;
+    this.maxHeartbeats = maxHeartbeats;
+  }
 
   async start(): Promise<void> {
     this.running = true;
@@ -46,7 +60,14 @@ export class AnalysisConsumer {
     let messages: Message[];
     try {
       const result = await this.sqs.send(
-        new ReceiveMessageCommand({ QueueUrl: queueUrl, MaxNumberOfMessages: 1, WaitTimeSeconds: 20 }),
+        new ReceiveMessageCommand({
+          QueueUrl: queueUrl,
+          MaxNumberOfMessages: 1,
+          WaitTimeSeconds: 20,
+          // 큐 자체의 visibility 속성에만 기대지 않는다 — SQS 기본값(30초)은 60초 heartbeat보다
+          // 짧아서, 큐 설정이 어긋나면 heartbeat가 갱신되기도 전에 메시지가 재전달될 수 있다.
+          VisibilityTimeout: VISIBILITY_TIMEOUT_SEC,
+        }),
       );
       messages = result.Messages ?? [];
     } catch (error) {
@@ -74,7 +95,19 @@ export class AnalysisConsumer {
   }
 
   private startHeartbeat(queueUrl: string, receiptHandle: string | undefined): NodeJS.Timeout {
+    let renewals = 0;
+    let cappedLogged = false;
     return setInterval(() => {
+      renewals += 1;
+      if (renewals > this.maxHeartbeats) {
+        if (!cappedLogged) {
+          cappedLogged = true;
+          this.logger.error(
+            `heartbeat cap (${this.maxHeartbeats}) reached for a message still in flight, letting visibility expire so it can be redelivered/DLQ'd`,
+          );
+        }
+        return;
+      }
       this.sqs
         .send(new ChangeMessageVisibilityCommand({ QueueUrl: queueUrl, ReceiptHandle: receiptHandle, VisibilityTimeout: VISIBILITY_TIMEOUT_SEC }))
         .catch((err: unknown) => this.logger.warn(`visibility extension failed: ${String(err)}`));

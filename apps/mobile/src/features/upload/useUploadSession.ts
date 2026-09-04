@@ -32,6 +32,7 @@ export function useUploadSession(params: UploadParams | null) {
   const upload = useCallback(async () => {
     if (!params || !band) return;
     setPhase("uploading");
+    setProgress(0);
     setError(null);
     try {
       const source = await fileUploadSource(params.fileUri);
@@ -48,7 +49,12 @@ export function useUploadSession(params: UploadParams | null) {
         (p) => setProgress(p.totalBytes ? p.uploadedBytes / p.totalBytes : 0),
       );
       setSession(created);
-      setPhase(created.status === "failed" ? "failed" : "analyzing");
+      if (created.status === "failed") {
+        setError("Couldn’t analyze this recording");
+        setPhase("failed");
+      } else {
+        setPhase("analyzing");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
       setPhase("failed");
@@ -56,31 +62,42 @@ export function useUploadSession(params: UploadParams | null) {
   }, [api, band, params]);
 
   useEffect(() => {
-    if (startedRef.current) return;
+    if (!params || !band || startedRef.current) return;
     startedRef.current = true;
     void upload();
-  }, [upload]);
+  }, [params, band, upload]);
 
-  // 서버 상태 폴링 — 세션이 analyzing인 동안만
+  // 서버 상태 폴링 — 세션이 analyzing인 동안만, 세션 id가 바뀔 때만 새 interval을 만든다
+  const sessionId = session?.id ?? null;
   useEffect(() => {
-    if (phase !== "analyzing" || !session) return;
+    if (phase !== "analyzing" || !sessionId) return;
     const t = setInterval(() => {
       void api.sessions
-        .get(session.id)
+        .get(sessionId)
         .then((s) => {
           setSession(s);
           if (s.status === "ready") setPhase("ready");
-          if (s.status === "failed") setPhase("failed");
+          if (s.status === "failed") {
+            setError("Couldn’t analyze this recording");
+            setPhase("failed");
+          }
         })
         .catch(() => undefined);
     }, POLL_MS);
     return () => clearInterval(t);
-  }, [api, phase, session]);
+  }, [api, phase, sessionId]);
 
   const retry = useCallback(() => {
     if (session && session.status === "failed") {
       setPhase("analyzing");
-      void api.sessions.retryAnalysis(session.id).then(setSession).catch(() => setPhase("failed"));
+      setError(null);
+      void api.sessions
+        .retryAnalysis(session.id)
+        .then(setSession)
+        .catch((e) => {
+          setError(e instanceof Error ? e.message : "Retry failed");
+          setPhase("failed");
+        });
       return;
     }
     void upload();

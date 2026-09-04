@@ -1,6 +1,8 @@
-import { Logger, UnauthorizedException } from "@nestjs/common";
+import { Logger, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
+import { timingSafeEqual } from "node:crypto";
 import type { AuthTokens, LoginResponse } from "@bandapp/types";
+import type { AuthProviderName } from "../db/schema.js";
 import { UsersService } from "../users/users.service.js";
 import { AppleAuthService } from "./apple-auth.service.js";
 import { AppleTokenService } from "./apple-token.service.js";
@@ -58,6 +60,28 @@ export class AuthService {
     }
   }
 
+  /**
+   * Windows에서는 Google/Apple 로그인 없이 서버를 끝까지 검증할 수 없다 (스펙 결정 10).
+   * DEV_LOGIN_SECRET이 있고 production이 아닐 때만 열린다. 없으면 라우트가 없는 것처럼 404.
+   */
+  async loginWithDev(input: { secret: string; displayName?: string }): Promise<LoginResponse> {
+    const expected = process.env.DEV_LOGIN_SECRET;
+    if (!expected || process.env.NODE_ENV === "production") throw new NotFoundException();
+    const a = Buffer.from(input.secret);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) {
+      throw new UnauthorizedException("로그인에 실패했어요. 다시 시도해 주세요.");
+    }
+    const displayName = input.displayName ?? "dev";
+    return this.login("DEV", {
+      subject: displayName,
+      email: null,
+      emailVerified: null,
+      displayName,
+      profileImageUrl: null,
+    });
+  }
+
   async refresh(refreshToken: string): Promise<AuthTokens> {
     const rotated = await this.sessions.rotate(refreshToken);
     if (!rotated) throw new UnauthorizedException("세션이 만료됐어요. 다시 로그인해 주세요.");
@@ -84,7 +108,7 @@ export class AuthService {
   }
 
   private async login(
-    provider: "GOOGLE" | "APPLE",
+    provider: AuthProviderName,
     verified: VerifiedProviderToken,
   ): Promise<LoginResponse> {
     const { user, isNewUser } = await this.users.findOrCreateByIdentity(provider, verified);

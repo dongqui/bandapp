@@ -46,6 +46,12 @@ docker compose up --build -d
 - 종료: `docker compose down`
 - 의존성 추가/변경 후에는 `docker compose up --build -V`로 anonymous node_modules 볼륨을 재생성해야 반영된다. (auth/bands/invites 도입으로 drizzle-orm, pg, jose, @nestjs/throttler가 새로 추가됐으니 기존 체크아웃은 반드시 `-V`로 재빌드할 것)
 
+### 녹음 업로드·분석 (모바일)
+
+- 가져오기·녹음 모두 m4a만 다룬다. 업로드는 앱이 R2에 직접 하고(presigned multipart), 완료되면 워커가 분석한다.
+- 새 네이티브 모듈(expo-audio, expo-document-picker)이 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
+- 서버 없이 UI만 볼 때는 `EXPO_PUBLIC_API_URL`을 비워 Mock으로 띄운다. Mock은 업로드 진행률만 흉내 내고 재생은 시뮬레이션이다.
+
 ### DB 마이그레이션
 
 `api` 컨테이너는 기동 시 자동으로 `pnpm --filter @bandapp/api db:migrate`를 실행해 최신 스키마를 적용한다(drizzle migrate는 멱등이라 반복 실행해도 안전하다). 컨테이너를 띄우지 않고 호스트에서 직접 적용하려면:

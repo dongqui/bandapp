@@ -36,11 +36,17 @@ export function NewSessionSheet({ visible, onClose }: { visible: boolean; onClos
         subtitle="Find the takes in an existing recording"
         onPress={async () => {
           onClose();
-          const picked = await DocumentPicker.getDocumentAsync({
-            type: SUPPORTED_MIME_TYPES,
-            copyToCacheDirectory: true,
-            multiple: false,
-          });
+          let picked;
+          try {
+            picked = await DocumentPicker.getDocumentAsync({
+              type: SUPPORTED_MIME_TYPES,
+              copyToCacheDirectory: true,
+              multiple: false,
+            });
+          } catch (error) {
+            toast.show("Couldn't open the file picker");
+            return;
+          }
           if (picked.canceled || !picked.assets[0]) return;
           const asset = picked.assets[0];
           // 원본 wav/영상 가져오기는 백로그: 지금은 m4a만 허용한다

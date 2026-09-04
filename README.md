@@ -49,7 +49,7 @@ docker compose up --build -d
 ### 녹음 업로드·분석 (모바일)
 
 - 가져오기·녹음 모두 m4a만 다룬다. 업로드는 앱이 R2에 직접 하고(presigned multipart), 완료되면 워커가 분석한다.
-- 새 네이티브 모듈(expo-audio, expo-document-picker)이 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
+- 새 네이티브 모듈(expo-audio, expo-document-picker, expo-file-system)이 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
 - 서버 없이 UI만 볼 때는 `EXPO_PUBLIC_API_URL`을 비워 Mock으로 띄운다. Mock은 업로드 진행률만 흉내 내고 재생은 시뮬레이션이다.
 - 웹 프리뷰(`pnpm --filter mobile dev`)에서 의미 있는 건 가져오기뿐이다. 녹음은 브라우저에서 webm이 나와 서버가 받는 m4a와 맞지 않으니 네이티브(dev build)에서만 쓴다.
 

@@ -1,16 +1,26 @@
 import {
+  type AnyPgColumn,
+  bigint,
   boolean,
+  index,
   integer,
   pgEnum,
   pgTable,
   primaryKey,
+  real,
   text,
   timestamp,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const authProvider = pgEnum("auth_provider", ["GOOGLE", "APPLE"]);
+export const authProvider = pgEnum("auth_provider", ["GOOGLE", "APPLE", "DEV"]);
+export type AuthProviderName = (typeof authProvider.enumValues)[number];
+
+// @bandapp/types의 SessionStatus / TakeCandidateType과 값을 일치시킨다
+export const sessionStatus = pgEnum("session_status", ["uploading", "analyzing", "failed", "ready"]);
+export const uploadStatus = pgEnum("upload_status", ["pending", "completed", "aborted"]);
+export const takeType = pgEnum("take_type", ["PERFORMANCE", "PARTIAL_PRACTICE"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
 // @bandapp/types의 BandPart와 값을 일치시킨다. 표시 문자열은 클라이언트 책임이다 (스펙 결정 2)
@@ -108,3 +118,79 @@ export const bandInvites = pgTable("band_invites", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const sessions = pgTable("sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bandId: uuid("band_id")
+    .notNull()
+    .references(() => bands.id, { onDelete: "cascade" }),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  title: text("title").notNull(),
+  name: text("name"),
+  status: sessionStatus("status").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  // 가져오기는 클라이언트가 길이를 모른다 — 워커가 ffprobe로 채운다
+  durationMs: integer("duration_ms"),
+  takeCount: integer("take_count").notNull().default(0),
+  analysisError: text("analysis_error"),
+  analysisModel: text("analysis_model"),
+  ...timestamps,
+});
+
+// 세션과 1:1. 저장 객체와 업로드 상태의 수명주기가 세션과 달라 테이블을 나눈다 (스펙 결정 5)
+export const recordings = pgTable("recordings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("session_id")
+    .notNull()
+    .unique()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  objectKey: text("object_key").notNull(),
+  contentType: text("content_type").notNull(),
+  sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+  uploadId: text("upload_id"),
+  partSize: integer("part_size").notNull(),
+  partCount: integer("part_count").notNull(),
+  uploadStatus: uploadStatus("upload_status").notNull().default("pending"),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const takes = pgTable(
+  "takes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    index: integer("index").notNull(),
+    name: text("name").notNull(),
+    startMs: integer("start_ms").notNull(),
+    endMs: integer("end_ms").notNull(),
+    type: takeType("type").notNull(),
+    confidence: real("confidence").notNull(),
+    objectKey: text("object_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("takes_session_index_uq").on(t.sessionId, t.index)],
+);
+
+export const comments = pgTable(
+  "comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    takeId: uuid("take_id")
+      .notNull()
+      .references(() => takes.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id),
+    // 대댓글 자리 (스펙 결정 6). 이번 범위에서는 항상 null
+    parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, { onDelete: "cascade" }),
+    atMs: integer("at_ms").notNull(),
+    text: text("text").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("comments_take_at_idx").on(t.takeId, t.atMs)],
+);

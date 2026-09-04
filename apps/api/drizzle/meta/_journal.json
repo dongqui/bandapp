@@ -29,6 +29,13 @@
       "when": 1788319060203,
       "tag": "0003_groovy_leo",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788503857211,
+      "tag": "0004_gray_killmonger",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "@bandapp/types";
 import type { RehearsalApiClient } from "./client";
-import { uploadRecording } from "./upload";
+import { resumeRecordingUpload, uploadRecording } from "./upload";
 
 const MB = 1024 * 1024;
 const session = (status: Session["status"]): Session => ({
@@ -58,19 +58,6 @@ describe("uploadRecording", () => {
     expect(progress.at(-1)).toBe(25 * MB);
   });
 
-  it("skips parts the server already has", async () => {
-    const { client, calls } = fakeClient(3, [1, 2]);
-    const fetchFn = vi.fn(async () => okPut("e3"));
-    await uploadRecording({ client, bandId: "b1", source: source(25 * MB), fetchFn, input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: 25 * MB, contentType: "audio/mp4", source: "import" } });
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect(calls.partUrls).toEqual([[3]]);
-    expect(calls.completed).toEqual([
-      { partNumber: 1, etag: "old1" },
-      { partNumber: 2, etag: "old2" },
-      { partNumber: 3, etag: "e3" },
-    ]);
-  });
-
   it("retries a failed part up to attemptsPerPart and then throws", async () => {
     const { client, sessions } = fakeClient(1);
     const fetchFn = vi.fn(async () => new Response(null, { status: 500 }));
@@ -101,5 +88,45 @@ describe("uploadRecording", () => {
     const fetchFn = vi.fn(async (url: RequestInfo | URL) => okPut(`e${String(url).split("/").at(-1)}`));
     await uploadRecording({ client, bandId: "b1", source: source(1500 * MB), fetchFn, concurrency: 8, input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: 1500 * MB, contentType: "audio/mp4", source: "import" } });
     expect(calls.partUrls.map((b) => b.length)).toEqual([100, 50]);
+  });
+
+  it("stops issuing new PUTs once a part exhausts its attempts, instead of racing ahead on other workers", async () => {
+    const { client, sessions } = fakeClient(4);
+    const fetchFn = vi.fn(async (url: RequestInfo | URL) => {
+      const n = Number(String(url).split("/").at(-1));
+      if (n === 1) throw new Error("boom");
+      await new Promise((r) => setTimeout(r, 20));
+      return okPut(`e${n}`);
+    });
+    await expect(
+      uploadRecording({
+        client,
+        bandId: "b1",
+        source: source(40 * MB),
+        fetchFn,
+        concurrency: 2,
+        attemptsPerPart: 1,
+        input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: 40 * MB, contentType: "audio/mp4", source: "import" },
+      }),
+    ).rejects.toThrow();
+    // 파트 1이 실패하는 즉시 중단해야 한다 — 동시에 떠 있던 것(최대 concurrency개)만큼만 fetch가 나갈 수 있고,
+    // 큐에 남아있던 파트(4번)는 절대 새로 시작되면 안 된다.
+    expect(fetchFn.mock.calls.length).toBeLessThanOrEqual(3);
+    expect(sessions.completeUpload).not.toHaveBeenCalled();
+  });
+});
+
+describe("resumeRecordingUpload", () => {
+  it("skips parts the server already has and resumes with the existing sessionId", async () => {
+    const { client, calls } = fakeClient(3, [1, 2]);
+    const fetchFn = vi.fn(async () => okPut("e3"));
+    await resumeRecordingUpload({ client, sessionId: "s1", source: source(25 * MB), fetchFn });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(calls.partUrls).toEqual([[3]]);
+    expect(calls.completed).toEqual([
+      { partNumber: 1, etag: "old1" },
+      { partNumber: 2, etag: "old2" },
+      { partNumber: 3, etag: "e3" },
+    ]);
   });
 });

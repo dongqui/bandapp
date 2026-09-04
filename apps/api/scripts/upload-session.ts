@@ -70,7 +70,12 @@ async function main(): Promise<void> {
         sizeBytes: size,
         readPart: async ({ start, end }) => {
           const buf = Buffer.alloc(end - start);
-          await handle.read(buf, 0, end - start, start);
+          let filled = 0;
+          while (filled < buf.length) {
+            const { bytesRead } = await handle.read(buf, filled, buf.length - filled, start + filled);
+            if (bytesRead === 0) throw new Error(`short read at ${start + filled}: file smaller than expected`);
+            filled += bytesRead;
+          }
           return new Blob([buf]);
         },
       },

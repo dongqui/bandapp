@@ -43,6 +43,11 @@ export function SessionDetailScreen() {
         data={takes ?? []}
         keyExtractor={(t) => t.id}
         contentContainerStyle={{ paddingHorizontal: space.screenX, paddingTop: 6, paddingBottom: 48 }}
+        ListEmptyComponent={
+          <AppText variant="caption" color={colors.textFaint} style={{ paddingVertical: 18 }}>
+            No takes were found in this recording. You can still listen to the original.
+          </AppText>
+        }
         renderItem={({ item }) => (
           <TakeRow take={item} onPress={() => router.push(`/session/${session.id}/take/${item.id}`)} />
         )}

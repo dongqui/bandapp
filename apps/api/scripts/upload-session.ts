@@ -38,7 +38,9 @@ function memoryTokens(): TokenStorage {
 
 async function main(): Promise<void> {
   const apiUrl = env("API_URL", "http://localhost:3001");
-  const file = resolve(env("UPLOAD_FILE"));
+  // pnpm --filter runs this with cwd=apps/api, but UPLOAD_FILE is given relative to the repo
+  // root (where the command is typed) — pnpm exposes that root as INIT_CWD.
+  const file = resolve(process.env.INIT_CWD ?? process.cwd(), env("UPLOAD_FILE"));
   const secret = env("DEV_LOGIN_SECRET");
   const tokens = memoryTokens();
   const client = new HttpApiClient({ baseUrl: apiUrl, tokens });

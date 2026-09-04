@@ -11,14 +11,13 @@ export interface MockState {
 
 export function generateTakes(sessionId: string, count: number): Take[] {
   const seed = seedOf(sessionId);
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${sessionId}-t${i}`,
-    sessionId,
-    index: i,
-    name: `Take ${i + 1}`,
-    durationSec: 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150),
-    commentCount: 0,
-  }));
+  let cursorMs = 60_000;
+  return Array.from({ length: count }, (_, i) => {
+    const durationSec = 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150);
+    const startMs = cursorMs;
+    cursorMs += durationSec * 1000 + 45_000;
+    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0 };
+  });
 }
 
 const session = (
@@ -94,9 +93,12 @@ export function createSeedState(): MockState {
     comments[takeId] = rows.map((r) => ({
       id: `c${cid++}`,
       takeId,
+      authorId: "m2",
       authorName: r.who,
+      parentId: null,
       atSec: r.t,
       text: r.text,
+      createdAt: new Date("2026-08-27T19:03:00").toISOString(),
     }));
   }
   // commentCount 반영

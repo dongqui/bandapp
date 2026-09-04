@@ -1,18 +1,24 @@
 import type {
   AppleLoginCredential,
+  AudioUrl,
   Band,
   BandInvite,
   BandMember,
   BandPart,
+  CreateCommentInput,
+  CreateSessionInput,
+  CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
   Take,
   TakeComment,
+  UploadPartUrl,
+  UploadStatus,
   User,
 } from "@bandapp/types";
-import type { CreateCommentInput, CreateSessionInput, RehearsalApiClient } from "../client";
+import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { seededUnit } from "./rand";
 import { createSeedState, generateTakes, type MockState } from "./seed";
 
@@ -53,6 +59,7 @@ export class MockApiClient implements RehearsalApiClient {
       const base = Math.min(300, s.durationSec / count);
       takes.forEach((t, i) => {
         t.durationSec = Math.max(4, Math.round(base * (0.55 + 0.8 * seededUnit(i * 31 + 7))));
+        t.endMs = t.startMs + t.durationSec * 1000;
       });
       this.state.takes[s.id] = takes;
       s.status = "ready";
@@ -168,27 +175,34 @@ export class MockApiClient implements RehearsalApiClient {
 
   sessions = {
     list: async (bandId: string): Promise<Session[]> =>
-      this.state.sessions
-        .filter((s) => s.bandId === bandId)
-        .slice()
-        .sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
+      this.state.sessions.filter((s) => s.bandId === bandId).slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
     get: async (id: string): Promise<Session> => ({ ...this.mustSession(id) }),
-    create: async (bandId: string, input: CreateSessionInput): Promise<Session> => {
-      const now = new Date();
-      const pad = (n: number) => String(n).padStart(2, "0");
-      const startedAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:00`;
+    create: async (bandId: string, input: CreateSessionInput): Promise<CreateSessionResult> => {
+      const startedAt = new Date(input.startedAt);
       const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       const s: Session = {
         id: `g${this.nextId++}`,
         bandId,
-        title: `${MONTHS[now.getMonth()]} ${now.getDate()} Rehearsal`,
-        status: "analyzing",
-        startedAt,
-        durationSec: Math.round(input.durationSec),
+        title: `${MONTHS[startedAt.getMonth()]} ${startedAt.getDate()} Rehearsal`,
+        status: "uploading",
+        startedAt: input.startedAt,
+        durationSec: Math.round((input.durationMs ?? 0) / 1000),
         takeCount: 0,
         commentCount: 0,
       };
       this.state.sessions.unshift(s);
+      this.emit();
+      const partSize = 10 * 1024 * 1024;
+      return { session: { ...s }, upload: { partSize, partCount: Math.max(1, Math.ceil(input.sizeBytes / partSize)) } };
+    },
+    partUrls: async (id: string, partNumbers: number[]): Promise<UploadPartUrl[]> =>
+      partNumbers.map((partNumber) => ({ partNumber, url: `https://mock.upload/${id}/${partNumber}` })),
+    uploadStatus: async (): Promise<UploadStatus> => ({ partSize: 10 * 1024 * 1024, partCount: 1, uploadedParts: [] }),
+    completeUpload: async (id: string): Promise<Session> => {
+      const s = this.mustSession(id);
+      s.status = "analyzing";
+      // 가져오기는 길이를 모른 채 들어온다 — 45분 세션이었다고 치고 take 개수를 정한다
+      if (s.durationSec === 0) s.durationSec = 2717;
       this.scheduleAnalysis(s.id);
       this.emit();
       return { ...s };
@@ -200,23 +214,35 @@ export class MockApiClient implements RehearsalApiClient {
       this.emit();
       return { ...s };
     },
+    audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
+    upload: async (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> => {
+      const { session } = await this.sessions.create(bandId, input);
+      // 실제 PUT 없이 진행률만 흘려보낸다 — 화면이 업로드 단계를 그리게 하려는 것
+      for (let i = 1; i <= 5; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        onProgress?.({ uploadedBytes: Math.round((source.sizeBytes * i) / 5), totalBytes: source.sizeBytes });
+      }
+      return this.sessions.completeUpload(session.id);
+    },
   };
 
   takes = {
-    list: async (sessionId: string): Promise<Take[]> =>
-      (this.state.takes[sessionId] ?? []).map((t) => ({ ...t })),
+    list: async (sessionId: string): Promise<Take[]> => (this.state.takes[sessionId] ?? []).map((t) => ({ ...t })),
+    audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
   };
 
   comments = {
-    list: async (takeId: string): Promise<TakeComment[]> =>
-      (this.state.comments[takeId] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
+    list: async (takeId: string): Promise<TakeComment[]> => (this.state.comments[takeId] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
     create: async (takeId: string, input: CreateCommentInput): Promise<TakeComment> => {
       const c: TakeComment = {
         id: `u${this.nextId++}`,
         takeId,
+        authorId: MOCK_USER.id,
         authorName: "You",
+        parentId: null,
         atSec: Math.floor(input.atSec),
         text: input.text,
+        createdAt: new Date().toISOString(),
       };
       (this.state.comments[takeId] ??= []).push(c);
       for (const takes of Object.values(this.state.takes)) {

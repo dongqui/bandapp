@@ -28,13 +28,18 @@ describe("MockApiClient", () => {
     expect(comments.map((c) => c.atSec)).toEqual([28, 133, 182]);
   });
 
-  it("create returns analyzing session then transitions to ready", async () => {
+  it("create returns uploading session, completeUpload transitions to analyzing then ready", async () => {
     const api = new MockApiClient({ analysisDelayMs: 10 });
-    const created = await api.sessions.create(BAND, {
-      durationSec: 3600,
+    const { session: created } = await api.sessions.create(BAND, {
+      startedAt: new Date().toISOString(),
+      durationMs: 3_600_000,
+      sizeBytes: 1,
+      contentType: "audio/mp4",
       source: "recording",
     });
-    expect(created.status).toBe("analyzing");
+    expect(created.status).toBe("uploading");
+    const analyzing = await api.sessions.completeUpload(created.id);
+    expect(analyzing.status).toBe("analyzing");
     await wait(50);
     const ready = await api.sessions.get(created.id);
     expect(ready.status).toBe("ready");

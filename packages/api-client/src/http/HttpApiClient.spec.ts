@@ -196,4 +196,23 @@ describe("HttpApiClient", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
   });
+
+  it("sessions.create는 밴드 경로로 POST하고 구독자에게 알린다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(201, { session: { id: "s1" }, upload: { partSize: 1, partCount: 1 } }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    await client.sessions.create("b1", { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: 1, contentType: "audio/mp4", source: "import" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/bands/b1/sessions", expect.objectContaining({ method: "POST" }));
+    expect(listener).toHaveBeenCalled();
+  });
+
+  it("comments.create는 takes 경로로 POST한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(201, { id: "c1" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.comments.create("t1", { atSec: 3, text: "x" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ atSec: 3, text: "x" }) }));
+  });
 });

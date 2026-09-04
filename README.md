@@ -39,7 +39,9 @@ docker compose up --build -d
 ```
 
 - API: http://localhost:3000 (health: `GET /health`)
-- 분석 요청: `curl -X POST http://localhost:3000/recordings/<id>/analysis` (Gemini 분석은 body에 `{"audioPath":"poc/data/....wav"}` 추가, `.env`에 `GEMINI_API_KEY` 필요) → worker 컨테이너 로그로 수신/분석 결과 확인
+- 분석 파이프라인: 세션 생성(`POST /bands/:bandId/sessions`) → presigned multipart 업로드 → `POST /sessions/:id/upload/complete` → SQS → worker(R2 다운로드 → ffmpeg 청크 → Gemini → take 절단 → R2 업로드 → DB). `.env`에 `GEMINI_API_KEY`, `R2_*`, `DEV_LOGIN_SECRET`이 필요하다.
+- 서버 전 구간 검증(Windows): `UPLOAD_FILE=poc/data/raw_sessions/IMG_2811.m4a DEV_LOGIN_SECRET=<.env 값> pnpm --filter @bandapp/api upload-session` → 업로드 진행률, 분석 대기, take 목록, 첫 take ffprobe 길이가 순서대로 찍힌다. 워커 로그는 `docker compose logs -f worker`.
+- Dockerfile에 ffmpeg이 추가됐고 큐 visibility timeout이 바뀌었으니 기존 체크아웃은 `docker compose up --build -V`로 재빌드하고 localstack 볼륨도 새로 만든다 (`docker compose down -v` 후 up).
 - 큐: LocalStack SQS (`recording-analysis`, `recording-analysis-python`, `recording-analysis-dlq`)
 - 종료: `docker compose down`
 - 의존성 추가/변경 후에는 `docker compose up --build -V`로 anonymous node_modules 볼륨을 재생성해야 반영된다. (auth/bands/invites 도입으로 drizzle-orm, pg, jose, @nestjs/throttler가 새로 추가됐으니 기존 체크아웃은 반드시 `-V`로 재빌드할 것)

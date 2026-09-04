@@ -1,11 +1,14 @@
 import type { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
+import type { UploadedPart } from "@bandapp/types";
 import { AppModule } from "../src/app.module.js";
+import { AnalysisProducer } from "../src/analysis/analysis.producer.js";
 import { AppleAuthService } from "../src/auth/apple-auth.service.js";
 import { AppleTokenService } from "../src/auth/apple-token.service.js";
 import { GoogleAuthService } from "../src/auth/google-auth.service.js";
 import type { VerifiedProviderToken } from "../src/auth/provider-token.js";
+import { StorageService } from "../src/storage/storage.service.js";
 
 export interface ProviderStub {
   verifyIdToken(idToken: string): Promise<VerifiedProviderToken>;
@@ -34,10 +37,66 @@ export function providerUser(subject: string, displayName: string | null = "Dong
   };
 }
 
+/** R2를 흉내 낸다 — 호출 기록만 남기고 파트는 listParts로 되돌려준다. */
+export class FakeStorage extends StorageService {
+  uploads = new Map<string, { key: string; contentType: string; parts: UploadedPart[]; completed: boolean }>();
+  put: Array<{ key: string; path: string }> = [];
+  deleted: string[] = [];
+  downloads: Array<{ key: string; path: string }> = [];
+  private seq = 0;
+
+  async createMultipartUpload(key: string, contentType: string) {
+    const uploadId = `upload-${++this.seq}`;
+    this.uploads.set(uploadId, { key, contentType, parts: [], completed: false });
+    return { uploadId };
+  }
+  async presignUploadPart(key: string, uploadId: string, partNumber: number) {
+    return `https://fake.r2/${key}?uploadId=${uploadId}&partNumber=${partNumber}`;
+  }
+  async listParts(_key: string, uploadId: string) {
+    return [...(this.uploads.get(uploadId)?.parts ?? [])];
+  }
+  async completeMultipartUpload(_key: string, uploadId: string, parts: UploadedPart[]) {
+    const upload = this.uploads.get(uploadId);
+    if (!upload) throw new Error("NoSuchUpload");
+    upload.parts = parts;
+    upload.completed = true;
+  }
+  async abortMultipartUpload(_key: string, uploadId: string) {
+    this.uploads.delete(uploadId);
+  }
+  async presignGet(key: string) {
+    return `https://fake.r2/${key}?signed`;
+  }
+  async downloadToFile(key: string, path: string) {
+    this.downloads.push({ key, path });
+  }
+  async putFile(key: string, path: string) {
+    this.put.push({ key, path });
+  }
+  async deleteObjects(keys: string[]) {
+    this.deleted.push(...keys);
+  }
+}
+
+export class FakeProducer {
+  enqueued: string[] = [];
+  failNext = false;
+  async enqueueAnalysis(sessionId: string): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("sqs down");
+    }
+    this.enqueued.push(sessionId);
+  }
+}
+
 export async function createTestApp(overrides?: {
   google?: ProviderStub;
   apple?: ProviderStub;
   appleTokens?: Pick<AppleTokenService, "exchangeAuthorizationCode" | "revokeAll">;
+  storage?: StorageService;
+  producer?: FakeProducer;
 }): Promise<INestApplication> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GoogleAuthService)
@@ -47,7 +106,11 @@ export async function createTestApp(overrides?: {
     // 항상 오버라이드한다 — 실 서비스는 오늘은 자격증명 부재로 no-op이지만, .p8이 들어오는 순간
     // 이 기본값이 없으면 테스트가 실제 appleid.apple.com에 요청을 보내게 된다.
     .overrideProvider(AppleTokenService)
-    .useValue(overrides?.appleTokens ?? noopAppleTokens);
+    .useValue(overrides?.appleTokens ?? noopAppleTokens)
+    .overrideProvider(StorageService)
+    .useValue(overrides?.storage ?? new FakeStorage())
+    .overrideProvider(AnalysisProducer)
+    .useValue(overrides?.producer ?? new FakeProducer());
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();

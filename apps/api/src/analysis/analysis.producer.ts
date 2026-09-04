@@ -1,23 +1,18 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
+import type { AnalyzeSessionJob } from "@bandapp/types";
 import { SQS_CLIENT } from "../queue/queue.constants.js";
 
 @Injectable()
 export class AnalysisProducer {
   constructor(@Inject(SQS_CLIENT) private readonly sqs: SQSClient) {}
 
-  async enqueueAnalysis(recordingId: string, audioPath?: string): Promise<void> {
+  async enqueueAnalysis(sessionId: string): Promise<void> {
     const queueUrl = process.env.SQS_ANALYSIS_QUEUE_URL;
     if (!queueUrl) {
       throw new Error("SQS_ANALYSIS_QUEUE_URL is not set");
     }
-    await this.sqs.send(
-      new SendMessageCommand({
-        QueueUrl: queueUrl,
-        MessageBody: JSON.stringify(
-          audioPath ? { recordingId, audioPath } : { recordingId },
-        ),
-      }),
-    );
+    const job: AnalyzeSessionJob = { sessionId };
+    await this.sqs.send(new SendMessageCommand({ QueueUrl: queueUrl, MessageBody: JSON.stringify(job) }));
   }
 }

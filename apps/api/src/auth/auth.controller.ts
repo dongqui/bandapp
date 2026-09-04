@@ -24,6 +24,14 @@ export class AuthController {
     });
   }
 
+  @Post("dev")
+  dev(@Body() body: unknown): Promise<LoginResponse> {
+    return this.auth.loginWithDev({
+      secret: requireString(body, "secret"),
+      displayName: optionalString(body, "displayName"),
+    });
+  }
+
   @Post("refresh")
   refresh(@Body() body: unknown): Promise<AuthTokens> {
     return this.auth.refresh(requireString(body, "refreshToken"));

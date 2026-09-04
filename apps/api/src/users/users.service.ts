@@ -3,7 +3,7 @@ import { ConflictException } from "@nestjs/common";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
-import { authSessions, bandMembers, bands, userIdentities, users } from "../db/schema.js";
+import { authSessions, bandMembers, bands, userIdentities, users, type AuthProviderName } from "../db/schema.js";
 import type { VerifiedProviderToken } from "../auth/provider-token.js";
 
 export interface PublicUser {
@@ -16,7 +16,7 @@ export class UsersService {
   constructor(private readonly db: Db) {}
 
   async findOrCreateByIdentity(
-    provider: "GOOGLE" | "APPLE",
+    provider: AuthProviderName,
     verified: VerifiedProviderToken,
   ): Promise<{ user: PublicUser; isNewUser: boolean }> {
     const found = await this.findByIdentity(provider, verified.subject);
@@ -51,7 +51,7 @@ export class UsersService {
     return this.toPublic(row);
   }
 
-  private async findByIdentity(provider: "GOOGLE" | "APPLE", subject: string): Promise<PublicUser | null> {
+  private async findByIdentity(provider: AuthProviderName, subject: string): Promise<PublicUser | null> {
     const identity = await this.db.query.userIdentities.findFirst({
       where: and(eq(userIdentities.provider, provider), eq(userIdentities.providerSubject, subject)),
     });
@@ -65,7 +65,7 @@ export class UsersService {
   }
 
   /** 해당 provider identity에 refresh token이 이미 저장돼 있는지. */
-  async hasProviderRefreshToken(userId: string, provider: "GOOGLE" | "APPLE"): Promise<boolean> {
+  async hasProviderRefreshToken(userId: string, provider: AuthProviderName): Promise<boolean> {
     const row = await this.db.query.userIdentities.findFirst({
       where: and(eq(userIdentities.userId, userId), eq(userIdentities.provider, provider)),
     });
@@ -75,7 +75,7 @@ export class UsersService {
   /** 해당 provider identity에 refresh token을 저장한다. */
   async saveProviderRefreshToken(
     userId: string,
-    provider: "GOOGLE" | "APPLE",
+    provider: AuthProviderName,
     token: string,
   ): Promise<void> {
     await this.db

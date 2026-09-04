@@ -40,3 +40,18 @@ export function monthLabel(startedAtIso: string): string {
   const d = new Date(startedAtIso);
   return `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 }
+
+/**
+ * 서버는 startedAt의 날짜 부분으로 세션 제목("Sep 4 Rehearsal")을 만든다.
+ * toISOString()은 UTC라 자정 근처에서 날짜가 어긋나므로 기기 오프셋을 붙여 보낸다.
+ */
+export function toLocalIso(date: Date): string {
+  const offsetMin = -date.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMin);
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}

@@ -1,25 +1,32 @@
 import type {
   AppleLoginCredential,
+  AudioUrl,
   AuthTokens,
   Band,
   BandInvite,
   BandMember,
   BandPart,
+  CreateCommentInput,
+  CreateSessionInput,
+  CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
   Take,
   TakeComment,
+  UploadPartUrl,
+  UploadStatus,
+  UploadedPart,
   User,
 } from "@bandapp/types";
 import type {
-  CreateCommentInput,
-  CreateSessionInput,
   RehearsalApiClient,
   TokenStorage,
+  UploadProgress,
+  UploadSource,
 } from "../client";
-import { MockApiClient } from "../mock/MockApiClient";
+import { uploadRecording } from "../upload";
 
 export class ApiError extends Error {
   constructor(
@@ -38,8 +45,6 @@ export interface HttpApiClientOptions {
   tokens: TokenStorage;
   onSessionExpired?: () => void;
   fetchFn?: typeof fetch;
-  /** 서버 미구현 도메인(sessions/takes/comments) 위임처. 기본은 MockApiClient. */
-  fallback?: RehearsalApiClient;
 }
 
 interface RequestConfig {
@@ -50,20 +55,16 @@ interface RequestConfig {
 export class HttpApiClient implements RehearsalApiClient {
   private readonly listeners = new Set<() => void>();
   private readonly fetchFn: typeof fetch;
-  private readonly fallback: RehearsalApiClient;
   private refreshing: Promise<boolean> | null = null;
 
   constructor(private readonly opts: HttpApiClientOptions) {
     this.fetchFn = opts.fetchFn ?? fetch;
-    this.fallback = opts.fallback ?? new MockApiClient();
   }
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
-    const unsubFallback = this.fallback.subscribe(listener);
     return () => {
       this.listeners.delete(listener);
-      unsubFallback();
     };
   }
 
@@ -233,14 +234,44 @@ export class HttpApiClient implements RehearsalApiClient {
     },
   };
 
-  // 서버에 sessions/takes/comments API가 생기기 전까지 Mock으로 위임 (스펙 결정 13)
-  get sessions(): RehearsalApiClient["sessions"] {
-    return this.fallback.sessions;
-  }
-  get takes(): RehearsalApiClient["takes"] {
-    return this.fallback.takes;
-  }
-  get comments(): RehearsalApiClient["comments"] {
-    return this.fallback.comments;
-  }
+  sessions = {
+    list: (bandId: string): Promise<Session[]> => this.request<Session[]>("GET", `/bands/${bandId}/sessions`),
+    get: (id: string): Promise<Session> => this.request<Session>("GET", `/sessions/${id}`),
+    create: async (bandId: string, input: CreateSessionInput): Promise<CreateSessionResult> => {
+      const result = await this.request<CreateSessionResult>("POST", `/bands/${bandId}/sessions`, input);
+      this.emit();
+      return result;
+    },
+    partUrls: (id: string, partNumbers: number[]): Promise<UploadPartUrl[]> =>
+      this.request<UploadPartUrl[]>("POST", `/sessions/${id}/upload/parts`, { partNumbers }),
+    uploadStatus: (id: string): Promise<UploadStatus> => this.request<UploadStatus>("GET", `/sessions/${id}/upload`),
+    completeUpload: async (id: string, parts: UploadedPart[]): Promise<Session> => {
+      const session = await this.request<Session>("POST", `/sessions/${id}/upload/complete`, { parts });
+      this.emit();
+      return session;
+    },
+    retryAnalysis: async (id: string): Promise<Session> => {
+      const session = await this.request<Session>("POST", `/sessions/${id}/retry`);
+      this.emit();
+      return session;
+    },
+    audioUrl: (id: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/sessions/${id}/audio`),
+    upload: (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> =>
+      // presigned URL로의 PUT은 API 서버가 아니라 R2로 가므로 Authorization 없이 fetchFn을 그대로 쓴다
+      uploadRecording({ client: this, bandId, input, source, fetchFn: this.fetchFn, onProgress }),
+  };
+
+  takes = {
+    list: (sessionId: string): Promise<Take[]> => this.request<Take[]>("GET", `/sessions/${sessionId}/takes`),
+    audioUrl: (takeId: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/takes/${takeId}/audio`),
+  };
+
+  comments = {
+    list: (takeId: string): Promise<TakeComment[]> => this.request<TakeComment[]>("GET", `/takes/${takeId}/comments`),
+    create: async (takeId: string, input: CreateCommentInput): Promise<TakeComment> => {
+      const comment = await this.request<TakeComment>("POST", `/takes/${takeId}/comments`, input);
+      this.emit();
+      return comment;
+    },
+  };
 }

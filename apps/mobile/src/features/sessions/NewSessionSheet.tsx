@@ -1,11 +1,16 @@
+import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
 import { View } from "react-native";
+import { toLocalIso } from "@/lib/time";
 import { font, useTheme } from "@/theme";
-import { AppText, BottomSheet, IconCircle, SheetActionRow } from "@/ui";
+import { AppText, BottomSheet, IconCircle, SheetActionRow, useToast } from "@/ui";
+
+const SUPPORTED_MIME_TYPES = ["audio/mp4", "audio/x-m4a", "audio/m4a"];
 
 export function NewSessionSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const router = useRouter();
   const { colors } = useTheme();
+  const toast = useToast();
   return (
     <BottomSheet visible={visible} onClose={onClose} title="New session">
       <SheetActionRow
@@ -29,9 +34,32 @@ export function NewSessionSheet({ visible, onClose }: { visible: boolean; onClos
         }
         title="Import a recording"
         subtitle="Find the takes in an existing recording"
-        onPress={() => {
+        onPress={async () => {
           onClose();
-          router.push({ pathname: "/processing", params: { durationSec: "6720", source: "import" } });
+          let picked;
+          try {
+            picked = await DocumentPicker.getDocumentAsync({
+              type: SUPPORTED_MIME_TYPES,
+              copyToCacheDirectory: true,
+              multiple: false,
+              // 파일 전체를 base64 문자열로 들고 오지 않게 한다 — 긴 녹음이면 그것만으로 메모리가 터진다
+              base64: false,
+            });
+          } catch {
+            toast.show("Couldn’t open the file picker");
+            return;
+          }
+          if (picked.canceled || !picked.assets[0]) return;
+          const asset = picked.assets[0];
+          // 원본 wav/영상 가져오기는 백로그: 지금은 m4a만 허용한다
+          if (asset.mimeType && !SUPPORTED_MIME_TYPES.includes(asset.mimeType)) {
+            toast.show("Only .m4a recordings are supported for now");
+            return;
+          }
+          router.push({
+            pathname: "/processing",
+            params: { fileUri: asset.uri, source: "import", startedAt: toLocalIso(new Date()) },
+          });
         }}
       />
     </BottomSheet>

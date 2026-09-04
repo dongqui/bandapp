@@ -1,65 +1,42 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { View } from "react-native";
-import { useApi, useApiData } from "@/api";
-import { useCurrentBand } from "@/features/band/useCurrentBand";
+import { useUploadSession } from "@/features/upload/useUploadSession";
 import { fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
-import { AppText, MonoLabel, ProgressBar, Screen, useToast } from "@/ui";
-
-const ANALYSIS_MS = 4500;
+import { AppText, Chip, MonoLabel, ProgressBar, Screen } from "@/ui";
 
 export function ProcessingScreen() {
-  const { durationSec: durParam, source } = useLocalSearchParams<{
-    durationSec: string;
-    source: "recording" | "import";
-  }>();
-  const durationSec = Number(durParam ?? 0);
-  const api = useApi();
-  const router = useRouter();
-  const { band } = useCurrentBand();
-  const { colors } = useTheme();
-  const toast = useToast();
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const startedRef = useRef(false);
-
-  useEffect(() => {
-    if (!band || startedRef.current) return;
-    startedRef.current = true;
-    void api.sessions
-      .create(band.id, { durationSec, source: source ?? "recording" })
-      .then((s) => setSessionId(s.id))
-      .catch(() => toast.show("Something went wrong"));
-  }, [api, band, durationSec, source]);
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      setProgress((p) => (p >= 1 ? p : Math.min(0.95, p + 200 / ANALYSIS_MS)));
-    }, 200);
-    return () => clearInterval(t);
-  }, []);
-
-  const { data: session } = useApiData(
-    async (a) => (sessionId ? a.sessions.get(sessionId) : undefined),
-    [sessionId],
+  const raw = useLocalSearchParams<{ fileUri: string; source: "recording" | "import"; startedAt: string; durationMs?: string }>();
+  const params = useMemo(
+    () =>
+      raw.fileUri
+        ? { fileUri: raw.fileUri, source: raw.source ?? "import", startedAt: raw.startedAt, durationMs: raw.durationMs ? Number(raw.durationMs) : undefined }
+        : null,
+    [raw.fileUri, raw.source, raw.startedAt, raw.durationMs],
   );
-  const done = session?.status === "ready";
+  const { phase, progress, session, error, retry } = useUploadSession(params);
+  const router = useRouter();
+  const { colors } = useTheme();
 
   useEffect(() => {
-    if (!done || !sessionId) return;
-    setProgress(1);
-    const t = setTimeout(() => router.replace(`/session/${sessionId}`), 1100);
+    if (phase !== "ready" || !session) return;
+    const t = setTimeout(() => router.replace(`/session/${session.id}`), 1100);
     return () => clearTimeout(t);
-  }, [done, sessionId, router]);
+  }, [phase, session, router]);
 
-  const phase = done
-    ? `${session?.takeCount ?? 0} Takes found`
-    : progress < 0.3
-      ? "Preparing the recording…"
-      : progress < 0.78
+  const durationSec = session?.durationSec || (params?.durationMs ? Math.round(params.durationMs / 1000) : 0);
+  const bar = phase === "uploading" ? progress * 0.6 : phase === "analyzing" ? 0.6 + 0.35 * 0.5 : phase === "ready" ? 1 : progress * 0.6;
+  const caption =
+    phase === "uploading"
+      ? `Uploading… ${Math.round(progress * 100)}%`
+      : phase === "analyzing"
         ? "Finding the parts you played…"
-        : "Organizing takes…";
+        : phase === "ready"
+          ? `${session?.takeCount ?? 0} Takes found`
+          : phase === "failed"
+            ? (error ?? "Couldn’t analyze this recording")
+            : "Preparing the recording…";
 
   return (
     <Screen>
@@ -68,18 +45,16 @@ export function ProcessingScreen() {
           Organizing your rehearsal
         </AppText>
         <MonoLabel color={colors.textMuted} style={{ fontSize: 12, letterSpacing: 0 }}>
-          {`${fmtDuration(durationSec)} recording`}
+          {durationSec ? `${fmtDuration(durationSec)} recording` : "Imported recording"}
         </MonoLabel>
-        <ProgressBar progress={progress} />
-        <AppText variant="caption" color={done ? colors.accent : colors.textMuted} style={{ minHeight: 18 }}>
-          {phase}
+        <ProgressBar progress={bar} />
+        <AppText variant="caption" color={phase === "ready" ? colors.accent : phase === "failed" ? colors.danger : colors.textMuted} style={{ minHeight: 18, textAlign: "center" }}>
+          {caption}
         </AppText>
+        {phase === "failed" ? <Chip label="Try again" onPress={retry} /> : null}
       </View>
-      <AppText
-        variant="small"
-        style={{ textAlign: "center", paddingHorizontal: space.screenX + 16, paddingBottom: 64, lineHeight: 18 }}
-      >
-        You can close the app — your takes will be ready when you're back.
+      <AppText variant="small" style={{ textAlign: "center", paddingHorizontal: space.screenX + 16, paddingBottom: 64, lineHeight: 18 }}>
+        {phase === "uploading" ? "Keep the app open until the upload finishes." : "You can close the app — your takes will be ready when you're back."}
       </AppText>
     </Screen>
   );

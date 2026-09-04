@@ -1,27 +1,43 @@
 import type {
   AppleLoginCredential,
+  AudioUrl,
   AuthTokens,
   Band,
   BandInvite,
   BandMember,
   BandPart,
+  CreateCommentInput,
+  CreateSessionInput,
+  CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
   Take,
   TakeComment,
+  UploadPartUrl,
+  UploadStatus,
+  UploadedPart,
   User,
 } from "@bandapp/types";
 
-export interface CreateSessionInput {
-  durationSec: number;
-  source: "recording" | "import";
+export type { CreateCommentInput, CreateSessionInput } from "@bandapp/types";
+
+/**
+ * PUT body로 그대로 넘길 수 있는 파트 한 조각. 웹은 Blob(게으른 slice), RN은 Uint8Array를
+ * 준다 — RN fetch는 Uint8Array를 RCTNetworking이 base64로 바꿔 네이티브로 보낸다.
+ */
+export type UploadPartBody = Blob | Uint8Array;
+
+export interface UploadSource {
+  sizeBytes: number;
+  /** [start, end) 바이트 범위를 돌려준다. 호출자는 파트마다 한 번 부른다. */
+  readPart(range: { start: number; end: number }): Promise<UploadPartBody>;
 }
 
-export interface CreateCommentInput {
-  atSec: number;
-  text: string;
+export interface UploadProgress {
+  uploadedBytes: number;
+  totalBytes: number;
 }
 
 /** 토큰 보관소 — 모바일이 SecureStore로 구현한다. */
@@ -60,11 +76,23 @@ export interface RehearsalApiClient {
   sessions: {
     list(bandId: string): Promise<Session[]>;
     get(id: string): Promise<Session>;
-    create(bandId: string, input: CreateSessionInput): Promise<Session>;
+    create(bandId: string, input: CreateSessionInput): Promise<CreateSessionResult>;
+    partUrls(id: string, partNumbers: number[]): Promise<UploadPartUrl[]>;
+    uploadStatus(id: string): Promise<UploadStatus>;
+    completeUpload(id: string, parts: UploadedPart[]): Promise<Session>;
     retryAnalysis(id: string): Promise<Session>;
+    audioUrl(id: string): Promise<AudioUrl>;
+    /** create → 파트 업로드 → complete를 한 번에. Mock은 진행률만 흉내 낸다. */
+    upload(
+      bandId: string,
+      input: CreateSessionInput,
+      source: UploadSource,
+      onProgress?: (p: UploadProgress) => void,
+    ): Promise<Session>;
   };
   takes: {
     list(sessionId: string): Promise<Take[]>;
+    audioUrl(takeId: string): Promise<AudioUrl>;
   };
   comments: {
     list(takeId: string): Promise<TakeComment[]>;

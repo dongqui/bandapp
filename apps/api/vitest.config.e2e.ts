@@ -12,6 +12,7 @@ export default defineConfig({
       JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET ?? 'e2e-test-secret',
       INVITE_LINK_BASE_URL: process.env.INVITE_LINK_BASE_URL ?? 'https://invite.test',
       AUTH_THROTTLE_LIMIT: '1000',
+      DEV_LOGIN_SECRET: 'e2e-dev-secret',
     },
     globalSetup: ['./test/global-setup.ts'],
     // e2e spec files share one real Postgres database and truncate it in beforeEach,

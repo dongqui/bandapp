@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useApi } from "@/api";
 import { seedOf } from "@/lib/seed";
@@ -8,6 +8,7 @@ import { space, useTheme } from "@/theme";
 import { AppText, MonoLabel, PlayerWaveform, PressableOpacity, Screen, useToast } from "@/ui";
 import { CommentInput } from "./CommentInput";
 import { CommentRow } from "./CommentRow";
+import { useAudioUrl } from "./useAudioUrl";
 import { useComments } from "./useComments";
 import { usePlayback } from "./usePlayback";
 import { useSession } from "./useSession";
@@ -26,14 +27,24 @@ export function TakePlayerScreen() {
   const take = useMemo(() => {
     if (!session) return undefined;
     if (isOriginal) {
-      return { name: "Original recording", durationSec: session.durationSec, commentKey: `${session.id}-orig` };
+      return { id: "orig", name: "Original recording", durationSec: session.durationSec };
     }
     const t = (takes ?? []).find((x) => x.id === takeId);
-    return t ? { name: t.name, durationSec: t.durationSec, commentKey: t.id } : undefined;
+    return t ? { id: t.id, name: t.name, durationSec: t.durationSec } : undefined;
   }, [session, takes, takeId, isOriginal]);
 
-  const { data: comments, reload } = useComments(take?.commentKey);
-  const playback = usePlayback(take?.durationSec ?? 0);
+  const { data: comments, reload } = useComments(isOriginal ? undefined : take?.id);
+  const url = useAudioUrl(isOriginal ? "session" : "take", isOriginal ? session?.id : take?.id);
+  const playback = usePlayback(take?.durationSec ?? 0, url);
+
+  // 재생 실패는 소리가 안 나는 것 말고는 티가 안 난다 — 같은 에러로 토스트가 반복되지 않게
+  // 마지막으로 보여준 값을 기억한다.
+  const shownErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!playback.error || playback.error === shownErrorRef.current) return;
+    shownErrorRef.current = playback.error;
+    toast.show("Couldn’t play this audio");
+  }, [playback.error, toast]);
 
   if (!session || !take) return <Screen>{null}</Screen>;
   const sub = `${session.title} · ${isOriginal ? fmtDuration(take.durationSec) : fmtClock(take.durationSec)}`;
@@ -63,7 +74,7 @@ export function TakePlayerScreen() {
         </View>
         <View style={{ paddingHorizontal: space.screenX, paddingTop: 18, paddingBottom: 8, alignItems: "center", gap: 16 }}>
           <PlayerWaveform
-            seed={seedOf(take.commentKey)}
+            seed={seedOf(isOriginal ? `${session.id}-orig` : take.id)}
             durationSec={take.durationSec}
             positionSec={playback.positionSec}
             markers={(comments ?? []).map((c) => c.atSec)}
@@ -112,22 +123,27 @@ export function TakePlayerScreen() {
           ListHeaderComponent={<MonoLabel style={{ paddingTop: 8, paddingBottom: 2 }}>FEEDBACK</MonoLabel>}
           ListEmptyComponent={
             <AppText variant="caption" color={colors.textFaint} style={{ paddingVertical: 18 }}>
-              No feedback yet. Say something at the right moment — it lands on the timeline.
+              {isOriginal
+                ? "Feedback lives on takes — open one to leave a note."
+                : "No feedback yet. Say something at the right moment — it lands on the timeline."}
             </AppText>
           }
           renderItem={({ item }) => (
             <CommentRow comment={item} onPress={() => playback.seekTo(Math.max(0, item.atSec - 5), true)} />
           )}
         />
-        <CommentInput
-          placeholder={`Leave feedback at ${fmtClock(playback.positionSec)}…`}
-          onSubmit={(text) => {
-            void api.comments
-              .create(take.commentKey, { atSec: Math.floor(playback.positionSec), text })
-              .then(() => reload())
-              .catch(() => toast.show("Something went wrong"));
-          }}
-        />
+        {!isOriginal && (
+          <CommentInput
+            placeholder={`Leave feedback at ${fmtClock(playback.positionSec)}…`}
+            onSubmit={(text) => {
+              void api.comments
+                // 재생 위치가 실제 길이를 넘길 수 있다(디코딩된 길이가 메타데이터보다 길 때) — 타임라인 밖 코멘트를 막는다
+                .create(take.id, { atSec: Math.min(playback.positionSec, take.durationSec), text })
+                .then(() => reload())
+                .catch(() => toast.show("Something went wrong"));
+            }}
+          />
+        )}
       </KeyboardAvoidingView>
     </Screen>
   );

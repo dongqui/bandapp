@@ -9,8 +9,7 @@ export interface TakeCandidate {
   confidence: number;
 }
 
-export interface RecordingAnalysisResult {
-  recordingId: string;
-  model: string;
-  takes: TakeCandidate[];
+/** SQS recording-analysis 큐 메시지 본문 */
+export interface AnalyzeSessionJob {
+  sessionId: string;
 }

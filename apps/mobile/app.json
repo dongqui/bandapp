@@ -29,7 +29,13 @@
       "expo-router",
       "expo-font",
       "expo-secure-store",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Take N records your rehearsal so it can find the takes."
+        }
+      ]
     ],
     "extra": {
       "router": {}

@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { extname } from "node:path";
 import { Logger, type Provider } from "@nestjs/common";
 import { GoogleGenAI, Type, createPartFromUri, createUserContent } from "@google/genai";
 import type { TakeCandidate } from "@bandapp/types";
@@ -22,38 +20,6 @@ export function audioMimeType(filePath: string): string {
     throw new Error(`unsupported audio extension: ${filePath}`);
   }
   return mime;
-}
-
-function findWorkspaceRoot(startDir: string): string {
-  let dir = startDir;
-  while (true) {
-    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      throw new Error(`could not locate workspace root (pnpm-workspace.yaml) from ${startDir}`);
-    }
-    dir = parent;
-  }
-}
-
-/**
- * audioPath는 저장소 루트 기준 상대 경로(예: "poc/data/a.wav")로 전달된다.
- * `pnpm --filter @bandapp/api ...`로 실행하면 process.cwd()가 apps/api로 바뀌므로
- * cwd에 의존하지 않고 이 모듈 파일 위치를 기준으로 워크스페이스 루트를 찾아 절대 경로로 바꾼다.
- */
-export function resolveAudioPath(filePath: string): string {
-  if (isAbsolute(filePath)) {
-    throw new Error("audioPath must be relative to the workspace root");
-  }
-  const moduleDir = dirname(fileURLToPath(import.meta.url));
-  const root = findWorkspaceRoot(moduleDir);
-  const resolved = resolve(root, filePath);
-  if (resolved !== root && !resolved.startsWith(root + sep)) {
-    throw new Error("audioPath escapes the workspace root");
-  }
-  return resolved;
 }
 
 const TAKE_TYPES = new Set(["PERFORMANCE", "PARTIAL_PRACTICE"]);
@@ -103,6 +69,7 @@ export interface GenAiClient {
       state?: string;
     }>;
     get(params: { name: string }): Promise<{ state?: string; uri?: string; mimeType?: string }>;
+    delete(params: { name: string }): Promise<unknown>;
   };
   models: {
     generateContent(params: unknown): Promise<{ text?: string }>;
@@ -162,7 +129,7 @@ export class GeminiService {
     private readonly pollIntervalMs = 2000,
   ) {}
 
-  async analyzeAudio(filePath: string): Promise<TakeCandidate[]> {
+  async analyzeFile(filePath: string): Promise<TakeCandidate[]> {
     const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS ?? 300000);
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<never>((_, reject) => {
@@ -182,28 +149,25 @@ export class GeminiService {
     const client = this.createClient();
     const model = process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
 
-    const uploaded = await client.files.upload({
-      file: resolveAudioPath(filePath),
-      config: { mimeType: audioMimeType(filePath) },
-    });
-    const active = await this.waitForActive(client, uploaded, deadline);
-
-    this.logger.log(`analyzing ${filePath} with ${model}`);
-    const response = await client.models.generateContent({
-      model,
-      contents: createUserContent([
-        ANALYSIS_PROMPT,
-        createPartFromUri(active.uri as string, active.mimeType as string),
-      ]),
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: TAKES_SCHEMA,
-      },
-    });
-    if (!response.text) {
-      throw new Error("gemini returned an empty response");
+    const uploaded = await client.files.upload({ file: filePath, config: { mimeType: audioMimeType(filePath) } });
+    try {
+      const active = await this.waitForActive(client, uploaded, deadline);
+      this.logger.log(`analyzing ${filePath} with ${model}`);
+      const response = await client.models.generateContent({
+        model,
+        contents: createUserContent([ANALYSIS_PROMPT, createPartFromUri(active.uri as string, active.mimeType as string)]),
+        config: { responseMimeType: "application/json", responseSchema: TAKES_SCHEMA },
+      });
+      if (!response.text) throw new Error("gemini returned an empty response");
+      return parseTakes(response.text);
+    } finally {
+      if (uploaded.name) {
+        // Files API 저장소는 48시간 뒤 자동 삭제되지만, 청크마다 하나씩 남기면 한도(20GB)를 먹는다
+        await client.files.delete({ name: uploaded.name }).catch((err: unknown) => {
+          this.logger.warn(`failed to delete gemini file ${uploaded.name}: ${String(err)}`);
+        });
+      }
     }
-    return parseTakes(response.text);
   }
 
   private async waitForActive(

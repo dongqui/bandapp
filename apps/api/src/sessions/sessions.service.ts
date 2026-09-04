@@ -22,6 +22,12 @@ export const PART_SIZE = 10 * 1024 * 1024;
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
 export const PRESIGN_EXPIRES_SEC = 3600;
 const MAX_PART_URLS_PER_REQUEST = 100;
+// analyzing에 이 시간 이상 머문 세션은 retry를 허용한다. 두 가지 정체 경로를 다룬다:
+// (1) API가 completeUpload 커밋 직후, 큐 발행 직전에 죽는 경우 — 세션은 analyzing인데 아무도 재시도하지 않는다.
+// (2) 워커가 죽고 SQS 재전달이 DLQ까지 소진되는 경우 — 세션이 영원히 analyzing에 머문다.
+// 3시간짜리 세션도 여유 있게 끝나므로(청크 분석은 그보다 훨씬 짧게 걸린다) 1시간은 "진짜 정체"와
+// "아직 분석 중"을 구분하기에 안전한 여유다.
+export const ANALYSIS_STALE_MS = 60 * 60 * 1000;
 
 export class SessionsService {
   private readonly logger = new Logger(SessionsService.name);
@@ -104,7 +110,7 @@ export class SessionsService {
     return Promise.all(
       partNumbers.map(async (partNumber) => ({
         partNumber,
-        url: await this.storage.presignUploadPart(rec.objectKey, rec.uploadId!, partNumber, PRESIGN_EXPIRES_SEC),
+        url: await this.storage.presignUploadPart(rec.objectKey, rec.uploadId, partNumber, PRESIGN_EXPIRES_SEC),
       })),
     );
   }
@@ -112,7 +118,7 @@ export class SessionsService {
   async uploadStatus(id: string, userId: string): Promise<UploadStatus> {
     await this.loadForMember(id, userId);
     const rec = await this.recordingOf(id);
-    const uploadedParts = rec.uploadStatus === "pending" ? await this.storage.listParts(rec.objectKey, rec.uploadId!) : [];
+    const uploadedParts = rec.uploadStatus === "pending" ? await this.storage.listParts(rec.objectKey, rec.uploadId) : [];
     return { partSize: rec.partSize, partCount: rec.partCount, uploadedParts };
   }
 
@@ -125,7 +131,7 @@ export class SessionsService {
       throw new BadRequestException(`parts must contain exactly ${rec.partCount} distinct entries`);
     }
     this.assertPartNumbers(parts.map((p) => p.partNumber), rec.partCount);
-    await this.storage.completeMultipartUpload(rec.objectKey, rec.uploadId!, parts);
+    await this.storage.completeMultipartUpload(rec.objectKey, rec.uploadId, parts);
     await this.db.transaction(async (tx) => {
       await tx
         .update(recordings)
@@ -139,7 +145,8 @@ export class SessionsService {
 
   async retry(id: string, userId: string): Promise<Session> {
     const session = await this.loadForMember(id, userId);
-    if (session.status !== "failed") throw new ConflictException("실패한 세션만 다시 시도할 수 있어요.");
+    const stale = session.status === "analyzing" && Date.now() - session.updatedAt.getTime() > ANALYSIS_STALE_MS;
+    if (session.status !== "failed" && !stale) throw new ConflictException("실패한 세션만 다시 시도할 수 있어요.");
     await this.db
       .update(sessions)
       .set({ status: "analyzing", analysisError: null, updatedAt: new Date() })
@@ -189,7 +196,9 @@ export class SessionsService {
   private async recordingOf(sessionId: string) {
     const rec = await this.db.query.recordings.findFirst({ where: eq(recordings.sessionId, sessionId) });
     if (!rec) throw new NotFoundException("녹음을 찾을 수 없어요.");
-    return rec;
+    // uploadId는 스키마상 nullable이지만 create()가 항상 채워 넣는다 — null이면 데이터가 깨진 것.
+    if (rec.uploadId === null) throw new ConflictException("업로드 정보가 없는 세션이에요.");
+    return rec as typeof rec & { uploadId: string };
   }
 }
 

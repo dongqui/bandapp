@@ -40,7 +40,7 @@ docker compose up --build -d
 
 - API: http://localhost:3000 (health: `GET /health`)
 - 분석 파이프라인: 세션 생성(`POST /bands/:bandId/sessions`) → presigned multipart 업로드 → `POST /sessions/:id/upload/complete` → SQS → worker(R2 다운로드 → ffmpeg 청크 → Gemini → take 절단 → R2 업로드 → DB). `.env`에 `GEMINI_API_KEY`, `R2_*`, `DEV_LOGIN_SECRET`이 필요하다.
-- 서버 전 구간 검증(Windows): `UPLOAD_FILE=poc/data/raw_sessions/IMG_2811.m4a DEV_LOGIN_SECRET=<.env 값> pnpm --filter @bandapp/api upload-session` → 업로드 진행률, 분석 대기, take 목록, 첫 take ffprobe 길이가 순서대로 찍힌다. 워커 로그는 `docker compose logs -f worker`.
+- 서버 전 구간 검증(Windows): PowerShell에서는 `$env:UPLOAD_FILE="poc/data/raw_sessions/IMG_2811.m4a"; $env:API_URL="http://localhost:3001"; $env:DEV_LOGIN_SECRET="<.env 값>"; pnpm --filter @bandapp/api upload-session` (API_URL은 호스트에 노출된 포트, `API_PORT`로 바뀌며 이 머신에서는 3001). bash라면 `UPLOAD_FILE=poc/data/raw_sessions/IMG_2811.m4a API_URL=http://localhost:3001 DEV_LOGIN_SECRET=<.env 값> pnpm --filter @bandapp/api upload-session`. → 업로드 진행률, 분석 대기, take 목록, 첫 take ffprobe 길이가 순서대로 찍힌다. 워커 로그는 `docker compose logs -f worker`.
 - Dockerfile에 ffmpeg이 추가됐고 큐 visibility timeout이 바뀌었으니 기존 체크아웃은 `docker compose up --build -V`로 재빌드하고 localstack 볼륨도 새로 만든다 (`docker compose down -v` 후 up).
 - 큐: LocalStack SQS (`recording-analysis`, `recording-analysis-python`, `recording-analysis-dlq`)
 - 종료: `docker compose down`

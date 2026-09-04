@@ -1,6 +1,12 @@
 /**
  * Windows에서 서버 전 구간을 실제 R2·Gemini로 검증한다 (스펙 "검증 스크립트").
+ * API_URL은 호스트에 노출된 포트다 — docker-compose의 API_PORT로 바뀌며 이 머신에서는 3001.
  *
+ * PowerShell:
+ *   $env:UPLOAD_FILE="poc/data/raw_sessions/IMG_2811.m4a"; $env:API_URL="http://localhost:3001"; `
+ *     $env:DEV_LOGIN_SECRET="..."; pnpm --filter @bandapp/api upload-session
+ *
+ * bash (대안):
  *   UPLOAD_FILE=poc/data/raw_sessions/IMG_2811.m4a API_URL=http://localhost:3001 DEV_LOGIN_SECRET=... \
  *     pnpm --filter @bandapp/api upload-session
  *

@@ -21,6 +21,7 @@ export interface SessionRow {
   durationMs: number | null;
   takeCount: number;
   commentCount: number;
+  updatedAt: Date;
 }
 
 export function toSession(row: SessionRow): Session {
@@ -48,6 +49,8 @@ export const SESSION_WITH_COUNTS = {
   startedAt: sessions.startedAt,
   durationMs: sessions.durationMs,
   takeCount: sessions.takeCount,
+  // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
+  updatedAt: sessions.updatedAt,
   // ${sessions.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
   // takes.id/comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
   commentCount: sql<number>`(select count(*)::int from comments c join takes t on t.id = c.take_id where t.session_id = "sessions"."id")`,

@@ -48,6 +48,19 @@ describe("MockApiClient", () => {
     expect(takes).toHaveLength(ready.takeCount);
   });
 
+  it("uploadStatus returns the partCount computed at create", async () => {
+    const api = new MockApiClient();
+    const { session: created } = await api.sessions.create(BAND, {
+      startedAt: new Date().toISOString(),
+      durationMs: 3_600_000,
+      sizeBytes: 25 * 1024 * 1024,
+      contentType: "audio/mp4",
+      source: "recording",
+    });
+    const status = await api.sessions.uploadStatus(created.id);
+    expect(status.partCount).toBe(3);
+  });
+
   it("retryAnalysis moves failed session to analyzing then ready", async () => {
     const api = new MockApiClient({ analysisDelayMs: 10 });
     const retried = await api.sessions.retryAnalysis("f1");

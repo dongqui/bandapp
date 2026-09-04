@@ -30,6 +30,8 @@ export class MockApiClient implements RehearsalApiClient {
   private listeners = new Set<() => void>();
   private analysisDelayMs: number;
   private nextId = 1;
+  // uploadStatus가 partCount를 실제로 만든 세션과 맞게 돌려주도록, create가 계산한 값을 세션별로 기억해 둔다.
+  private partCounts = new Map<string, number>();
 
   constructor(opts?: { analysisDelayMs?: number }) {
     this.analysisDelayMs = opts?.analysisDelayMs ?? 4000;
@@ -193,11 +195,17 @@ export class MockApiClient implements RehearsalApiClient {
       this.state.sessions.unshift(s);
       this.emit();
       const partSize = 10 * 1024 * 1024;
-      return { session: { ...s }, upload: { partSize, partCount: Math.max(1, Math.ceil(input.sizeBytes / partSize)) } };
+      const partCount = Math.max(1, Math.ceil(input.sizeBytes / partSize));
+      this.partCounts.set(s.id, partCount);
+      return { session: { ...s }, upload: { partSize, partCount } };
     },
     partUrls: async (id: string, partNumbers: number[]): Promise<UploadPartUrl[]> =>
       partNumbers.map((partNumber) => ({ partNumber, url: `https://mock.upload/${id}/${partNumber}` })),
-    uploadStatus: async (): Promise<UploadStatus> => ({ partSize: 10 * 1024 * 1024, partCount: 1, uploadedParts: [] }),
+    uploadStatus: async (id: string): Promise<UploadStatus> => ({
+      partSize: 10 * 1024 * 1024,
+      partCount: this.partCounts.get(id) ?? 1,
+      uploadedParts: [],
+    }),
     completeUpload: async (id: string): Promise<Session> => {
       const s = this.mustSession(id);
       s.status = "analyzing";

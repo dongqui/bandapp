@@ -48,6 +48,14 @@ export function r2ClientConfig(env: NodeJS.ProcessEnv): S3ClientConfig & { endpo
   if (!accountId || !accessKeyId || !secretAccessKey) {
     throw new Error("R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY must be set");
   }
+  // 실전 검증 중 .env에 남아있던 예전 값(.../band-rehearsal-dev)이 R2_ENDPOINT에 경로째 들어가면서
+  // 모든 요청이 그 경로 아래로 조용히 잘못 라우팅됐다 — origin이 아니면 바로 던져서 재발을 막는다.
+  if (env.R2_ENDPOINT) {
+    const url = new URL(env.R2_ENDPOINT);
+    if (url.pathname !== "/" || url.search || url.hash) {
+      throw new Error(`R2_ENDPOINT must be an origin with no path (got ${env.R2_ENDPOINT})`);
+    }
+  }
   return {
     region: "auto",
     endpoint: env.R2_ENDPOINT || `https://${accountId}.r2.cloudflarestorage.com`,

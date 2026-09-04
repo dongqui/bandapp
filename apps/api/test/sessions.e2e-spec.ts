@@ -153,6 +153,25 @@ describe("sessions API", () => {
     expect(producer.enqueued).toEqual([session.id]);
   });
 
+  it("analyzing에 1시간 넘게 머문 세션은 retry로 다시 발행할 수 있다", async () => {
+    const { session } = await createSession();
+    const parts = [1, 2, 3].map((partNumber) => ({ partNumber, etag: `e${partNumber}` }));
+    await request(app.getHttpServer()).post(`/sessions/${session.id}/upload/complete`).set(auth(owner.accessToken)).send({ parts }).expect(200);
+    // completeUpload가 analyzing으로 바꾼 직후의 updatedAt을 2시간 전으로 되돌려서, API가 죽었거나
+    // 워커 메시지가 DLQ까지 소진된 정체 상황을 흉내 낸다.
+    await db.update(sessions).set({ updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000) }).where(eq(sessions.id, session.id));
+    const retried = await request(app.getHttpServer()).post(`/sessions/${session.id}/retry`).set(auth(owner.accessToken)).expect(200);
+    expect(retried.body.status).toBe("analyzing");
+    expect(producer.enqueued).toContain(session.id);
+  });
+
+  it("방금 analyzing이 된 세션은 retry가 409다", async () => {
+    const { session } = await createSession();
+    const parts = [1, 2, 3].map((partNumber) => ({ partNumber, etag: `e${partNumber}` }));
+    await request(app.getHttpServer()).post(`/sessions/${session.id}/upload/complete`).set(auth(owner.accessToken)).send({ parts }).expect(200);
+    await request(app.getHttpServer()).post(`/sessions/${session.id}/retry`).set(auth(owner.accessToken)).expect(409);
+  });
+
   it("uploading이 아닌 세션에 파트를 요청하거나, failed가 아닌 세션을 retry하면 409", async () => {
     const { session } = await createSession();
     await request(app.getHttpServer()).post(`/sessions/${session.id}/retry`).set(auth(owner.accessToken)).expect(409);

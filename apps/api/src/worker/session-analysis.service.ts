@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
@@ -38,6 +38,7 @@ export class SessionAnalysisService {
     private readonly gemini: GeminiService,
     private readonly ffmpeg: FfmpegRunner,
     private readonly tmpRoot: string = tmpdir(),
+    private readonly retryDelayMs: number = 2000,
   ) {}
 
   /**
@@ -45,6 +46,9 @@ export class SessionAnalysisService {
    * DB 읽기 자체가 실패하면 throw해서 메시지를 남긴다 (재전달로 복구될 수 있는 오류).
    */
   async run(sessionId: string): Promise<void> {
+    // 실행 도중 배포로 환경변수가 바뀌어도 이 세션은 시작할 때의 모델로 끝까지 간다 —
+    // 마무리 트랜잭션이 기록하는 값과 실제로 호출한 모델이 어긋나지 않도록 한 번만 읽어 둔다.
+    const model = process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL;
     const session = await this.db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
     if (!session) {
       this.logger.warn(`session ${sessionId} not found, ignoring`);
@@ -83,6 +87,9 @@ export class SessionAnalysisService {
         const output = join(workDir, `take-${index}.m4a`);
         await this.ffmpeg.cut(original, candidate.startMs, candidate.endMs, output);
         await this.storage.putFile(key, output, TAKE_CONTENT_TYPE);
+        // R2 업로드가 끝났으니 로컬 사본은 바로 지운다 — take 여러 개가 쌓이는 동안 임시 디스크가
+        // 꽉 차는 걸 막는다. 스펙 테스트의 가짜 ffmpeg는 파일을 실제로 만들지 않으니 ENOENT는 무시한다.
+        await unlink(output).catch(() => undefined);
         rows.push({
           id: takeId,
           sessionId,
@@ -108,7 +115,7 @@ export class SessionAnalysisService {
             takeCount: rows.length,
             durationMs,
             analysisError: null,
-            analysisModel: process.env.GEMINI_MODEL ?? DEFAULT_GEMINI_MODEL,
+            analysisModel: model,
             updatedAt: new Date(),
           })
           .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")))
@@ -144,17 +151,26 @@ export class SessionAnalysisService {
   private async analyzeChunk(original: string, chunk: Chunk, workDir: string): Promise<TakeCandidate[]> {
     const path = join(workDir, `chunk-${chunk.index}.m4a`);
     await this.ffmpeg.cut(original, chunk.startMs, chunk.endMs, path);
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
-      try {
-        const found = await this.gemini.analyzeFile(path);
-        return found.map((c) => ({ ...c, startMs: c.startMs + chunk.startMs, endMs: c.endMs + chunk.startMs }));
-      } catch (err) {
-        lastError = err;
-        this.logger.warn(`chunk ${chunk.index} attempt ${attempt} failed: ${String(err)}`);
+    try {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
+        try {
+          const found = await this.gemini.analyzeFile(path);
+          return found.map((c) => ({ ...c, startMs: c.startMs + chunk.startMs, endMs: c.endMs + chunk.startMs }));
+        } catch (err) {
+          lastError = err;
+          this.logger.warn(`chunk ${chunk.index} attempt ${attempt} failed: ${String(err)}`);
+          // 재시도 사이에 잠깐 쉰다 — Gemini가 일시적으로 과부하일 때 바로 재요청하면 같은 오류가
+          // 반복될 뿐이다. 스펙 테스트는 retryDelayMs=0으로 넘겨 이 대기를 건너뛴다.
+          if (attempt < CHUNK_ATTEMPTS) await new Promise((r) => setTimeout(r, this.retryDelayMs));
+        }
       }
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    } finally {
+      // 청크 분석이 끝나면(성공하든 실패하든) 로컬 사본은 바로 지운다 — 임시 디스크 압박을 줄인다.
+      // 스펙의 가짜 ffmpeg는 파일을 실제로 만들지 않으니 ENOENT는 무시한다.
+      await unlink(path).catch(() => undefined);
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   private async fail(sessionId: string, message: string): Promise<void> {

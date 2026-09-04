@@ -20,6 +20,7 @@ describe("toSession", () => {
       durationMs: 2716601,
       takeCount: 3,
       commentCount: 2,
+      updatedAt: new Date("2026-09-04T10:00:00Z"),
     });
     expect(session).toEqual({
       id: "s1",
@@ -34,7 +35,7 @@ describe("toSession", () => {
     expect("name" in session).toBe(false);
   });
   it("reports 0 seconds while duration is unknown", () => {
-    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0 }).durationSec).toBe(0);
+    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, updatedAt: new Date() }).durationSec).toBe(0);
   });
 });
 

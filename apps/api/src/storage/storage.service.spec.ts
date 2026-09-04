@@ -56,6 +56,27 @@ describe("r2ClientConfig", () => {
     } as NodeJS.ProcessEnv);
     expect(config.endpoint).toBe("http://localhost:9000");
   });
+  it("rejects an R2_ENDPOINT with a path", () => {
+    expect(() =>
+      r2ClientConfig({
+        R2_ACCOUNT_ID: "acct",
+        R2_ACCESS_KEY_ID: "k",
+        R2_SECRET_ACCESS_KEY: "s",
+        R2_ENDPOINT: "https://x.example.com/bucket",
+      } as NodeJS.ProcessEnv),
+    ).toThrow("no path");
+  });
+  it("accepts an R2_ENDPOINT that is a bare origin, with or without a trailing slash", () => {
+    for (const endpoint of ["https://x.example.com", "https://x.example.com/"]) {
+      const config = r2ClientConfig({
+        R2_ACCOUNT_ID: "acct",
+        R2_ACCESS_KEY_ID: "k",
+        R2_SECRET_ACCESS_KEY: "s",
+        R2_ENDPOINT: endpoint,
+      } as NodeJS.ProcessEnv);
+      expect(config.endpoint).toBe(endpoint);
+    }
+  });
   it("throws when credentials are missing", () => {
     expect(() => r2ClientConfig({} as NodeJS.ProcessEnv)).toThrow("R2_ACCOUNT_ID");
   });

@@ -107,7 +107,7 @@ describe("SessionAnalysisService.run", () => {
     const analyzeFile = vi.fn().mockImplementation(async () => perChunk.shift() ?? []);
     const gemini = { analyzeFile } as unknown as GeminiService;
 
-    await new SessionAnalysisService(db, storage, gemini, ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, gemini, ffmpeg, tmp, 0).run("s");
 
     expect(calls.downloads).toEqual(["bands/b/sessions/s/original.m4a"]);
     // DB 행이 있는 take(old.m4a)와, R2에만 남아있던 고아 객체(orphan.m4a, listKeys가 돌려줌) 둘 다 지운다.
@@ -140,7 +140,7 @@ describe("SessionAnalysisService.run", () => {
     const { storage } = fakeStorage();
     const { ffmpeg } = fakeFfmpeg(5 * MIN);
     const analyzeFile = vi.fn().mockRejectedValueOnce(new Error("503")).mockResolvedValueOnce([]);
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     expect(analyzeFile).toHaveBeenCalledTimes(2);
     expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 0 });
   });
@@ -150,7 +150,7 @@ describe("SessionAnalysisService.run", () => {
     const { storage } = fakeStorage();
     const { ffmpeg } = fakeFfmpeg(5 * MIN);
     const analyzeFile = vi.fn().mockRejectedValue(new Error("gemini down"));
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     expect(analyzeFile).toHaveBeenCalledTimes(2);
     expect(state.updates.at(-1)).toMatchObject({ status: "failed", analysisError: expect.stringContaining("gemini down") });
   });
@@ -159,7 +159,7 @@ describe("SessionAnalysisService.run", () => {
     const { db, state } = fakeDb({ id: "s", bandId: "b", status: "ready" });
     const { storage, calls } = fakeStorage();
     const analyzeFile = vi.fn();
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, fakeFfmpeg(MIN).ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, fakeFfmpeg(MIN).ffmpeg, tmp, 0).run("s");
     expect(calls.downloads).toEqual([]);
     expect(analyzeFile).not.toHaveBeenCalled();
     expect(state.updates).toEqual([]);
@@ -168,7 +168,7 @@ describe("SessionAnalysisService.run", () => {
   it("ignores unknown sessions", async () => {
     const { db } = fakeDb(undefined);
     const { storage, calls } = fakeStorage();
-    await new SessionAnalysisService(db, storage, { analyzeFile: vi.fn() } as unknown as GeminiService, fakeFfmpeg(MIN).ffmpeg, tmp).run("nope");
+    await new SessionAnalysisService(db, storage, { analyzeFile: vi.fn() } as unknown as GeminiService, fakeFfmpeg(MIN).ffmpeg, tmp, 0).run("nope");
     expect(calls.downloads).toEqual([]);
   });
 
@@ -178,7 +178,7 @@ describe("SessionAnalysisService.run", () => {
     const { storage, calls } = fakeStorage(["bands/b/sessions/s/takes/orphan.m4a"]);
     const { ffmpeg } = fakeFfmpeg(MIN);
     const analyzeFile = vi.fn().mockResolvedValue([]);
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     expect(calls.listedPrefixes).toEqual(["bands/b/sessions/s/takes/"]);
     expect(calls.deleted).toEqual(["bands/b/sessions/s/takes/orphan.m4a"]);
     expect(state.deletedTakes).toBe(0); // DB 행이 없었으니 delete(takes)는 호출되지 않는다
@@ -189,7 +189,7 @@ describe("SessionAnalysisService.run", () => {
     const { storage } = fakeStorage();
     const { ffmpeg } = fakeFfmpeg(5 * MIN);
     const analyzeFile = vi.fn().mockResolvedValue([{ startMs: 0, endMs: 30_000, type: "PERFORMANCE", confidence: 0.9 }]);
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp).run("s");
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     // 마무리 갱신이 analyzing 가드에 걸려 0행을 반환했으니 트랜잭션이 롤백되고, take는 커밋되지 않는다.
     expect(state.insertedTakes).toEqual([]);
     // "더 이상 내 세션이 아니다"라는 신호라 fail()로 덮어쓰지 않는다.

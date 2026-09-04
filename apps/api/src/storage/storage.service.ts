@@ -111,12 +111,15 @@ export class R2StorageService extends StorageService {
 
   async completeMultipartUpload(key: string, uploadId: string, parts: UploadedPart[]): Promise<void> {
     const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+    // S3/R2가 돌려주는 ETag는 큰따옴표로 감싸져 있는데, 우리 API와 클라이언트는 그 따옴표를 벗겨서
+    // 저장·전달한다(listParts의 stripQuotes와 대칭). CompleteMultipartUpload는 원래 형식인
+    // 따옴표 붙은 ETag를 요구하므로 여기서 다시 감싸 보낸다.
     await this.s3.send(
       new CompleteMultipartUploadCommand({
         Bucket: this.bucket,
         Key: key,
         UploadId: uploadId,
-        MultipartUpload: { Parts: sorted.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })) },
+        MultipartUpload: { Parts: sorted.map((p) => ({ PartNumber: p.partNumber, ETag: quoteEtag(p.etag) })) },
       }),
     );
   }
@@ -165,6 +168,10 @@ export class R2StorageService extends StorageService {
 
 function stripQuotes(etag: string): string {
   return etag.replace(/^"|"$/g, "");
+}
+
+function quoteEtag(etag: string): string {
+  return etag.startsWith('"') && etag.endsWith('"') ? etag : `"${etag}"`;
 }
 
 export const storageServiceProvider: Provider = {

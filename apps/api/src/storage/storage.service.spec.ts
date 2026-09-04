@@ -1,9 +1,15 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
 import {
+  AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   ListPartsCommand,
+  PutObjectCommand,
   UploadPartCommand,
   type S3Client,
 } from "@aws-sdk/client-s3";
@@ -15,12 +21,17 @@ function makeService(send: ReturnType<typeof vi.fn>, presign = vi.fn().mockResol
   return { service: new R2StorageService(() => client, presign), presign };
 }
 
+const tmpDirs: string[] = [];
+
 afterEach(() => {
   delete process.env.R2_BUCKET;
   delete process.env.R2_ACCOUNT_ID;
   delete process.env.R2_ACCESS_KEY_ID;
   delete process.env.R2_SECRET_ACCESS_KEY;
   delete process.env.R2_ENDPOINT;
+  for (const dir of tmpDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("r2ClientConfig", () => {
@@ -81,7 +92,7 @@ describe("R2StorageService", () => {
     expect(second.input.PartNumberMarker).toBe("1");
   });
 
-  it("completeMultipartUpload sends parts sorted by number", async () => {
+  it("completeMultipartUpload sends parts sorted by number, with ETags re-quoted", async () => {
     const send = vi.fn().mockResolvedValue({});
     const { service } = makeService(send);
     await service.completeMultipartUpload("k", "up-1", [
@@ -91,10 +102,18 @@ describe("R2StorageService", () => {
     const cmd = send.mock.calls[0]![0] as CompleteMultipartUploadCommand;
     expect(cmd.input.MultipartUpload).toEqual({
       Parts: [
-        { PartNumber: 1, ETag: "e1" },
-        { PartNumber: 2, ETag: "e2" },
+        { PartNumber: 1, ETag: '"e1"' },
+        { PartNumber: 2, ETag: '"e2"' },
       ],
     });
+  });
+
+  it("completeMultipartUpload does not double-quote an already-quoted ETag", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const { service } = makeService(send);
+    await service.completeMultipartUpload("k", "up-1", [{ partNumber: 1, etag: '"e3"' }]);
+    const cmd = send.mock.calls[0]![0] as CompleteMultipartUploadCommand;
+    expect(cmd.input.MultipartUpload).toEqual({ Parts: [{ PartNumber: 1, ETag: '"e3"' }] });
   });
 
   it("presignGet signs a GetObjectCommand", async () => {
@@ -111,5 +130,56 @@ describe("R2StorageService", () => {
     await service.deleteObjects(["a", "b"]);
     const cmd = send.mock.calls[0]![0] as DeleteObjectsCommand;
     expect(cmd.input.Delete).toEqual({ Objects: [{ Key: "a" }, { Key: "b" }], Quiet: true });
+  });
+
+  it("abortMultipartUpload sends an AbortMultipartUploadCommand", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const { service } = makeService(send);
+    await service.abortMultipartUpload("k", "up-1");
+    const cmd = send.mock.calls[0]![0] as AbortMultipartUploadCommand;
+    expect(cmd).toBeInstanceOf(AbortMultipartUploadCommand);
+    expect(cmd.input).toEqual({ Bucket: "taken-rehearsal-dev", Key: "k", UploadId: "up-1" });
+  });
+
+  it("downloadToFile writes the response body stream to the given path", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "storage-spec-"));
+    tmpDirs.push(dir);
+    const dest = join(dir, "out.txt");
+    const send = vi.fn().mockResolvedValue({ Body: Readable.from([Buffer.from("hello")]) });
+    const { service } = makeService(send);
+    await service.downloadToFile("k", dest);
+    expect(readFileSync(dest, "utf8")).toBe("hello");
+  });
+
+  it("downloadToFile rejects when the response has no body", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "storage-spec-"));
+    tmpDirs.push(dir);
+    const dest = join(dir, "out.txt");
+    const send = vi.fn().mockResolvedValue({});
+    const { service } = makeService(send);
+    await expect(service.downloadToFile("k", dest)).rejects.toThrow();
+  });
+
+  it("putFile sends a PutObjectCommand streaming the file with its byte size", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "storage-spec-"));
+    tmpDirs.push(dir);
+    const src = join(dir, "in.mp4");
+    const content = Buffer.from("audio-bytes");
+    writeFileSync(src, content);
+    const send = vi.fn().mockResolvedValue({});
+    const { service } = makeService(send);
+    await service.putFile("k", src, "audio/mp4");
+    const cmd = send.mock.calls[0]![0] as PutObjectCommand;
+    expect(cmd).toBeInstanceOf(PutObjectCommand);
+    expect(cmd.input.Bucket).toBe("taken-rehearsal-dev");
+    expect(cmd.input.Key).toBe("k");
+    expect(cmd.input.ContentType).toBe("audio/mp4");
+    expect(cmd.input.ContentLength).toBe(content.byteLength);
+    expect(cmd.input.Body).toBeInstanceOf(Readable);
+    // send()가 목이라 스트림을 실제로 소비하지 않는다. 열린 채로 두면 afterEach가 임시 파일을
+    // 지운 뒤 비동기 open()이 뒤늦게 완료되며 처리되지 않은 ENOENT를 던지므로 정리해 둔다.
+    const body = cmd.input.Body as Readable;
+    body.on("error", () => {});
+    body.destroy();
   });
 });

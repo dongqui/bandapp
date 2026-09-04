@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useApi } from "@/api";
 import { seedOf } from "@/lib/seed";
@@ -36,6 +36,15 @@ export function TakePlayerScreen() {
   const { data: comments, reload } = useComments(isOriginal ? undefined : take?.id);
   const url = useAudioUrl(isOriginal ? "session" : "take", isOriginal ? session?.id : take?.id);
   const playback = usePlayback(take?.durationSec ?? 0, url);
+
+  // 재생 실패는 소리가 안 나는 것 말고는 티가 안 난다 — 같은 에러로 토스트가 반복되지 않게
+  // 마지막으로 보여준 값을 기억한다.
+  const shownErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!playback.error || playback.error === shownErrorRef.current) return;
+    shownErrorRef.current = playback.error;
+    toast.show("Couldn’t play this audio");
+  }, [playback.error, toast]);
 
   if (!session || !take) return <Screen>{null}</Screen>;
   const sub = `${session.title} · ${isOriginal ? fmtDuration(take.durationSec) : fmtClock(take.durationSec)}`;
@@ -128,7 +137,8 @@ export function TakePlayerScreen() {
             placeholder={`Leave feedback at ${fmtClock(playback.positionSec)}…`}
             onSubmit={(text) => {
               void api.comments
-                .create(take.id, { atSec: playback.positionSec, text })
+                // 재생 위치가 실제 길이를 넘길 수 있다(디코딩된 길이가 메타데이터보다 길 때) — 타임라인 밖 코멘트를 막는다
+                .create(take.id, { atSec: Math.min(playback.positionSec, take.durationSec), text })
                 .then(() => reload())
                 .catch(() => toast.show("Something went wrong"));
             }}

@@ -42,9 +42,11 @@ export function NewSessionSheet({ visible, onClose }: { visible: boolean; onClos
               type: SUPPORTED_MIME_TYPES,
               copyToCacheDirectory: true,
               multiple: false,
+              // 파일 전체를 base64 문자열로 들고 오지 않게 한다 — 긴 녹음이면 그것만으로 메모리가 터진다
+              base64: false,
             });
-          } catch (error) {
-            toast.show("Couldn't open the file picker");
+          } catch {
+            toast.show("Couldn’t open the file picker");
             return;
           }
           if (picked.canceled || !picked.assets[0]) return;

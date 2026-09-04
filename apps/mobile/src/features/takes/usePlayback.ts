@@ -18,6 +18,8 @@ export function usePlayback(durationSec: number, url: string | null) {
   return {
     positionSec: status.currentTime,
     playing: status.playing,
+    // 로드·디코딩 실패는 화면이 토스트로 알린다 — 안 그러면 재생 버튼이 먹통인 이유를 알 수 없다
+    error: status.error ?? null,
     toggle: () => {
       if (status.playing) player.pause();
       else {
@@ -62,5 +64,5 @@ function useSimulatedPlayback(durationSec: number, enabled: boolean) {
     setPositionSec(Math.max(0, Math.min(durationSec, sec)));
     if (autoplay) setPlaying(true);
   };
-  return { positionSec, playing, toggle, seekTo };
+  return { positionSec, playing, toggle, seekTo, error: null };
 }

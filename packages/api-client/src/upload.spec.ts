@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Session } from "@bandapp/types";
 import type { RehearsalApiClient } from "./client";
-import { resumeRecordingUpload, uploadRecording } from "./upload";
+import { resumeRecordingUpload, uploadRecording, UploadRecordingError } from "./upload";
 
 const MB = 1024 * 1024;
 const session = (status: Session["status"]): Session => ({
@@ -30,6 +30,12 @@ const source = (sizeBytes: number) => ({
   readPart: vi.fn(async ({ start, end }: { start: number; end: number }) => new Blob([new Uint8Array(end - start)])),
 });
 
+/** RN 경로 — readPart가 Blob 대신 Uint8Array를 준다. */
+const bytesSource = (sizeBytes: number) => ({
+  sizeBytes,
+  readPart: vi.fn(async ({ start, end }: { start: number; end: number }) => new Uint8Array(end - start).fill(7)),
+});
+
 const okPut = (etag: string) => new Response(null, { status: 200, headers: { etag: `"${etag}"` } });
 
 describe("uploadRecording", () => {
@@ -56,6 +62,30 @@ describe("uploadRecording", () => {
       { partNumber: 3, etag: "e3" },
     ]);
     expect(progress.at(-1)).toBe(25 * MB);
+  });
+
+  it("passes a Uint8Array part straight through as the PUT body", async () => {
+    const { client } = fakeClient(1);
+    const src = bytesSource(MB);
+    const fetchFn = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => okPut("e1"));
+    await uploadRecording({ client, bandId: "b1", source: src, fetchFn, input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: MB, contentType: "audio/mp4", source: "recording" } });
+    const body = fetchFn.mock.calls[0]![1]!.body;
+    expect(body).toBeInstanceOf(Uint8Array);
+    expect(body).toBe(await src.readPart.mock.results[0]!.value);
+    expect((body as Uint8Array).length).toBe(MB);
+  });
+
+  it("wraps a post-create failure in an UploadRecordingError carrying the session id", async () => {
+    const { client } = fakeClient(1);
+    const fetchFn = vi.fn(async () => new Response(null, { status: 500 }));
+    const err = await uploadRecording({
+      client, bandId: "b1", source: source(MB), fetchFn, attemptsPerPart: 1,
+      input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: MB, contentType: "audio/mp4", source: "import" },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UploadRecordingError);
+    expect((err as UploadRecordingError).sessionId).toBe("s1");
+    expect((err as UploadRecordingError).message).toMatch(/part 1/);
+    expect((err as UploadRecordingError).cause).toBeInstanceOf(Error);
   });
 
   it("retries a failed part up to attemptsPerPart and then throws", async () => {

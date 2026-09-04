@@ -23,10 +23,16 @@ import type {
 
 export type { CreateCommentInput, CreateSessionInput } from "@bandapp/types";
 
+/**
+ * PUT body로 그대로 넘길 수 있는 파트 한 조각. 웹은 Blob(게으른 slice), RN은 Uint8Array를
+ * 준다 — RN fetch는 Uint8Array를 RCTNetworking이 base64로 바꿔 네이티브로 보낸다.
+ */
+export type UploadPartBody = Blob | Uint8Array;
+
 export interface UploadSource {
   sizeBytes: number;
-  /** [start, end) 바이트 범위를 Blob으로 돌려준다. 호출자는 파트마다 한 번 부른다. */
-  readPart(range: { start: number; end: number }): Promise<Blob>;
+  /** [start, end) 바이트 범위를 돌려준다. 호출자는 파트마다 한 번 부른다. */
+  readPart(range: { start: number; end: number }): Promise<UploadPartBody>;
 }
 
 export interface UploadProgress {

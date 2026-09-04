@@ -16,6 +16,21 @@ export interface UploadRecordingOptions {
 }
 
 /**
+ * create는 성공했는데 그 뒤가 실패했을 때 던진다. 호출자가 sessionId를 알아야
+ * resumeRecordingUpload로 이어 올릴 수 있다 — 모르면 재시도가 세션을 새로 만들어 중복된다.
+ */
+export class UploadRecordingError extends Error {
+  constructor(
+    message: string,
+    public readonly sessionId: string,
+    cause?: unknown,
+  ) {
+    super(message, { cause });
+    this.name = "UploadRecordingError";
+  }
+}
+
+/**
  * create → (이미 올라간 파트 제외) presigned PUT → complete. 순수 함수라 Node 스크립트와
  * 모바일이 같은 코드를 쓴다 (스펙 결정 15). 파트 하나가 attemptsPerPart번 실패하면 throw하고
  * 세션은 uploading으로 남는다. 새 세션은 항상 빈 상태로 시작하므로 이어 올리기는
@@ -24,15 +39,19 @@ export interface UploadRecordingOptions {
 export async function uploadRecording(opts: UploadRecordingOptions): Promise<Session> {
   const { sessions } = opts.client;
   const { session } = await sessions.create(opts.bandId, opts.input);
-  return resumeUpload({
-    client: opts.client,
-    source: opts.source,
-    fetchFn: opts.fetchFn ?? fetch,
-    onProgress: opts.onProgress,
-    concurrency: opts.concurrency ?? 2,
-    attempts: opts.attemptsPerPart ?? 3,
-    sessionId: session.id,
-  });
+  try {
+    return await resumeUpload({
+      client: opts.client,
+      source: opts.source,
+      fetchFn: opts.fetchFn ?? fetch,
+      onProgress: opts.onProgress,
+      concurrency: opts.concurrency ?? 2,
+      attempts: opts.attemptsPerPart ?? 3,
+      sessionId: session.id,
+    });
+  } catch (err) {
+    throw new UploadRecordingError(err instanceof Error ? err.message : String(err), session.id, err);
+  }
 }
 
 /**
@@ -125,7 +144,9 @@ async function putPart(a: ResumeArgs, partNumber: number, url: string, partSize:
   for (let attempt = 1; attempt <= a.attempts; attempt++) {
     try {
       const body = await a.source.readPart({ start, end });
-      const res = await a.fetchFn(url, { method: "PUT", body });
+      // lib.dom의 BodyInit은 Uint8Array<ArrayBuffer>만 받는데 UploadPartBody는 ArrayBufferLike까지
+      // 허용한다(SharedArrayBuffer 뷰 때문). 런타임은 웹·RN 모두 Uint8Array를 그대로 보낸다.
+      const res = await a.fetchFn(url, { method: "PUT", body: body as BodyInit });
       if (!res.ok) throw new Error(`part ${partNumber} upload failed with HTTP ${res.status}`);
       const etag = res.headers.get("etag");
       if (!etag) throw new Error(`part ${partNumber} upload returned no ETag`);

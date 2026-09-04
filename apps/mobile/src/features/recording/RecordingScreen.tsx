@@ -40,6 +40,9 @@ export function RecordingScreen() {
       cancelled = true;
       // 녹음 화면이 언마운트될 때 녹음 중이면 중지
       if (recorder.isRecording) void recorder.stop().catch(() => undefined);
+      // allowsRecording을 켠 채 두면 iOS 오디오 세션이 playAndRecord로 고정돼 재생 출력이
+      // 달라지고(수화기 쪽으로 빠진다) 상태 표시줄의 마이크 표시도 남는다.
+      void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

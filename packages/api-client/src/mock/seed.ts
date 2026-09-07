@@ -45,11 +45,38 @@ function titleFor(startedAt: string): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()} Rehearsal`;
 }
 
-const SEED_COMMENTS: Record<string, Array<{ who: string; t: number; text: string }>> = {
+interface SeedReply {
+  who: string;
+  text: string;
+}
+interface SeedComment {
+  who: string;
+  t: number;
+  text: string;
+  replies?: SeedReply[];
+}
+
+/** 시드 작성자 이름 → 멤버 id. 없는 이름은 m2. */
+const AUTHOR_IDS: Record<string, string> = { Dongjin: "m1", Minsu: "m2", Jihoon: "m3", Suhyun: "m4" };
+
+const SEED_COMMENTS: Record<string, SeedComment[]> = {
   "s1-t0": [
     { who: "Suhyun", t: 28, text: "Drums a bit loud in the intro?" },
-    { who: "Minsu", t: 133, text: "Rushing going into the chorus" },
+    {
+      who: "Minsu",
+      t: 133,
+      text: "Rushing going into the chorus",
+      replies: [
+        { who: "Dongjin", text: "Yeah I felt it too, let’s click-track this one next time" },
+        { who: "Minsu", text: "ok 👍" },
+        { who: "Jihoon", text: "@Dongjin click at 128 or the album tempo?" },
+        { who: "Dongjin", text: "@Jihoon 128, album feels too slow live" },
+        { who: "Suhyun", text: "Can we run just the transition a few times?" },
+      ],
+    },
+    { who: "Dongjin", t: 158, text: "Second chorus vocals sitting better here" },
     { who: "Jihoon", t: 182, text: "Guitar tone is great here" },
+    { who: "Suhyun", t: 210, text: "Outro cymbal swell too early", replies: [{ who: "Suhyun", text: "Never mind, it was the room" }] },
   ],
   "s1-t1": [{ who: "Jihoon", t: 95, text: "This one felt tight — keep this arrangement" }],
   "s1-t3": [
@@ -89,21 +116,40 @@ export function createSeedState(): MockState {
 
   const comments: MockState["comments"] = {};
   let cid = 0;
+  // 답글은 부모 뒤에 1분 간격으로 쓴 것으로 둔다 — createdAt 순 정렬이 시드 순서를 유지하게
+  const base = new Date("2026-08-27T19:03:00").getTime();
   for (const [takeId, rows] of Object.entries(SEED_COMMENTS)) {
-    comments[takeId] = rows.map((r) => ({
-      id: `c${cid++}`,
-      takeId,
-      authorId: "m2",
-      authorName: r.who,
-      parentId: null,
-      atSec: r.t,
-      text: r.text,
-      createdAt: new Date("2026-08-27T19:03:00").toISOString(),
-    }));
+    const list: TakeComment[] = [];
+    for (const r of rows) {
+      const parentId = `c${cid++}`;
+      list.push({
+        id: parentId,
+        takeId,
+        authorId: AUTHOR_IDS[r.who] ?? "m2",
+        authorName: r.who,
+        parentId: null,
+        atSec: r.t,
+        text: r.text,
+        createdAt: new Date(base).toISOString(),
+      });
+      (r.replies ?? []).forEach((rep, i) => {
+        list.push({
+          id: `c${cid++}`,
+          takeId,
+          authorId: AUTHOR_IDS[rep.who] ?? "m2",
+          authorName: rep.who,
+          parentId,
+          atSec: r.t,
+          text: rep.text,
+          createdAt: new Date(base + (i + 1) * 60_000).toISOString(),
+        });
+      });
+    }
+    comments[takeId] = list;
   }
-  // commentCount 반영
+  // commentCount 반영 — 답글은 세지 않는다
   for (const list of Object.values(takes)) {
-    for (const t of list) t.commentCount = comments[t.id]?.length ?? 0;
+    for (const t of list) t.commentCount = (comments[t.id] ?? []).filter((c) => c.parentId === null).length;
   }
   for (const s of sessions) {
     s.commentCount = (takes[s.id] ?? []).reduce((a, t) => a + t.commentCount, 0);

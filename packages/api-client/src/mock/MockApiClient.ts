@@ -242,23 +242,37 @@ export class MockApiClient implements RehearsalApiClient {
   comments = {
     list: async (takeId: string): Promise<TakeComment[]> => (this.state.comments[takeId] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
     create: async (takeId: string, input: CreateCommentInput): Promise<TakeComment> => {
+      const list = (this.state.comments[takeId] ??= []);
+      let atSec: number;
+      if (input.parentId) {
+        // 스레드는 1단계 — 부모는 이 take의 최상위 코멘트여야 한다
+        const parent = list.find((c) => c.id === input.parentId);
+        if (!parent || parent.parentId !== null) throw new Error("parentId must be a top-level comment on this take");
+        atSec = parent.atSec;
+      } else {
+        if (input.atSec === undefined) throw new Error("atSec is required");
+        atSec = Math.floor(input.atSec);
+      }
       const c: TakeComment = {
         id: `u${this.nextId++}`,
         takeId,
         authorId: MOCK_USER.id,
         authorName: "You",
-        parentId: null,
-        atSec: Math.floor(input.atSec),
+        parentId: input.parentId ?? null,
+        atSec,
         text: input.text,
         createdAt: new Date().toISOString(),
       };
-      (this.state.comments[takeId] ??= []).push(c);
-      for (const takes of Object.values(this.state.takes)) {
-        const take = takes.find((t) => t.id === takeId);
-        if (take) {
-          take.commentCount += 1;
-          const s = this.state.sessions.find((x) => x.id === take.sessionId);
-          if (s) s.commentCount += 1;
+      list.push(c);
+      // 답글은 commentCount에 세지 않는다
+      if (!input.parentId) {
+        for (const takes of Object.values(this.state.takes)) {
+          const take = takes.find((t) => t.id === takeId);
+          if (take) {
+            take.commentCount += 1;
+            const s = this.state.sessions.find((x) => x.id === take.sessionId);
+            if (s) s.commentCount += 1;
+          }
         }
       }
       this.emit();

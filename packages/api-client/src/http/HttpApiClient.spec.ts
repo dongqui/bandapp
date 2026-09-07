@@ -215,4 +215,12 @@ describe("HttpApiClient", () => {
     await client.comments.create("t1", { atSec: 3, text: "x" });
     expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ atSec: 3, text: "x" }) }));
   });
+
+  it("답글은 parentId만 싣고 atSec 없이 POST한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(201, { id: "c2" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.comments.create("t1", { parentId: "c1", text: "y" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ parentId: "c1", text: "y" }) }));
+  });
 });

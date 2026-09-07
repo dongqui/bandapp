@@ -53,7 +53,8 @@ export const SESSION_WITH_COUNTS = {
   updatedAt: sessions.updatedAt,
   // ${sessions.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
   // takes.id/comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
-  commentCount: sql<number>`(select count(*)::int from comments c join takes t on t.id = c.take_id where t.session_id = "sessions"."id")`,
+  // 답글은 세지 않는다 (스레드 스펙 결정 5).
+  commentCount: sql<number>`(select count(*)::int from comments c join takes t on t.id = c.take_id where t.session_id = "sessions"."id" and c.parent_id is null)`,
 };
 
 export function originalKey(bandId: string, sessionId: string): string {

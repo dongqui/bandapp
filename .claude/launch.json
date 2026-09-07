@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mobile-web-mock",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "-e",
+        "process.env.EXPO_PUBLIC_API_URL='';process.env.CI='1';require('child_process').spawn('pnpm',['--filter','mobile','dev'],{stdio:'inherit',shell:true}).on('exit',c=>process.exit(c??0))"
+      ],
+      "port": 8081
+    }
+  ]
+}

@@ -71,6 +71,10 @@ export interface CreateCommentInput {
 - `CommentInput.tsx` — `value/onChangeText` 제어, `replyingTo?: { name; onCancel }` 배너, `autoFocus` 대신 `ref.focus()`로 답글 시작 시 포커스.
 - `TakePlayerScreen.tsx` — 상태: `input`, `replyTo: { parentId, name } | null`, `shownThreads`(4), `shownReplies: Record<parentId, number>`. 전송은 `api.comments.create(take.id, replyTo ? { parentId, text } : { atSec, text })`. 파형 마커는 스레드 부모의 `atSec`만.
 
+## 피드백 시점 미세 조정 (같은 날 디자인 추가분)
+
+시간 표시(`00:00 / 04:32`) 양옆에 `−`/`＋` 버튼을 둔다. 누르면 재생 위치가 1초씩 앞뒤로 움직이고, 입력창 placeholder의 "Leave feedback at …" 시각이 따라 바뀐다. 재생 중이면 재생 상태는 그대로 두고 위치만 옮긴다(디자인 프로토타입과 동일). 현재 시각은 본문 색(`text`), 전체 길이는 기존대로 흐린 색이다. 별도 상태 없이 `playback.seekTo(pos ± 1)`로 구현한다. 원본 녹음 화면에도 같은 컨트롤이 보인다(플레이어가 공통).
+
 ## 테스트
 
 - API e2e: 답글 생성이 부모의 atSec을 물려받고 `parentId`를 실어 돌아온다 / 다른 take의 코멘트·답글을 부모로 주면 400 / `commentCount`가 답글을 세지 않는다.

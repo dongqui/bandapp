@@ -56,7 +56,16 @@ export function CommentInput({
           </PressableOpacity>
         </View>
       ) : null}
-      <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: space.sheetX, paddingTop: 12, paddingBottom: 30 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          paddingHorizontal: space.sheetX,
+          paddingTop: 12,
+          paddingBottom: 30,
+        }}
+      >
         <TextInput
           ref={inputRef}
           value={value}
@@ -66,6 +75,7 @@ export function CommentInput({
           placeholderTextColor={colors.textFaint}
           style={{
             flex: 1,
+            minWidth: 0,
             backgroundColor: colors.surface,
             borderWidth: 1,
             borderColor: colors.borderStrong,

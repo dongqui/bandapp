@@ -19,6 +19,8 @@ import { useTakes } from "./useTakes";
 /** 디자인의 페이징 단위 — 코멘트 4개, 답글 3개씩 더 보기 */
 const COMMENT_PAGE = 4;
 const REPLY_PAGE = 3;
+/** −/＋ 버튼이 재생 위치를 옮기는 폭 */
+const NUDGE_SEC = 1;
 
 interface ReplyState extends ReplyTarget {
   parentId: string;
@@ -128,7 +130,29 @@ export function TakePlayerScreen() {
             markers={threads.map((t) => t.comment.atSec)}
             onSeek={(sec) => playback.seekTo(sec)}
           />
-          <AppText variant="monoMeta">{`${fmtClock(playback.positionSec)} / ${fmtClock(take.durationSec)}`}</AppText>
+          {/* 피드백 시점 미세 조정 — 1초씩 앞뒤로. 재생 상태는 건드리지 않는다 */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <PressableOpacity
+              onPress={() => playback.seekTo(playback.positionSec - NUDGE_SEC)}
+              hitSlop={6}
+              style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+            >
+              <AppText style={{ fontSize: 16, lineHeight: 18, color: colors.textMuted }}>−</AppText>
+            </PressableOpacity>
+            <AppText variant="monoMeta">
+              <AppText variant="monoMeta" color={colors.text}>
+                {fmtClock(playback.positionSec)}
+              </AppText>
+              {` / ${fmtClock(take.durationSec)}`}
+            </AppText>
+            <PressableOpacity
+              onPress={() => playback.seekTo(playback.positionSec + NUDGE_SEC)}
+              hitSlop={6}
+              style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+            >
+              <AppText style={{ fontSize: 16, lineHeight: 18, color: colors.textMuted }}>＋</AppText>
+            </PressableOpacity>
+          </View>
           <PressableOpacity
             onPress={playback.toggle}
             style={{

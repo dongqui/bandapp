@@ -17,7 +17,7 @@
 
 ## 재생·피드백
 - **실제 파형.** 워커가 take별 피크 배열을 만들어 저장하고 앱이 그린다. 지금은 시드 기반 가짜 파형.
-- **대댓글 UI·작성.** `comments.parent_id`와 `TakeComment.parentId`는 준비됨. 스레드 표시와 답글 입력이 남았다.
+- **코멘트 수정·삭제.** 스레드([2026-09-07 스펙](superpowers/specs/2026-09-07-comment-threads-design.md))는 작성만 있다. 삭제 시 답글은 DB cascade로 함께 지워진다.
 - **원본 녹음에 대한 코멘트.** `comments.take_id`를 nullable로 바꾸고 `session_id`를 더한다.
 
 ## 운영

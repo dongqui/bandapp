@@ -1,6 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { CreateCommentInput, TakeComment } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
@@ -63,9 +63,22 @@ export class CommentsService {
     const take = await this.takes.loadForMember(takeId, userId);
     const text = input.text.trim();
     if (text.length === 0 || text.length > 500) throw new BadRequestException("text must be 1-500 characters");
-    const atMs = Math.round(input.atSec * 1000);
-    if (atMs > take.endMs - take.startMs) throw new BadRequestException("atSec is beyond the take length");
-    const [inserted] = await this.db.insert(comments).values({ takeId, authorId: userId, atMs, text }).returning({ id: comments.id });
+    const parentId = input.parentId ?? null;
+    let atMs: number;
+    if (parentId) {
+      // 스레드는 1단계 — 부모는 이 take의 최상위 코멘트여야 한다 (스펙 결정 1, 3)
+      const [parent] = await this.db
+        .select({ atMs: comments.atMs, parentId: comments.parentId })
+        .from(comments)
+        .where(and(eq(comments.id, parentId), eq(comments.takeId, takeId)));
+      if (!parent || parent.parentId !== null) throw new BadRequestException("parentId must be a top-level comment on this take");
+      atMs = parent.atMs;
+    } else {
+      if (input.atSec === undefined) throw new BadRequestException("atSec is required");
+      atMs = Math.round(input.atSec * 1000);
+      if (atMs > take.endMs - take.startMs) throw new BadRequestException("atSec is beyond the take length");
+    }
+    const [inserted] = await this.db.insert(comments).values({ takeId, authorId: userId, parentId, atMs, text }).returning({ id: comments.id });
     if (!inserted) throw new Error("failed to insert comment");
     const [row] = await this.db
       .select(COMMENT_COLUMNS)

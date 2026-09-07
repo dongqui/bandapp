@@ -6,10 +6,13 @@ export function Avatar({
   label,
   size = 40,
   dashed = false,
+  fontSize,
 }: {
   label: string;
   size?: number;
   dashed?: boolean;
+  /** 작은 아바타(코멘트 30 / 답글 24)용. 기본은 monoAvatar 크기 */
+  fontSize?: number;
 }) {
   const { colors } = useTheme();
   return (
@@ -26,7 +29,11 @@ export function Avatar({
         borderColor: colors.borderStronger,
       }}
     >
-      <AppText variant="monoAvatar" color={dashed ? colors.textMuted : colors.textSecondary}>
+      <AppText
+        variant="monoAvatar"
+        color={dashed ? colors.textMuted : colors.textSecondary}
+        style={fontSize ? { fontSize } : null}
+      >
         {label}
       </AppText>
     </View>

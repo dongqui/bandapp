@@ -22,10 +22,26 @@ describe("MockApiClient", () => {
     const api = new MockApiClient();
     const takes = await api.takes.list("s1");
     expect(takes).toHaveLength(7);
-    expect(takes[0].commentCount).toBe(3);
+    expect(takes[0].commentCount).toBe(5); // 답글은 세지 않는다
     expect(takes[2].commentCount).toBe(0);
     const comments = await api.comments.list("s1-t0");
-    expect(comments.map((c) => c.atSec)).toEqual([28, 133, 182]);
+    const top = comments.filter((c) => c.parentId === null);
+    expect(top.map((c) => c.atSec)).toEqual([28, 133, 158, 182, 210]);
+    const rushing = top[1]!;
+    const replies = comments.filter((c) => c.parentId === rushing.id);
+    expect(replies).toHaveLength(5);
+    expect(replies.every((r) => r.atSec === rushing.atSec)).toBe(true);
+  });
+
+  it("comments.create with parentId appends a reply that inherits the parent's atSec and leaves counts alone", async () => {
+    const api = new MockApiClient();
+    const [parent] = await api.comments.list("s1-t1");
+    const reply = await api.comments.create("s1-t1", { parentId: parent!.id, text: "agreed" });
+    expect(reply).toMatchObject({ parentId: parent!.id, atSec: parent!.atSec, text: "agreed" });
+    const takes = await api.takes.list("s1");
+    expect(takes[1].commentCount).toBe(1);
+    await expect(api.comments.create("s1-t1", { parentId: reply.id, text: "nested" })).rejects.toThrow();
+    await expect(api.comments.create("s1-t2", { parentId: parent!.id, text: "other take" })).rejects.toThrow();
   });
 
   it("create returns uploading session, completeUpload transitions to analyzing then ready", async () => {
@@ -77,7 +93,7 @@ describe("MockApiClient", () => {
     const takes = await api.takes.list("s1");
     expect(takes[2].commentCount).toBe(1);
     const session = await api.sessions.get("s1");
-    expect(session.commentCount).toBe(8); // 시드 7 + 1
+    expect(session.commentCount).toBe(10); // 시드 최상위 9 + 1
     expect(notified).toBeGreaterThan(0);
     off();
   });

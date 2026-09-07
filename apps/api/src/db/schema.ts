@@ -186,7 +186,7 @@ export const comments = pgTable(
     authorId: uuid("author_id")
       .notNull()
       .references(() => users.id),
-    // 대댓글 자리 (스펙 결정 6). 이번 범위에서는 항상 null
+    // 답글이면 부모(최상위 코멘트). 스레드는 1단계만 허용한다 — 서비스에서 검증
     parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, { onDelete: "cascade" }),
     atMs: integer("at_ms").notNull(),
     text: text("text").notNull(),

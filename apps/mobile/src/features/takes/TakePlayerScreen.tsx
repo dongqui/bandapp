@@ -1,18 +1,28 @@
+import type { TakeComment } from "@bandapp/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useApi } from "@/api";
 import { seedOf } from "@/lib/seed";
 import { fmtClock, fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
 import { AppText, MonoLabel, PlayerWaveform, PressableOpacity, Screen, useToast } from "@/ui";
-import { CommentInput } from "./CommentInput";
-import { CommentRow } from "./CommentRow";
+import { CommentInput, type ReplyTarget } from "./CommentInput";
+import { CommentThread } from "./CommentThread";
+import { groupThreads, type CommentThread as Thread } from "./threads";
 import { useAudioUrl } from "./useAudioUrl";
 import { useComments } from "./useComments";
 import { usePlayback } from "./usePlayback";
 import { useSession } from "./useSession";
 import { useTakes } from "./useTakes";
+
+/** 디자인의 페이징 단위 — 코멘트 4개, 답글 3개씩 더 보기 */
+const COMMENT_PAGE = 4;
+const REPLY_PAGE = 3;
+
+interface ReplyState extends ReplyTarget {
+  parentId: string;
+}
 
 export function TakePlayerScreen() {
   const { id, takeId } = useLocalSearchParams<{ id: string; takeId: string }>();
@@ -37,6 +47,27 @@ export function TakePlayerScreen() {
   const url = useAudioUrl(isOriginal ? "session" : "take", isOriginal ? session?.id : take?.id);
   const playback = usePlayback(take?.durationSec ?? 0, url);
 
+  const threads = useMemo(() => groupThreads(comments ?? []), [comments]);
+  const [shownThreads, setShownThreads] = useState(COMMENT_PAGE);
+  // parentId → 보이는 답글 수. 없으면 접힌 상태. 답글을 보내면 전부 펼친다.
+  const [shownReplies, setShownReplies] = useState<Record<string, number>>({});
+  const [input, setInput] = useState("");
+  const [replyTo, setReplyTo] = useState<ReplyState | null>(null);
+
+  const cancelReply = () => {
+    setReplyTo(null);
+    setInput("");
+  };
+  const startReply = (thread: Thread, target: TakeComment) => {
+    const parent = thread.comment;
+    // 답글에 답하면 같은 스레드에 붙고 `@이름 `을 미리 채운다 — 부모 작성자 본인이면 생략 (스레드 스펙 결정 1)
+    const mention = target.id !== parent.id && target.authorName !== parent.authorName;
+    setReplyTo({ parentId: parent.id, name: target.authorName, onCancel: cancelReply });
+    setInput(mention ? `@${target.authorName} ` : "");
+  };
+  const showMoreReplies = (parentId: string) =>
+    setShownReplies((s) => ({ ...s, [parentId]: (s[parentId] ?? 0) + REPLY_PAGE }));
+
   // 재생 실패는 소리가 안 나는 것 말고는 티가 안 난다 — 같은 에러로 토스트가 반복되지 않게
   // 마지막으로 보여준 값을 기억한다.
   const shownErrorRef = useRef<string | null>(null);
@@ -48,6 +79,23 @@ export function TakePlayerScreen() {
 
   if (!session || !take) return <Screen>{null}</Screen>;
   const sub = `${session.title} · ${isOriginal ? fmtDuration(take.durationSec) : fmtClock(take.durationSec)}`;
+  const hiddenThreads = Math.max(0, threads.length - shownThreads);
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    const parentId = replyTo?.parentId;
+    setInput("");
+    setReplyTo(null);
+    // 새 코멘트가 화면 밖 페이지로 밀리지 않게 표시 범위를 넓혀 둔다
+    if (parentId) setShownReplies((s) => ({ ...s, [parentId]: Number.POSITIVE_INFINITY }));
+    else setShownThreads((n) => n + 1);
+    const create = parentId
+      ? api.comments.create(take.id, { parentId, text })
+      : // 재생 위치가 실제 길이를 넘길 수 있다(디코딩된 길이가 메타데이터보다 길 때) — 타임라인 밖 코멘트를 막는다
+        api.comments.create(take.id, { atSec: Math.min(playback.positionSec, take.durationSec), text });
+    void create.then(() => reload()).catch(() => toast.show("Something went wrong"));
+  };
 
   return (
     <Screen>
@@ -77,7 +125,7 @@ export function TakePlayerScreen() {
             seed={seedOf(isOriginal ? `${session.id}-orig` : take.id)}
             durationSec={take.durationSec}
             positionSec={playback.positionSec}
-            markers={(comments ?? []).map((c) => c.atSec)}
+            markers={threads.map((t) => t.comment.atSec)}
             onSeek={(sec) => playback.seekTo(sec)}
           />
           <AppText variant="monoMeta">{`${fmtClock(playback.positionSec)} / ${fmtClock(take.durationSec)}`}</AppText>
@@ -116,9 +164,10 @@ export function TakePlayerScreen() {
           </PressableOpacity>
         </View>
         <FlatList
-          data={comments ?? []}
-          keyExtractor={(c) => c.id}
+          data={threads.slice(0, shownThreads)}
+          keyExtractor={(t) => t.comment.id}
           style={{ flex: 1 }}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: space.screenX, paddingTop: 10, paddingBottom: 16 }}
           ListHeaderComponent={<MonoLabel style={{ paddingTop: 8, paddingBottom: 2 }}>FEEDBACK</MonoLabel>}
           ListEmptyComponent={
@@ -128,20 +177,33 @@ export function TakePlayerScreen() {
                 : "No feedback yet. Say something at the right moment — it lands on the timeline."}
             </AppText>
           }
+          ListFooterComponent={
+            hiddenThreads > 0 ? (
+              <PressableOpacity
+                onPress={() => setShownThreads((n) => n + COMMENT_PAGE)}
+                style={{ alignItems: "center", paddingTop: 14, paddingBottom: 6 }}
+              >
+                <AppText variant="caption">{`View more comments (${hiddenThreads})`}</AppText>
+              </PressableOpacity>
+            ) : null
+          }
           renderItem={({ item }) => (
-            <CommentRow comment={item} onPress={() => playback.seekTo(Math.max(0, item.atSec - 5), true)} />
+            <CommentThread
+              thread={item}
+              shownReplies={shownReplies[item.comment.id] ?? 0}
+              onSeek={() => playback.seekTo(Math.max(0, item.comment.atSec - 5), true)}
+              onReply={(target) => startReply(item, target)}
+              onMoreReplies={() => showMoreReplies(item.comment.id)}
+            />
           )}
         />
         {!isOriginal && (
           <CommentInput
-            placeholder={`Leave feedback at ${fmtClock(playback.positionSec)}…`}
-            onSubmit={(text) => {
-              void api.comments
-                // 재생 위치가 실제 길이를 넘길 수 있다(디코딩된 길이가 메타데이터보다 길 때) — 타임라인 밖 코멘트를 막는다
-                .create(take.id, { atSec: Math.min(playback.positionSec, take.durationSec), text })
-                .then(() => reload())
-                .catch(() => toast.show("Something went wrong"));
-            }}
+            value={input}
+            onChangeText={setInput}
+            replyingTo={replyTo}
+            placeholder={replyTo ? "Add a reply…" : `Leave feedback at ${fmtClock(playback.positionSec)}…`}
+            onSubmit={send}
           />
         )}
       </KeyboardAvoidingView>

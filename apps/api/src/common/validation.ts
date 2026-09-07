@@ -23,6 +23,13 @@ export function requireUuidParam(value: string, name: string): string {
   return value;
 }
 
+export function optionalUuid(body: unknown, name: string): string | undefined {
+  const value = field(body, name);
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || !UUID_RE.test(value)) throw new BadRequestException(`${name} must be a UUID`);
+  return value;
+}
+
 const BAND_PARTS = ["vocal", "guitar", "bass", "drums", "keyboard", "other"] as const;
 
 /**

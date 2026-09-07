@@ -63,6 +63,45 @@ describe("comments API", () => {
     await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send(body).expect(400);
   });
 
+  it("답글은 부모의 시점을 물려받고, 목록에서 부모 뒤에 온다", async () => {
+    const parent = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 133, text: "Rushing" }).expect(201);
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 150, text: "later" }).expect(201);
+    const reply = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: parent.body.id, text: "felt it too" }).expect(201);
+    expect(reply.body).toMatchObject({ parentId: parent.body.id, atSec: 133, text: "felt it too" });
+    const res = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body.map((c: { text: string; parentId: string | null }) => [c.text, c.parentId])).toEqual([
+      ["Rushing", null],
+      ["felt it too", parent.body.id],
+      ["later", null],
+    ]);
+  });
+
+  it("답글은 commentCount에 세지 않는다", async () => {
+    const parent = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 1, text: "a" }).expect(201);
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: parent.body.id, text: "b" }).expect(201);
+    const takesRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
+    expect(takesRes.body[0].commentCount).toBe(1);
+    const sessionRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}`).set(auth(owner.accessToken)).expect(200);
+    expect(sessionRes.body.commentCount).toBe(1);
+  });
+
+  it("부모가 이 take의 최상위 코멘트가 아니면 400", async () => {
+    const parent = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 1, text: "a" }).expect(201);
+    const reply = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: parent.body.id, text: "b" }).expect(201);
+    // 답글의 답글은 막는다 — 스레드는 1단계
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: reply.body.id, text: "c" }).expect(400);
+    // 다른 take의 코멘트
+    const [other] = await db
+      .insert(takes)
+      .values({ sessionId, index: 1, name: "Take 2", startMs: 300_000, endMs: 400_000, type: "PERFORMANCE", confidence: 0.9, objectKey: "k2" })
+      .returning();
+    await request(app.getHttpServer()).post(`/takes/${other!.id}/comments`).set(auth(owner.accessToken)).send({ parentId: parent.body.id, text: "c" }).expect(400);
+    // 없는 부모, UUID 아님, parentId 없이 atSec도 없음
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: "00000000-0000-0000-0000-000000000000", text: "c" }).expect(400);
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ parentId: "nope", text: "c" }).expect(400);
+    await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ text: "c" }).expect(400);
+  });
+
   it("다른 멤버의 코멘트도 보이고, 비멤버는 403", async () => {
     const other = await createTestApp({ google: providerUser("member-1", "Minsoo"), storage: new FakeStorage() });
     const member = await loginAs(other);

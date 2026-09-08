@@ -20,6 +20,11 @@
 - **코멘트 수정·삭제.** 스레드([2026-09-07 스펙](superpowers/specs/2026-09-07-comment-threads-design.md))는 작성만 있다. 삭제 시 답글은 DB cascade로 함께 지워진다.
 - **원본 녹음에 대한 코멘트.** `comments.take_id`를 nullable로 바꾸고 `session_id`를 더한다.
 
+## 팀·설정
+- **삭제된 밴드 영구 삭제 배치.** `bands.deleted_at`이 채워진 밴드의 행과 R2 객체(원본·take)를 N일 뒤 지운다 ([2026-09-08 스펙](superpowers/specs/2026-09-08-team-management-screen-design.md) 결정 3). 세션 삭제 정리 배치와 같이 진행.
+- **기존 화면 문구의 i18n 이관.** 세션·녹음·설정·초대 랜딩의 하드코딩 문구를 `src/i18n` 리소스로. 설정 화면의 `Alert.alert`를 `ConfirmDialog`로.
+- **언어 전환 UI.** 지금은 기기 언어만 따른다.
+
 ## 운영
 - **세션 삭제 API와 R2 객체 정리.** 세션을 지울 때 원본·take 객체를 함께 지운다.
 - **만료된 multipart 업로드.** 버킷 수명주기 규칙이 7일 뒤 자동 중단한다. `recordings.upload_status=pending`으로 남은 행을 같이 정리하는 배치가 필요하다.

@@ -23,15 +23,6 @@ export const uploadStatus = pgEnum("upload_status", ["pending", "completed", "ab
 export const takeType = pgEnum("take_type", ["PERFORMANCE", "PARTIAL_PRACTICE"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
-// @bandapp/types의 BandPart와 값을 일치시킨다. 표시 문자열은 클라이언트 책임이다 (스펙 결정 2)
-export const bandPart = pgEnum("band_part", [
-  "vocal",
-  "guitar",
-  "bass",
-  "drums",
-  "keyboard",
-  "other",
-]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -83,6 +74,8 @@ export const bands = pgTable("bands", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
   ...timestamps,
+  // soft delete — 행·R2 객체는 남긴다. 영구 삭제는 배치가 맡는다 (2026-09-08 스펙 결정 3)
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const bandMembers = pgTable(
@@ -95,8 +88,8 @@ export const bandMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     role: bandRole("role").notNull(),
-    // null = 미설정. 초대 과정에서 파트를 묻지 않으므로 갓 참여한 멤버는 항상 null이다 (스펙 결정 4)
-    part: bandPart("part"),
+    // null = 미설정. 프리셋 키(vocal 등)든 자유 문자열이든 서버는 구분하지 않는다 (2026-09-08 스펙 결정 1·2)
+    part: text("part"),
     joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.bandId, t.userId] })],

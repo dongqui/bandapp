@@ -13,9 +13,17 @@ import {
 import type { Band, BandMember } from "@bandapp/types";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
-import { requireBandPartOrNull, requireString, requireUuidParam } from "../common/validation.js";
+import { requirePartOrNull, requireString, requireUuidParam } from "../common/validation.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
 import { BandsService } from "./bands.service.js";
+
+function requireBandName(body: unknown): string {
+  const name = requireString(body, "name").trim();
+  if (name.length === 0 || name.length > 50) {
+    throw new BadRequestException("name must be 1-50 characters");
+  }
+  return name;
+}
 
 @Controller("bands")
 @UseGuards(AuthGuard)
@@ -27,16 +35,42 @@ export class BandsController {
 
   @Post()
   create(@CurrentUserId() userId: string, @Body() body: unknown): Promise<Band> {
-    const name = requireString(body, "name").trim();
-    if (name.length === 0 || name.length > 50) {
-      throw new BadRequestException("name must be 1-50 characters");
-    }
-    return this.bandsService.create(userId, name);
+    return this.bandsService.create(userId, requireBandName(body));
   }
 
   @Get()
   list(@CurrentUserId() userId: string): Promise<Band[]> {
     return this.bandsService.listForUser(userId);
+  }
+
+  @Patch(":bandId")
+  rename(
+    @CurrentUserId() userId: string,
+    @Param("bandId") bandId: string,
+    @Body() body: unknown,
+  ): Promise<Band> {
+    requireUuidParam(bandId, "bandId");
+    return this.bandsService.rename(bandId, userId, requireBandName(body));
+  }
+
+  @Post(":bandId/transfer")
+  @HttpCode(204)
+  async transfer(
+    @CurrentUserId() userId: string,
+    @Param("bandId") bandId: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    requireUuidParam(bandId, "bandId");
+    const target = requireString(body, "userId");
+    requireUuidParam(target, "userId");
+    await this.bandsService.transferOwnership(bandId, userId, target);
+  }
+
+  @Delete(":bandId")
+  @HttpCode(204)
+  async remove(@CurrentUserId() userId: string, @Param("bandId") bandId: string): Promise<void> {
+    requireUuidParam(bandId, "bandId");
+    await this.bandsService.softDelete(bandId, userId);
   }
 
   @Get(":bandId/members")
@@ -56,7 +90,7 @@ export class BandsController {
     @Body() body: unknown,
   ): Promise<BandMember> {
     requireUuidParam(bandId, "bandId");
-    return this.bandsService.setPart(bandId, userId, requireBandPartOrNull(body, "part"));
+    return this.bandsService.setPart(bandId, userId, requirePartOrNull(body, "part"));
   }
 
   @Delete(":bandId/members/me")

@@ -1,3 +1,4 @@
+import "@/i18n"; // 반드시 첫 import — 첫 렌더 전에 t()가 준비돼야 한다
 import {
   JetBrainsMono_400Regular,
   JetBrainsMono_500Medium,

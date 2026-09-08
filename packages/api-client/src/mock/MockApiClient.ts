@@ -4,7 +4,6 @@ import type {
   Band,
   BandInvite,
   BandMember,
-  BandPart,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -19,6 +18,7 @@ import type {
   User,
 } from "@bandapp/types";
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
+import { ApiError } from "../errors";
 import { seededUnit } from "./rand";
 import { createSeedState, generateTakes, type MockState } from "./seed";
 
@@ -50,6 +50,21 @@ export class MockApiClient implements RehearsalApiClient {
     const s = this.state.sessions.find((x) => x.id === id);
     if (!s) throw new Error(`session not found: ${id}`);
     return s;
+  }
+
+  private mustBand(bandId: string): Band {
+    const band = this.state.bands.find((b) => b.id === bandId);
+    if (!band) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
+    return band;
+  }
+
+  /** 서버의 assertOwner와 같은 순서·code — 화면의 code 분기가 Mock에서도 동작하게 (2026-09-08 스펙). */
+  private assertOwner(bandId: string): BandMember[] {
+    const members = this.state.members[bandId];
+    const me = members?.find((m) => m.id === MOCK_USER.id);
+    if (!members || !me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
+    if (me.role !== "owner") throw new ApiError(403, "밴드 관리자만 할 수 있어요.", "band_owner_only");
+    return members;
   }
 
   private scheduleAnalysis(sessionId: string) {
@@ -100,30 +115,58 @@ export class MockApiClient implements RehearsalApiClient {
       this.emit();
       return { ...band };
     },
-    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+    setMyPart: async (bandId: string, part: string | null): Promise<BandMember> => {
       const me = (this.state.members[bandId] ?? []).find((m) => m.id === MOCK_USER.id);
-      if (!me) throw new Error("이 밴드의 멤버가 아니에요.");
-      me.part = part;
+      if (!me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
+      me.part = part === null ? null : part.trim();
       this.emit();
       return { ...me };
     },
     removeMember: async (bandId: string, userId: string): Promise<void> => {
-      const members = this.state.members[bandId];
-      if (!members) throw new Error("이 밴드를 찾을 수 없어요.");
-      const me = members.find((m) => m.id === MOCK_USER.id);
-      if (!me || me.role !== "owner") throw new Error("밴드 관리자만 할 수 있어요.");
+      const members = this.assertOwner(bandId);
       const target = members.find((m) => m.id === userId);
-      if (!target) throw new Error("팀원을 찾을 수 없어요.");
+      if (!target) throw new ApiError(404, "팀원을 찾을 수 없어요.", "band_member_not_found");
       if (userId === MOCK_USER.id) {
-        throw new Error("자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.");
+        throw new ApiError(409, "자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.", "band_cannot_remove_self");
       }
-      if (target.role === "owner") throw new Error("팀장은 내보낼 수 없어요.");
+      if (target.role === "owner") throw new ApiError(409, "팀장은 내보낼 수 없어요.", "band_cannot_remove_owner");
       this.state.members[bandId] = members.filter((m) => m.id !== userId);
-      const band = this.state.bands.find((b) => b.id === bandId);
-      if (band) band.memberCount = this.state.members[bandId]!.length;
+      this.mustBand(bandId).memberCount = this.state.members[bandId]!.length;
       this.emit();
     },
     leave: async (bandId: string): Promise<void> => {
+      const members = this.state.members[bandId] ?? [];
+      const me = members.find((m) => m.id === MOCK_USER.id);
+      if (!me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
+      if (me.role === "owner" && members.length > 1) {
+        throw new ApiError(409, "관리자는 먼저 소유권을 넘기거나 팀을 삭제해야 해요.", "band_owner_must_transfer");
+      }
+      this.state.bands = this.state.bands.filter((b) => b.id !== bandId);
+      delete this.state.members[bandId];
+      this.emit();
+    },
+    rename: async (bandId: string, name: string): Promise<Band> => {
+      this.assertOwner(bandId);
+      const trimmed = name.trim();
+      if (trimmed.length < 1 || trimmed.length > 50) {
+        throw new ApiError(400, "name must be 1-50 characters");
+      }
+      const band = this.mustBand(bandId);
+      band.name = trimmed;
+      this.emit();
+      return { ...band };
+    },
+    transferOwnership: async (bandId: string, userId: string): Promise<void> => {
+      const members = this.assertOwner(bandId);
+      if (userId === MOCK_USER.id) throw new ApiError(409, "이미 소유자예요.", "band_transfer_self");
+      const target = members.find((m) => m.id === userId);
+      if (!target) throw new ApiError(404, "팀원을 찾을 수 없어요.", "band_member_not_found");
+      for (const m of members) m.role = m.id === userId ? "owner" : m.id === MOCK_USER.id ? "member" : m.role;
+      this.emit();
+    },
+    delete: async (bandId: string): Promise<void> => {
+      this.assertOwner(bandId);
+      // Mock에는 deleted_at이 없다 — 목록에서 빠지는 것이 관찰 가능한 전부다
       this.state.bands = this.state.bands.filter((b) => b.id !== bandId);
       delete this.state.members[bandId];
       this.emit();

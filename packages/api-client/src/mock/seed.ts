@@ -57,7 +57,7 @@ interface SeedComment {
 }
 
 /** 시드 작성자 이름 → 멤버 id. 없는 이름은 m2. */
-const AUTHOR_IDS: Record<string, string> = { Dongjin: "m1", Minsu: "m2", Jihoon: "m3", Suhyun: "m4" };
+const AUTHOR_IDS: Record<string, string> = { Dongjin: "u-mock", Minsu: "m2", Jihoon: "m3", Suhyun: "m4" };
 
 const SEED_COMMENTS: Record<string, SeedComment[]> = {
   "s1-t0": [
@@ -156,13 +156,22 @@ export function createSeedState(): MockState {
   }
 
   return {
-    bands: [{ id: "b1", name: "FRIDAY NIGHT", memberCount: 4 }],
+    // b1: 내가 owner. b2: 내가 member — 팀 관리 화면의 owner/member 두 상태를 웹 프리뷰에서 본다 (2026-09-08 스펙).
+    bands: [
+      { id: "b1", name: "FRIDAY NIGHT", memberCount: 4 },
+      { id: "b2", name: "SIDE PROJECT", memberCount: 3 },
+    ],
     members: {
       b1: [
-        { id: "m1", name: "Dongjin Kim", role: "owner", part: "guitar" },
+        { id: "u-mock", name: "Dongjin", role: "owner", part: "guitar" },
         { id: "m2", name: "Minsu", role: "member", part: "vocal" },
-        { id: "m3", name: "Jihoon", role: "member", part: "bass" },
+        { id: "m3", name: "Jihoon", role: "member", part: "Synth" },
         { id: "m4", name: "Suhyun", role: "member", part: null },
+      ],
+      b2: [
+        { id: "m2", name: "Minsu", role: "owner", part: "bass" },
+        { id: "u-mock", name: "Dongjin", role: "member", part: null },
+        { id: "m4", name: "Suhyun", role: "member", part: "drums" },
       ],
     },
     sessions,

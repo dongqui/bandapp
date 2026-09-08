@@ -100,10 +100,11 @@ describe("bands API", () => {
     const bandId = await createBand(owner.accessToken);
     const member = await secondUser();
     await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
-    await request(app.getHttpServer())
+    const res = await request(app.getHttpServer())
       .delete(`/bands/${bandId}/members/me`)
       .set(auth(owner.accessToken))
       .expect(409);
+    expect(res.body.code).toBe("band_owner_must_transfer");
   });
 
   it("혼자 남은 owner가 탈퇴하면 밴드가 삭제된다", async () => {
@@ -114,6 +115,9 @@ describe("bands API", () => {
       .expect(204);
     const mine = await request(app.getHttpServer()).get("/bands").set(auth(owner.accessToken)).expect(200);
     expect(mine.body).toHaveLength(0);
+    const row = await db.query.bands.findFirst({ where: eq(bands.id, bandId) });
+    expect(row).toBeDefined();
+    expect(row?.deletedAt).not.toBeNull();
   });
 
   it("owner는 팀원을 내보내고, 그 밴드의 활성 초대가 함께 무효화된다", async () => {
@@ -175,21 +179,34 @@ describe("bands API", () => {
       .set(auth(member.accessToken))
       .expect(403);
     // owner가 자기 자신을 내보내려 하면 409 — 팀 나가기를 써야 한다
-    await request(app.getHttpServer())
+    const self = await request(app.getHttpServer())
       .delete(`/bands/${bandId}/members/${owner.userId}`)
       .set(auth(owner.accessToken))
       .expect(409);
+    expect(self.body.code).toBe("band_cannot_remove_self");
     // 멤버가 아닌 사용자는 404
     const stranger = await secondUser("not-a-member");
-    await request(app.getHttpServer())
+    const notFound = await request(app.getHttpServer())
       .delete(`/bands/${bandId}/members/${stranger.userId}`)
       .set(auth(owner.accessToken))
       .expect(404);
+    expect(notFound.body.code).toBe("band_member_not_found");
     // UUID가 아니면 400
     await request(app.getHttpServer())
       .delete(`/bands/${bandId}/members/not-a-uuid`)
       .set(auth(owner.accessToken))
       .expect(400);
+
+    // 이전 후 새 owner가 이전 owner를 내보낼 수 있다
+    await request(app.getHttpServer())
+      .post(`/bands/${bandId}/transfer`)
+      .set(auth(owner.accessToken))
+      .send({ userId: member.userId })
+      .expect(204);
+    await request(app.getHttpServer())
+      .delete(`/bands/${bandId}/members/${owner.userId}`)
+      .set(auth(member.accessToken))
+      .expect(204);
   });
 
   it("DELETE .../members/me는 여전히 탈퇴로 동작한다 (라우트 순서)", async () => {
@@ -284,5 +301,128 @@ describe("bands API", () => {
       .get(`/bands/${bandId}/sessions`)
       .set(auth(owner.accessToken))
       .expect(403);
+  });
+
+  describe("이름 변경", () => {
+    it("owner는 이름을 바꾼다 (trim, 1~50자)", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const res = await request(app.getHttpServer())
+        .patch(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .send({ name: "  Saturday Night  " })
+        .expect(200);
+      expect(res.body).toMatchObject({ id: bandId, name: "Saturday Night", memberCount: 1 });
+      await request(app.getHttpServer())
+        .patch(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .send({ name: "   " })
+        .expect(400);
+      await request(app.getHttpServer())
+        .patch(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .send({ name: "a".repeat(51) })
+        .expect(400);
+    });
+
+    it("member는 403 band_owner_only", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const member = await secondUser("renamer");
+      await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+      const res = await request(app.getHttpServer())
+        .patch(`/bands/${bandId}`)
+        .set(auth(member.accessToken))
+        .send({ name: "Nope" })
+        .expect(403);
+      expect(res.body.code).toBe("band_owner_only");
+    });
+  });
+
+  describe("소유권 이전", () => {
+    it("owner가 member에게 넘기면 역할이 교체된다", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const member = await secondUser("heir");
+      await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+      await request(app.getHttpServer())
+        .post(`/bands/${bandId}/transfer`)
+        .set(auth(owner.accessToken))
+        .send({ userId: member.userId })
+        .expect(204);
+      const members = await request(app.getHttpServer())
+        .get(`/bands/${bandId}/members`)
+        .set(auth(owner.accessToken))
+        .expect(200);
+      const roles = Object.fromEntries(members.body.map((m: { id: string; role: string }) => [m.id, m.role]));
+      expect(roles[owner.userId]).toBe("member");
+      expect(roles[member.userId]).toBe("owner");
+      // 이전 owner는 이제 owner 전용 작업을 못 한다
+      await request(app.getHttpServer())
+        .patch(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .send({ name: "X" })
+        .expect(403);
+    });
+
+    it("대상 검증: 본인 409, 비멤버 404, member 호출 403, UUID 아님 400", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const member = await secondUser("plain-2");
+      await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+      const stranger = await secondUser("outsider");
+
+      const self = await request(app.getHttpServer())
+        .post(`/bands/${bandId}/transfer`)
+        .set(auth(owner.accessToken))
+        .send({ userId: owner.userId })
+        .expect(409);
+      expect(self.body.code).toBe("band_transfer_self");
+
+      const notFound = await request(app.getHttpServer())
+        .post(`/bands/${bandId}/transfer`)
+        .set(auth(owner.accessToken))
+        .send({ userId: stranger.userId })
+        .expect(404);
+      expect(notFound.body.code).toBe("band_member_not_found");
+
+      await request(app.getHttpServer())
+        .post(`/bands/${bandId}/transfer`)
+        .set(auth(member.accessToken))
+        .send({ userId: owner.userId })
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .post(`/bands/${bandId}/transfer`)
+        .set(auth(owner.accessToken))
+        .send({ userId: "not-a-uuid" })
+        .expect(400);
+    });
+  });
+
+  describe("밴드 삭제 (soft)", () => {
+    it("owner가 지우면 행은 남고 목록·라우트에서 사라진다", async () => {
+      const bandId = await createBand(owner.accessToken);
+      await request(app.getHttpServer())
+        .delete(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .expect(204);
+      const row = await db.query.bands.findFirst({ where: eq(bands.id, bandId) });
+      expect(row?.deletedAt).not.toBeNull();
+      const mine = await request(app.getHttpServer()).get("/bands").set(auth(owner.accessToken)).expect(200);
+      expect(mine.body).toHaveLength(0);
+      const again = await request(app.getHttpServer())
+        .delete(`/bands/${bandId}`)
+        .set(auth(owner.accessToken))
+        .expect(403);
+      expect(again.body.code).toBe("band_forbidden");
+    });
+
+    it("member는 403 band_owner_only", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const member = await secondUser("deleter");
+      await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+      const res = await request(app.getHttpServer())
+        .delete(`/bands/${bandId}`)
+        .set(auth(member.accessToken))
+        .expect(403);
+      expect(res.body.code).toBe("band_owner_only");
+    });
   });
 });

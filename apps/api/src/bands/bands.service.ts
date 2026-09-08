@@ -6,6 +6,7 @@ import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { bandInvites, bandMembers, bands, users } from "../db/schema.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
+import { bandError } from "./band-errors.js";
 
 const memberColumns = {
   id: users.id,
@@ -65,13 +66,11 @@ export class BandsService {
     const role = await this.memberships.assertMember(bandId, userId);
     const total = await this.countMembers(bandId);
     if (total === 1) {
-      // 마지막 멤버가 나가면 밴드 삭제 — cascade로 멤버·초대 함께 삭제
-      await this.db.delete(bands).where(eq(bands.id, bandId));
+      // 마지막 멤버가 나가면 밴드를 soft delete — 행은 남고 목록·라우트에서 사라진다 (2026-09-08 스펙 결정 5)
+      await this.markDeleted(bandId);
       return;
     }
-    if (role === "owner") {
-      throw new ConflictException("관리자는 먼저 소유권을 넘기거나 팀을 삭제해야 해요.");
-    }
+    if (role === "owner") throw new ConflictException(bandError("band_owner_must_transfer"));
     await this.db
       .delete(bandMembers)
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
@@ -84,11 +83,9 @@ export class BandsService {
   async removeMember(bandId: string, actorId: string, targetUserId: string): Promise<void> {
     await this.memberships.assertOwner(bandId, actorId);
     const targetRole = await this.memberships.roleOf(bandId, targetUserId);
-    if (!targetRole) throw new NotFoundException("팀원을 찾을 수 없어요.");
-    if (targetUserId === actorId) {
-      throw new ConflictException("자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.");
-    }
-    if (targetRole === "owner") throw new ConflictException("팀장은 내보낼 수 없어요.");
+    if (!targetRole) throw new NotFoundException(bandError("band_member_not_found"));
+    if (targetUserId === actorId) throw new ConflictException(bandError("band_cannot_remove_self"));
+    if (targetRole === "owner") throw new ConflictException(bandError("band_cannot_remove_owner"));
     await this.db.transaction(async (tx) => {
       await tx
         .delete(bandMembers)
@@ -114,8 +111,50 @@ export class BandsService {
       .innerJoin(users, eq(users.id, bandMembers.userId))
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
     // update와 read 사이에 동시 removeMember로 행이 사라졌을 수 있다 — assertMember와 같은 403.
-    if (!row) throw new ForbiddenException("이 밴드에 접근할 수 없어요.");
+    if (!row) throw new ForbiddenException(bandError("band_forbidden"));
     return toBandMember(row);
+  }
+
+  async rename(bandId: string, actorId: string, name: string): Promise<Band> {
+    await this.memberships.assertOwner(bandId, actorId);
+    const [row] = await this.db
+      .update(bands)
+      .set({ name, updatedAt: new Date() })
+      .where(eq(bands.id, bandId))
+      .returning({ id: bands.id, name: bands.name });
+    if (!row) throw new ForbiddenException(bandError("band_forbidden"));
+    return { id: row.id, name: row.name, memberCount: await this.countMembers(bandId) };
+  }
+
+  /**
+   * owner↔member 교체 한 번. 밴드당 owner는 항상 정확히 1명이다 (2026-09-08 스펙 결정 7).
+   * 검증 순서: owner 확인 → 본인 여부 → 대상 존재. 권한 없는 호출자에게 멤버십 존재를 알려주지 않는다.
+   */
+  async transferOwnership(bandId: string, actorId: string, targetUserId: string): Promise<void> {
+    await this.memberships.assertOwner(bandId, actorId);
+    if (targetUserId === actorId) throw new ConflictException(bandError("band_transfer_self"));
+    const targetRole = await this.memberships.roleOf(bandId, targetUserId);
+    if (!targetRole) throw new NotFoundException(bandError("band_member_not_found"));
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(bandMembers)
+        .set({ role: "owner" })
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, targetUserId)));
+      await tx
+        .update(bandMembers)
+        .set({ role: "member" })
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, actorId)));
+    });
+  }
+
+  /** soft delete — 행·세션·R2 객체는 남긴다 (2026-09-08 스펙 결정 3). 이미 삭제된 밴드는 assertOwner가 403. */
+  async softDelete(bandId: string, actorId: string): Promise<void> {
+    await this.memberships.assertOwner(bandId, actorId);
+    await this.markDeleted(bandId);
+  }
+
+  private async markDeleted(bandId: string): Promise<void> {
+    await this.db.update(bands).set({ deletedAt: new Date() }).where(eq(bands.id, bandId));
   }
 
   private async countMembers(bandId: string): Promise<number> {

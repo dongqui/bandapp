@@ -24,6 +24,12 @@ describe("MockApiClient bands 관리", () => {
     await expect(api.bands.rename("b2", "X")).rejects.toMatchObject({ status: 403, code: "band_owner_only" });
   });
 
+  it("rename은 trim 후 1~50자가 아니면 400", async () => {
+    const api = new MockApiClient();
+    await expect(api.bands.rename("b1", "   ")).rejects.toMatchObject({ status: 400 });
+    await expect(api.bands.rename("b1", "a".repeat(51))).rejects.toMatchObject({ status: 400 });
+  });
+
   it("transferOwnership은 역할을 교체하고, 본인이면 409, 없으면 404", async () => {
     const api = new MockApiClient();
     await api.bands.transferOwnership("b1", "m2");
@@ -53,7 +59,7 @@ describe("MockApiClient bands 관리", () => {
 
   it("setMyPart는 자유 문자열을 받는다", async () => {
     const api = new MockApiClient();
-    const me = await api.bands.setMyPart("b1", "Synth");
+    const me = await api.bands.setMyPart("b1", "  Synth  ");
     expect(me.part).toBe("Synth");
   });
 });

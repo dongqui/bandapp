@@ -118,7 +118,7 @@ export class MockApiClient implements RehearsalApiClient {
     setMyPart: async (bandId: string, part: string | null): Promise<BandMember> => {
       const me = (this.state.members[bandId] ?? []).find((m) => m.id === MOCK_USER.id);
       if (!me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
-      me.part = part;
+      me.part = part === null ? null : part.trim();
       this.emit();
       return { ...me };
     },
@@ -147,8 +147,12 @@ export class MockApiClient implements RehearsalApiClient {
     },
     rename: async (bandId: string, name: string): Promise<Band> => {
       this.assertOwner(bandId);
+      const trimmed = name.trim();
+      if (trimmed.length < 1 || trimmed.length > 50) {
+        throw new ApiError(400, "name must be 1-50 characters");
+      }
       const band = this.mustBand(bandId);
-      band.name = name.trim();
+      band.name = trimmed;
       this.emit();
       return { ...band };
     },

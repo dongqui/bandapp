@@ -73,10 +73,18 @@ export class InvitesService {
     return { id: row.id, url: this.inviteUrl(row.token), expiresAt: row.expiresAt.toISOString() };
   }
 
+  /** 삭제된 밴드의 초대는 존재하지 않는 것으로 답한다 (2026-09-08 스펙 결정 4, 2026-09-02 결정 10). */
+  private async liveBand(bandId: string): Promise<typeof bands.$inferSelect> {
+    const band = await this.db.query.bands.findFirst({
+      where: and(eq(bands.id, bandId), isNull(bands.deletedAt)),
+    });
+    if (!band) throw new NotFoundException(inviteError("invite_not_found"));
+    return band;
+  }
+
   async preview(token: string): Promise<InvitePreview> {
     const invite = await this.findValid(token);
-    const band = await this.db.query.bands.findFirst({ where: eq(bands.id, invite.bandId) });
-    if (!band) throw new NotFoundException(inviteError("invite_not_found"));
+    const band = await this.liveBand(invite.bandId);
     const creator = await this.db.query.users.findFirst({ where: eq(users.id, invite.createdBy) });
     const [count] = await this.db
       .select({ n: sql<number>`count(*)::int` })
@@ -92,6 +100,7 @@ export class InvitesService {
   /** idempotent — 이미 멤버면 오류 대신 alreadyMember=true (기획서 15장). */
   async join(token: string, userId: string): Promise<JoinInviteResult> {
     const invite = await this.findValid(token);
+    await this.liveBand(invite.bandId);
     const existing = await this.db.query.bandMembers.findFirst({
       where: and(eq(bandMembers.bandId, invite.bandId), eq(bandMembers.userId, userId)),
     });

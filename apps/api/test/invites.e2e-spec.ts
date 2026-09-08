@@ -1,7 +1,7 @@
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bandInvites } from "../src/db/schema.js";
+import { bandInvites, bands } from "../src/db/schema.js";
 import { eq } from "drizzle-orm";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
@@ -132,6 +132,19 @@ describe("invites API", () => {
       .where(eq(bandInvites.id, invite.id));
     const both = await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(410);
     expect(both.body.code).toBe("invite_revoked");
+  });
+
+  it("삭제된 밴드의 초대는 preview·join 모두 404 invite_not_found", async () => {
+    const invite = await createInvite();
+    await db.update(bands).set({ deletedAt: new Date() }).where(eq(bands.id, bandId));
+    const preview = await request(app.getHttpServer()).get(`/invites/${invite.token}`).expect(404);
+    expect(preview.body.code).toBe("invite_not_found");
+    const member = await memberLogin("late-joiner");
+    const join = await request(app.getHttpServer())
+      .post(`/invites/${invite.token}/join`)
+      .set(auth(member.accessToken))
+      .expect(404);
+    expect(join.body.code).toBe("invite_not_found");
   });
 
   it("비로그인 join은 401", async () => {

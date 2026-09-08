@@ -78,6 +78,40 @@ describe("DELETE /me", () => {
     await request(app.getHttpServer()).get("/me").set(auth(me.accessToken)).expect(200);
   });
 
+  it("soft delete된 멀티 멤버 밴드의 owner도 탈퇴할 수 있다 (밴드 행은 남는다)", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/bands")
+      .set(auth(me.accessToken))
+      .send({ name: "FRIDAY NIGHT" })
+      .expect(201);
+    const bandId = res.body.id;
+    const [other] = await db.insert(users).values({ displayName: "Minsoo" }).returning();
+    await db.insert(bandMembers).values({ bandId, userId: other!.id, role: "member" });
+
+    await request(app.getHttpServer()).delete(`/bands/${bandId}`).set(auth(me.accessToken)).expect(204);
+    await request(app.getHttpServer()).delete("/me").set(auth(me.accessToken)).expect(204);
+
+    const row = await db.query.bands.findFirst({ where: eq(bands.id, bandId) });
+    expect(row).toBeDefined();
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
+  it("soft delete된 혼자인 밴드는 탈퇴해도 하드 삭제되지 않는다", async () => {
+    const res = await request(app.getHttpServer())
+      .post("/bands")
+      .set(auth(me.accessToken))
+      .send({ name: "SOLO" })
+      .expect(201);
+    const bandId = res.body.id;
+
+    await request(app.getHttpServer()).delete(`/bands/${bandId}`).set(auth(me.accessToken)).expect(204);
+    await request(app.getHttpServer()).delete("/me").set(auth(me.accessToken)).expect(204);
+
+    const row = await db.query.bands.findFirst({ where: eq(bands.id, bandId) });
+    expect(row).toBeDefined();
+    expect(row?.deletedAt).not.toBeNull();
+  });
+
   it("Apple로 가입한 계정은 탈퇴 시 Apple 토큰을 revoke한다", async () => {
     const apple = await request(app.getHttpServer())
       .post("/auth/apple")

@@ -1,8 +1,10 @@
 import type { INestApplication } from "@nestjs/common";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bandInvites, bandMembers, bands } from "../src/db/schema.js";
+import { DB } from "../src/db/db.constants.js";
+import type { Db } from "../src/db/db.module.js";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
@@ -393,6 +395,47 @@ describe("bands API", () => {
         .set(auth(owner.accessToken))
         .send({ userId: "not-a-uuid" })
         .expect(400);
+    });
+
+    it("동시에 두 번 이전해도 owner는 한 명만 남는다 (race-safe)", async () => {
+      const bandId = await createBand(owner.accessToken);
+      const a = await secondUser("racer-a");
+      const b = await secondUser("racer-b");
+      await db.insert(bandMembers).values([
+        { bandId, userId: a.userId, role: "member" },
+        { bandId, userId: b.userId, role: "member" },
+      ]);
+
+      // 두 요청이 각자 새 커넥션을 여느라 사실상 직렬화되지 않도록, 앱의 커넥션 풀을
+      // 미리 데워 둔다 (콜드 풀에서는 첫 요청이 유일한 유휴 커넥션을 차지해 두 번째가
+      // TCP connect 동안 뒤로 밀리면서 레이스가 재현되지 않는다).
+      const appDb = app.get<Db>(DB);
+      await Promise.all(Array.from({ length: 6 }, () => appDb.execute(sql`select 1`)));
+
+      const [first, second] = await Promise.all([
+        request(app.getHttpServer())
+          .post(`/bands/${bandId}/transfer`)
+          .set(auth(owner.accessToken))
+          .send({ userId: a.userId })
+          .then((r) => ({ status: r.status, body: r.body })),
+        request(app.getHttpServer())
+          .post(`/bands/${bandId}/transfer`)
+          .set(auth(owner.accessToken))
+          .send({ userId: b.userId })
+          .then((r) => ({ status: r.status, body: r.body })),
+      ]);
+
+      const statuses = [first.status, second.status].sort();
+      expect(statuses).toEqual([204, 403]);
+      const loser = first.status === 403 ? first : second;
+      expect(loser.body.code).toBe("band_owner_only");
+
+      const members = await request(app.getHttpServer())
+        .get(`/bands/${bandId}/members`)
+        .set(auth(owner.accessToken))
+        .expect(200);
+      const owners = members.body.filter((m: { role: string }) => m.role === "owner");
+      expect(owners).toHaveLength(1);
     });
   });
 

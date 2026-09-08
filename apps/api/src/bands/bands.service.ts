@@ -136,6 +136,21 @@ export class BandsService {
     const targetRole = await this.memberships.roleOf(bandId, targetUserId);
     if (!targetRole) throw new NotFoundException(bandError("band_member_not_found"));
     await this.db.transaction(async (tx) => {
+      // 트랜잭션 밖의 assertOwner/roleOf는 스냅샷일 뿐이다 — 동시에 두 번 이전 요청이 오면
+      // 둘 다 그 스냅샷을 통과할 수 있다. 실제 UPDATE 직전에 행을 잠그고 역할을 다시 확인해
+      // owner가 둘이 되는 것을 막는다 (Important #2).
+      const [actor] = await tx
+        .select({ role: bandMembers.role })
+        .from(bandMembers)
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, actorId)))
+        .for("update");
+      if (actor?.role !== "owner") throw new ForbiddenException(bandError("band_owner_only"));
+      const [target] = await tx
+        .select({ role: bandMembers.role })
+        .from(bandMembers)
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, targetUserId)))
+        .for("update");
+      if (!target) throw new NotFoundException(bandError("band_member_not_found"));
       await tx
         .update(bandMembers)
         .set({ role: "owner" })

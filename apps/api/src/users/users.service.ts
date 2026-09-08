@@ -94,9 +94,13 @@ export class UsersService {
    */
   async deleteAccount(userId: string): Promise<{ appleRefreshTokens: string[] }> {
     return this.db.transaction(async (tx) => {
-      const memberships = await tx.query.bandMembers.findMany({
-        where: eq(bandMembers.userId, userId),
-      });
+      // soft delete된 밴드(bands.deleted_at)는 여기서 완전히 무시한다 — 409 판정에도 끼지 않고
+      // count===1 분기로 하드 삭제되지도 않는다 (스펙 결정 3, 이미 삭제된 밴드는 다시 지우지 않는다).
+      const memberships = await tx
+        .select({ bandId: bandMembers.bandId, role: bandMembers.role })
+        .from(bandMembers)
+        .innerJoin(bands, eq(bands.id, bandMembers.bandId))
+        .where(and(eq(bandMembers.userId, userId), isNull(bands.deletedAt)));
       for (const membership of memberships) {
         const [count] = await tx
           .select({ n: sql<number>`count(*)::int` })

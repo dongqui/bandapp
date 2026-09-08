@@ -8,6 +8,7 @@ export * from "./IconCircle";
 export * from "./StatusDot";
 export * from "./ProgressBar";
 export * from "./BottomSheet";
+export * from "./ConfirmDialog";
 export * from "./SheetActionRow";
 export * from "./Toast";
 export * from "./Fab";

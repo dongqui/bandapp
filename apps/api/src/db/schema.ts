@@ -23,6 +23,7 @@ export const uploadStatus = pgEnum("upload_status", ["pending", "completed", "ab
 export const takeType = pgEnum("take_type", ["PERFORMANCE", "PARTIAL_PRACTICE"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
+
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

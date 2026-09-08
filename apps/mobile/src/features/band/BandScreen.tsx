@@ -35,7 +35,9 @@ export function BandScreen() {
         data={members ?? []}
         keyExtractor={(m) => m.id}
         contentContainerStyle={{ paddingHorizontal: space.screenX, paddingBottom: 160 }}
-        renderItem={({ item }) => <MemberRow member={item} />}
+        renderItem={({ item }) => (
+          <MemberRow member={item} isMe={false} tappable={false} onPress={() => undefined} />
+        )}
         ListFooterComponent={
           <PressableOpacity
             onPress={() => setInviteOpen(true)}

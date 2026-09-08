@@ -1,3 +1,4 @@
+import "@/i18n";
 import {
   JetBrainsMono_400Regular,
   JetBrainsMono_500Medium,

@@ -92,6 +92,7 @@ export function useBandActions(band: Band | null, reloadMembers: () => void) {
         // 목록이 낡아 클라이언트가 owner인 줄 몰랐을 때 — 화면이 "먼저 이전" 다이얼로그를 띄운다
         if (err instanceof ApiError && err.code === "band_owner_must_transfer") return "ownerMustTransfer";
         toast.show(apiErrorMessage(err, t));
+        if (err instanceof ApiError && err.code === "band_forbidden") await refreshBands();
         return "failed";
       } finally {
         setBusy(false);

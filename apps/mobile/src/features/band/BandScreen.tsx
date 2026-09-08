@@ -58,7 +58,11 @@ export function BandScreen() {
 
   const close = () => setSheet(null);
 
-  const onLeavePress = () => setConfirm({ kind: isOwner ? "ownerLeave" : "leave" });
+  const onLeavePress = () => {
+    // 혼자 남은 owner는 이전할 상대가 없으니 TransferSheet 대신 delete 확인으로 보낸다
+    if (isOwner && others.length === 0) setConfirm({ kind: "delete" });
+    else setConfirm({ kind: isOwner ? "ownerLeave" : "leave" });
+  };
 
   const confirmProps = (() => {
     if (!confirm) return null;

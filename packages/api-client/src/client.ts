@@ -65,6 +65,12 @@ export interface RehearsalApiClient {
     /** Owner 전용. 성공하면 서버가 그 밴드의 활성 초대를 함께 무효화한다. */
     removeMember(bandId: string, userId: string): Promise<void>;
     leave(bandId: string): Promise<void>;
+    /** Owner 전용. trim 후 1~50자. */
+    rename(bandId: string, name: string): Promise<Band>;
+    /** Owner 전용. 대상이 owner가 되고 호출자는 member가 된다. */
+    transferOwnership(bandId: string, userId: string): Promise<void>;
+    /** Owner 전용. soft delete — 목록에서 사라진다. */
+    delete(bandId: string): Promise<void>;
     createInvite(bandId: string): Promise<BandInvite>;
     revokeInvite(bandId: string, inviteId: string): Promise<void>;
   };

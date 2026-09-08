@@ -26,18 +26,9 @@ import type {
   UploadSource,
 } from "../client";
 import { uploadRecording } from "../upload";
+import { ApiError } from "../errors";
 
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    message: string,
-    /** 서버가 본문에 실어 보낸 기계 판독용 사유. 없을 수 있다. */
-    public readonly code?: string,
-  ) {
-    super(message);
-    this.name = "ApiError";
-  }
-}
+export { ApiError };
 
 export interface HttpApiClientOptions {
   baseUrl: string;
@@ -209,6 +200,19 @@ export class HttpApiClient implements RehearsalApiClient {
     },
     leave: async (bandId: string): Promise<void> => {
       await this.request<void>("DELETE", `/bands/${bandId}/members/me`);
+      this.emit();
+    },
+    rename: async (bandId: string, name: string): Promise<Band> => {
+      const band = await this.request<Band>("PATCH", `/bands/${bandId}`, { name });
+      this.emit();
+      return band;
+    },
+    transferOwnership: async (bandId: string, userId: string): Promise<void> => {
+      await this.request<void>("POST", `/bands/${bandId}/transfer`, { userId });
+      this.emit();
+    },
+    delete: async (bandId: string): Promise<void> => {
+      await this.request<void>("DELETE", `/bands/${bandId}`);
       this.emit();
     },
     createInvite: (bandId: string): Promise<BandInvite> =>

@@ -104,9 +104,9 @@ describe("MockApiClient", () => {
       await expect(api.bands.removeMember("no-such-band", "m2")).rejects.toThrow();
     });
 
-    it("현재 사용자가 owner가 아니면 거부한다 (시드 b1에는 참여하지 않은 상태)", async () => {
+    it("현재 사용자가 owner가 아니면 거부한다 (시드 b2에서는 member)", async () => {
       const api = new MockApiClient();
-      await expect(api.bands.removeMember("b1", "m2")).rejects.toThrow();
+      await expect(api.bands.removeMember("b2", "m4")).rejects.toThrow();
     });
 
     it("대상이 멤버가 아니면 거부한다", async () => {

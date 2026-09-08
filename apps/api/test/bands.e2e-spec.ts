@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bandInvites, bandMembers } from "../src/db/schema.js";
+import { bandInvites, bandMembers, bands } from "../src/db/schema.js";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
@@ -249,5 +249,40 @@ describe("bands API", () => {
   it("이름이 비면 400, 토큰 없으면 401", async () => {
     await request(app.getHttpServer()).post("/bands").set(auth(owner.accessToken)).send({ name: "  " }).expect(400);
     await request(app.getHttpServer()).get("/bands").expect(401);
+  });
+
+  it("403 본문에 code가 실린다", async () => {
+    const bandId = await createBand(owner.accessToken);
+    const member = await secondUser("coded-member");
+    await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
+    const stranger = await secondUser("coded-stranger");
+    const forbidden = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(stranger.accessToken))
+      .expect(403);
+    expect(forbidden.body.code).toBe("band_forbidden");
+    const ownerOnly = await request(app.getHttpServer())
+      .post(`/bands/${bandId}/invites`)
+      .set(auth(member.accessToken))
+      .expect(403);
+    expect(ownerOnly.body.code).toBe("band_owner_only");
+  });
+
+  it("삭제된 밴드는 목록에서 빠지고 모든 밴드 스코프 라우트가 403 band_forbidden", async () => {
+    const bandId = await createBand(owner.accessToken);
+    await db.update(bands).set({ deletedAt: new Date() }).where(eq(bands.id, bandId));
+
+    const mine = await request(app.getHttpServer()).get("/bands").set(auth(owner.accessToken)).expect(200);
+    expect(mine.body).toHaveLength(0);
+
+    const members = await request(app.getHttpServer())
+      .get(`/bands/${bandId}/members`)
+      .set(auth(owner.accessToken))
+      .expect(403);
+    expect(members.body.code).toBe("band_forbidden");
+    await request(app.getHttpServer())
+      .get(`/bands/${bandId}/sessions`)
+      .set(auth(owner.accessToken))
+      .expect(403);
   });
 });

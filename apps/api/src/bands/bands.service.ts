@@ -47,7 +47,7 @@ export class BandsService {
       })
       .from(bandMembers)
       .innerJoin(bands, eq(bands.id, bandMembers.bandId))
-      .where(eq(bandMembers.userId, userId))
+      .where(and(eq(bandMembers.userId, userId), isNull(bands.deletedAt)))
       .orderBy(bandMembers.joinedAt);
   }
 

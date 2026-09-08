@@ -24,6 +24,14 @@
 - **삭제된 밴드 영구 삭제 배치.** `bands.deleted_at`이 채워진 밴드의 행과 R2 객체(원본·take)를 N일 뒤 지운다 ([2026-09-08 스펙](superpowers/specs/2026-09-08-team-management-screen-design.md) 결정 3). 세션 삭제 정리 배치와 같이 진행.
 - **기존 화면 문구의 i18n 이관.** 세션·녹음·설정·초대 랜딩의 하드코딩 문구를 `src/i18n` 리소스로. 설정 화면의 `Alert.alert`를 `ConfirmDialog`로.
 - **언어 전환 UI.** 지금은 기기 언어만 따른다.
+- **파트 해제 UI.** `setMyPart(null)`은 서버·클라이언트 모두 지원하지만 파트 시트에 "해제" 행이 없다 (2026-09-08 스펙 갭).
+- **밴드가 바뀌면 열린 시트·다이얼로그를 닫기.** BandScreen의 `sheet`/`confirm`이 `band.id` 변경에도 살아남는다. 지금은 `band_member_not_found` 토스트로 끝난다.
+- **BandSwitchSheet 문구 i18n.** `features/band/` 안에서 유일하게 하드코딩("Switch band", "Create or join a band").
+- **SheetRow와 SheetActionRow 통합.** `icon?`·`danger?`를 공용 컴포넌트에 더하면 하나로 합쳐진다.
+- **밴드 soft delete 시 활성 초대 revoke.** 지금은 preview/join이 404로 막지만, 삭제를 되돌리면 옛 링크가 살아난다. `removeMember`와 같은 방식으로 `markDeleted`에서 revoke.
+- **소유권 이전 TOCTOU.** 트랜잭션 안의 FOR UPDATE 재확인이 `bands.deleted_at`은 다시 보지 않는다. 창이 극히 좁아 방치.
+- **api-client 정리.** Mock 테스트 파일이 `.test.ts`/`.spec.ts` 둘로 나뉘어 있고, `index.ts`가 `ApiError`를 `errors.ts` 대신 `HttpApiClient`를 거쳐 export한다.
+- **기기 검증(dev build) 필요.** 시트→다이얼로그 Modal 전환, 시트 안 TextInput 키보드 회피, 토스트와 Modal의 z-order, 한국어 기기의 `getLocales()[0].languageCode`가 `ko`인지.
 
 ## 운영
 - **세션 삭제 API와 R2 객체 정리.** 세션을 지울 때 원본·take 객체를 함께 지운다.

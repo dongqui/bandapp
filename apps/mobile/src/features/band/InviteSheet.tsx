@@ -1,5 +1,6 @@
 import * as Clipboard from "expo-clipboard";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { useApiData } from "@/api";
 import { font, radius, useTheme } from "@/theme";
@@ -14,6 +15,7 @@ export function InviteSheet({
   onClose: () => void;
   bandId: string;
 }) {
+  const { t } = useTranslation();
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
   const { data: invite } = useApiData((api) => api.bands.createInvite(bandId), [bandId]);
@@ -28,8 +30,8 @@ export function InviteSheet({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title="Invite your band"
-      subtitle="Send a link to invite members."
+      title={t("band.invite.title")}
+      subtitle={t("band.invite.subtitle")}
     >
       <View
         style={{
@@ -59,7 +61,7 @@ export function InviteSheet({
         }}
       >
         <AppText style={{ fontSize: 14, fontWeight: "600", color: colors.bg }}>
-          {copied ? "Copied" : "Copy link"}
+          {copied ? t("band.invite.copied") : t("band.invite.copy")}
         </AppText>
       </PressableOpacity>
     </BottomSheet>

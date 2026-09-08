@@ -4,7 +4,6 @@ import type {
   Band,
   BandInvite,
   BandMember,
-  BandPart,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -100,7 +99,7 @@ export class MockApiClient implements RehearsalApiClient {
       this.emit();
       return { ...band };
     },
-    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+    setMyPart: async (bandId: string, part: string | null): Promise<BandMember> => {
       const me = (this.state.members[bandId] ?? []).find((m) => m.id === MOCK_USER.id);
       if (!me) throw new Error("이 밴드의 멤버가 아니에요.");
       me.part = part;

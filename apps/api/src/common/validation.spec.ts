@@ -5,6 +5,7 @@ import {
   requireIsoDate,
   requireNumber,
   requireOneOf,
+  requirePartOrNull,
 } from "./validation.js";
 
 describe("requireInteger", () => {
@@ -64,5 +65,28 @@ describe("requireIsoDate", () => {
     ["impossible date", "2026-13-40T00:00:00Z"],
   ])("rejects %s", (_label, d) => {
     expect(() => requireIsoDate({ d }, "d")).toThrow(BadRequestException);
+  });
+});
+
+describe("requirePartOrNull", () => {
+  it("프리셋 키든 자유 문자열이든 trim해서 돌려준다", () => {
+    expect(requirePartOrNull({ part: "guitar" }, "part")).toBe("guitar");
+    expect(requirePartOrNull({ part: "  Synth  " }, "part")).toBe("Synth");
+  });
+
+  it("null은 해제", () => {
+    expect(requirePartOrNull({ part: null }, "part")).toBeNull();
+  });
+
+  it("필드 없음·빈 문자열·공백만·21자·문자열 아님은 400", () => {
+    expect(() => requirePartOrNull({}, "part")).toThrow(BadRequestException);
+    expect(() => requirePartOrNull({ part: "" }, "part")).toThrow(BadRequestException);
+    expect(() => requirePartOrNull({ part: "   " }, "part")).toThrow(BadRequestException);
+    expect(() => requirePartOrNull({ part: "a".repeat(21) }, "part")).toThrow(BadRequestException);
+    expect(() => requirePartOrNull({ part: 3 }, "part")).toThrow(BadRequestException);
+  });
+
+  it("20자는 통과", () => {
+    expect(requirePartOrNull({ part: "a".repeat(20) }, "part")).toBe("a".repeat(20));
   });
 });

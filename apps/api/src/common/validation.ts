@@ -1,5 +1,4 @@
 import { BadRequestException } from "@nestjs/common";
-import type { BandPart } from "@bandapp/types";
 
 export function requireString(body: unknown, field: string): string {
   const value = (body as Record<string, unknown> | null | undefined)?.[field];
@@ -30,19 +29,22 @@ export function optionalUuid(body: unknown, name: string): string | undefined {
   return value;
 }
 
-const BAND_PARTS = ["vocal", "guitar", "bass", "drums", "keyboard", "other"] as const;
+const PART_MAX_LENGTH = 20;
 
 /**
- * null을 허용한다 — 파트 미설정이 정상 상태이고, 해제 전용 엔드포인트 대신 같은 PATCH로 받는다
- * (스펙 결정 4). 필드가 아예 없으면 400 — 의도한 해제와 실수를 구분한다.
+ * 파트는 자유 문자열이다 — 프리셋 키(vocal 등)든 "Synth"든 서버는 구분하지 않는다 (스펙 결정 2).
+ * null을 허용한다 — 파트 미설정이 정상 상태이고, 해제 전용 엔드포인트 대신 같은 PATCH로 받는다.
+ * 필드가 아예 없으면 400 — 의도한 해제와 실수를 구분한다.
  */
-export function requireBandPartOrNull(body: unknown, field: string): BandPart | null {
-  const value = (body as Record<string, unknown> | null | undefined)?.[field];
+export function requirePartOrNull(body: unknown, name: string): string | null {
+  const value = field(body, name);
   if (value === null) return null;
-  if (typeof value !== "string" || !(BAND_PARTS as readonly string[]).includes(value)) {
-    throw new BadRequestException(`${field} must be one of ${BAND_PARTS.join(", ")} or null`);
+  if (typeof value !== "string") throw new BadRequestException(`${name} must be a string or null`);
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > PART_MAX_LENGTH) {
+    throw new BadRequestException(`${name} must be 1-${PART_MAX_LENGTH} characters or null`);
   }
-  return value as BandPart;
+  return trimmed;
 }
 
 interface Range {

@@ -13,7 +13,7 @@ import {
 import type { Band, BandMember } from "@bandapp/types";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
-import { requireBandPartOrNull, requireString, requireUuidParam } from "../common/validation.js";
+import { requirePartOrNull, requireString, requireUuidParam } from "../common/validation.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
 import { BandsService } from "./bands.service.js";
 
@@ -56,7 +56,7 @@ export class BandsController {
     @Body() body: unknown,
   ): Promise<BandMember> {
     requireUuidParam(bandId, "bandId");
-    return this.bandsService.setPart(bandId, userId, requireBandPartOrNull(body, "part"));
+    return this.bandsService.setPart(bandId, userId, requirePartOrNull(body, "part"));
   }
 
   @Delete(":bandId/members/me")

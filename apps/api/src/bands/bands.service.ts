@@ -1,7 +1,7 @@
 import { ConflictException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { Band, BandMember, BandPart, MemberRole } from "@bandapp/types";
+import type { Band, BandMember, MemberRole } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { bandInvites, bandMembers, bands, users } from "../db/schema.js";
@@ -18,7 +18,7 @@ function toBandMember(row: {
   id: string;
   name: string | null;
   role: MemberRole;
-  part: BandPart | null;
+  part: string | null;
 }): BandMember {
   return { id: row.id, name: row.name ?? "탈퇴한 멤버", role: row.role, part: row.part };
 }
@@ -102,7 +102,7 @@ export class BandsService {
   }
 
   /** 본인 파트만 쓴다 — 타인의 파트를 쓰는 경로는 없다 (스펙 결정 3). */
-  async setPart(bandId: string, userId: string, part: BandPart | null): Promise<BandMember> {
+  async setPart(bandId: string, userId: string, part: string | null): Promise<BandMember> {
     await this.memberships.assertMember(bandId, userId);
     await this.db
       .update(bandMembers)

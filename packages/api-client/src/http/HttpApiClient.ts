@@ -5,7 +5,6 @@ import type {
   Band,
   BandInvite,
   BandMember,
-  BandPart,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -197,7 +196,7 @@ export class HttpApiClient implements RehearsalApiClient {
     },
     members: (bandId: string): Promise<BandMember[]> =>
       this.request<BandMember[]>("GET", `/bands/${bandId}/members`),
-    setMyPart: async (bandId: string, part: BandPart | null): Promise<BandMember> => {
+    setMyPart: async (bandId: string, part: string | null): Promise<BandMember> => {
       const member = await this.request<BandMember>("PATCH", `/bands/${bandId}/members/me`, {
         part,
       });

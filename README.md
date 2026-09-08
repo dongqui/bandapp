@@ -53,6 +53,12 @@ docker compose up --build -d
 - 서버 없이 UI만 볼 때는 `EXPO_PUBLIC_API_URL`을 비워 Mock으로 띄운다. Mock은 업로드 진행률만 흉내 내고 재생은 시뮬레이션이다.
 - 웹 프리뷰(`pnpm --filter mobile dev`)에서 의미 있는 건 가져오기뿐이다. 녹음은 브라우저에서 webm이 나와 서버가 받는 m4a와 맞지 않으니 네이티브(dev build)에서만 쓴다.
 
+### 팀 관리·i18n (모바일)
+
+- 밴드 탭에서 파트 변경(프리셋 + 직접 입력), owner의 팀원 내보내기·소유권 이전, 이름 변경, 나가기, 삭제가 된다. 서버 API는 `PATCH /bands/:id`, `POST /bands/:id/transfer`, `DELETE /bands/:id`(soft delete).
+- 문구는 `apps/mobile/src/i18n`의 ko/en 리소스에서 온다. 기기 언어가 ko면 한국어, 아니면 영어. 아직 이 화면만 리소스를 쓴다 (나머지 화면은 백로그).
+- `expo-localization`이 새로 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
+
 ### DB 마이그레이션
 
 `api` 컨테이너는 기동 시 자동으로 `pnpm --filter @bandapp/api db:migrate`를 실행해 최신 스키마를 적용한다(drizzle migrate는 멱등이라 반복 실행해도 안전하다). 컨테이너를 띄우지 않고 호스트에서 직접 적용하려면:

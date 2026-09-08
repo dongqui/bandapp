@@ -60,3 +60,5 @@ docker compose up --build -d
 ```bash
 pnpm --filter @bandapp/api db:migrate   # localhost:5432 대상
 ```
+
+`0005` 마이그레이션이 `band_part` enum을 text로 바꾸고 `bands.deleted_at`을 더한다. 기존 `part = 'other'` 행은 NULL이 된다.

@@ -217,14 +217,21 @@ describe("bands API", () => {
       .send({ part: null })
       .expect(200);
     expect(cleared.body.part).toBeNull();
+
+    const custom = await request(app.getHttpServer())
+      .patch(`/bands/${bandId}/members/me`)
+      .set(auth(owner.accessToken))
+      .send({ part: "  Synth " })
+      .expect(200);
+    expect(custom.body.part).toBe("Synth");
   });
 
-  it("정의되지 않은 파트는 400, 비멤버는 403", async () => {
+  it("21자 이상·필드 없음은 400, 비멤버는 403", async () => {
     const bandId = await createBand(owner.accessToken);
     await request(app.getHttpServer())
       .patch(`/bands/${bandId}/members/me`)
       .set(auth(owner.accessToken))
-      .send({ part: "trumpet" })
+      .send({ part: "a".repeat(21) })
       .expect(400);
     await request(app.getHttpServer())
       .patch(`/bands/${bandId}/members/me`)

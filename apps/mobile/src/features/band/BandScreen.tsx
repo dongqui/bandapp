@@ -6,7 +6,7 @@ import { FlatList, View } from "react-native";
 import { useApiData } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { radius, space, useTheme } from "@/theme";
-import { AppText, ConfirmDialog, MonoLabel, PressableOpacity, Screen } from "@/ui";
+import { AppText, BottomSheet, ConfirmDialog, MonoLabel, PressableOpacity, Screen } from "@/ui";
 import { InviteSheet } from "./InviteSheet";
 import { MemberRow } from "./MemberRow";
 import { MemberSheet } from "./MemberSheet";
@@ -38,7 +38,7 @@ export function BandScreen() {
   const { band } = useCurrentBand();
   const { state } = useAuth();
   const myId = state.status === "authenticated" ? state.user.id : null;
-  const { data: members, reload } = useApiData(
+  const { data: members } = useApiData(
     async (api) => (band ? api.bands.members(band.id) : []),
     [band?.id],
   );
@@ -47,7 +47,7 @@ export function BandScreen() {
   const router = useRouter();
   const [sheet, setSheet] = useState<Sheet>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
-  const actions = useBandActions(band, reload);
+  const actions = useBandActions(band);
 
   const list = members ?? [];
   const me = list.find((m) => m.id === myId) ?? null;
@@ -94,7 +94,11 @@ export function BandScreen() {
           primary: {
             label: t("band.confirm.delete.primary"),
             danger: true,
-            onPress: () => void actions.deleteBand().then(cancel),
+            // 다이얼로그(Modal)를 먼저 닫아야 router.replace가 띄워진 Modal 아래에서 돌지 않는다
+            onPress: () => {
+              cancel();
+              void actions.deleteBand();
+            },
           },
         };
       case "leave":
@@ -104,11 +108,13 @@ export function BandScreen() {
           primary: {
             label: t("band.confirm.leave.primary"),
             danger: true,
-            onPress: () =>
+            // 다이얼로그를 먼저 닫는다 — ownerMustTransfer면 leave() 응답 후 ownerLeave 다이얼로그를 다시 연다
+            onPress: () => {
+              cancel();
               void actions.leave().then((result) => {
                 if (result === "ownerMustTransfer") setConfirm({ kind: "ownerLeave" });
-                else cancel();
-              }),
+              });
+            },
           },
         };
       case "ownerLeave":
@@ -197,60 +203,82 @@ export function BandScreen() {
       />
 
       {band ? <InviteSheet visible={sheet?.kind === "invite"} onClose={close} bandId={band.id} /> : null}
-      {me ? (
-        <SelfMemberSheet
-          visible={sheet?.kind === "self"}
-          onClose={close}
-          me={me}
-          isOwner={isOwner}
-          onChangePart={() => setSheet({ kind: "part" })}
-          onTransfer={() => setSheet({ kind: "transfer" })}
-        />
-      ) : null}
-      <PartSheet
-        visible={sheet?.kind === "part"}
+
+      {/* 다섯 개 인앱 시트를 한 BottomSheet(=한 Modal)로 호스팅한다 — 시트 사이 전환(예: self → part)이
+          Modal을 닫았다 다시 여는 게 아니라 같은 Modal 안에서 내용만 바뀌게 하기 위함이다.
+          iOS에서 dismiss와 present가 같은 커밋에서 겹치면 두 번째 present가 조용히 씹힐 수 있다. */}
+      <BottomSheet
+        visible={sheet !== null && sheet.kind !== "invite"}
         onClose={close}
-        current={me?.part ?? null}
-        onSubmit={(part) => {
-          close();
-          void actions.setPart(part);
-        }}
-      />
-      <MemberSheet
-        visible={sheet?.kind === "member"}
-        onClose={close}
-        member={sheet?.kind === "member" ? sheet.member : null}
-        onMakeOwner={() => {
-          if (sheet?.kind !== "member") return;
-          const { member } = sheet;
-          close();
-          setConfirm({ kind: "transfer", member });
-        }}
-        onRemove={() => {
-          if (sheet?.kind !== "member") return;
-          const { member } = sheet;
-          close();
-          setConfirm({ kind: "remove", member });
-        }}
-      />
-      <TransferSheet
-        visible={sheet?.kind === "transfer"}
-        onClose={close}
-        candidates={others}
-        onPick={(member) => {
-          close();
-          setConfirm({ kind: "transfer", member });
-        }}
-      />
-      <RenameSheet
-        visible={sheet?.kind === "rename"}
-        onClose={close}
-        initial={bandName}
-        onSave={(name) => {
-          close();
-          void actions.rename(name);
-        }}
-      />
+        title={
+          sheet?.kind === "part"
+            ? t("band.part.title")
+            : sheet?.kind === "transfer"
+              ? t("band.transfer.title")
+              : sheet?.kind === "rename"
+                ? t("band.rename.title")
+                : undefined
+        }
+        subtitle={
+          sheet?.kind === "part"
+            ? t("band.part.subtitle")
+            : sheet?.kind === "transfer"
+              ? t("band.transfer.subtitle")
+              : undefined
+        }
+      >
+        {sheet?.kind === "self" && me ? (
+          <SelfMemberSheet
+            me={me}
+            isOwner={isOwner}
+            onChangePart={() => setSheet({ kind: "part" })}
+            onTransfer={() => setSheet({ kind: "transfer" })}
+          />
+        ) : null}
+        {sheet?.kind === "part" ? (
+          <PartSheet
+            current={me?.part ?? null}
+            onSubmit={(part) => {
+              close();
+              void actions.setPart(part);
+            }}
+          />
+        ) : null}
+        {sheet?.kind === "member" ? (
+          <MemberSheet
+            member={sheet.member}
+            onMakeOwner={() => {
+              const { member } = sheet;
+              close();
+              setConfirm({ kind: "transfer", member });
+            }}
+            onRemove={() => {
+              const { member } = sheet;
+              close();
+              setConfirm({ kind: "remove", member });
+            }}
+          />
+        ) : null}
+        {sheet?.kind === "transfer" ? (
+          <TransferSheet
+            candidates={others}
+            onPick={(member) => {
+              close();
+              setConfirm({ kind: "transfer", member });
+            }}
+          />
+        ) : null}
+        {sheet?.kind === "rename" ? (
+          <RenameSheet
+            initial={bandName}
+            onSave={(name) => {
+              close();
+              void actions.rename(name);
+            }}
+          />
+        ) : null}
+      </BottomSheet>
+
       {confirmProps ? (
         <ConfirmDialog
           visible

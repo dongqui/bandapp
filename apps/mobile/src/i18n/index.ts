@@ -5,9 +5,9 @@ import { en } from "./en";
 import { ko } from "./ko";
 import "./types";
 
-const SUPPORTED = ["en", "ko"] as const;
+type Lang = "en" | "ko";
 
-function deviceLanguage(): (typeof SUPPORTED)[number] {
+function deviceLanguage(): Lang {
   const code = getLocales()[0]?.languageCode ?? "en";
   return code === "ko" ? "ko" : "en";
 }
@@ -19,7 +19,7 @@ void i18next.use(initReactI18next).init({
   fallbackLng: "en",
   resources: { en: { translation: en }, ko: { translation: ko } },
   interpolation: { escapeValue: false }, // React Native는 HTML 이스케이프가 필요 없다
-  // i18next v26에서 initImmediate가 initAsync로 이름이 바뀌었다 (의미는 반대: false가 동기 초기화).
+  // i18next v26에서 initImmediate가 initAsync로 이름만 바뀌었다. 의미는 그대로 — false가 동기 초기화다.
   initAsync: false,
 });
 

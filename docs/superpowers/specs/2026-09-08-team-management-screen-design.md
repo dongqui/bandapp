@@ -198,7 +198,7 @@ Mock은 같은 규칙을 흉내 낸다: rename은 이름 교체, transfer는 rol
 ```
 apps/mobile/src/i18n/
   index.ts     i18next 초기화. 언어 감지, 리소스 등록, react-i18next 바인딩. 루트 _layout에서 import.
-  en.ts        export const en = { ... } as const  ← 타입 원본
+  en.ts        export const en = { ... }  ← 타입 원본
   ko.ts        export const ko: Resource = { ... }   ← Resource = typeof en
   types.ts     Resource 타입, react-i18next 모듈 확장(키 자동완성)
 ```

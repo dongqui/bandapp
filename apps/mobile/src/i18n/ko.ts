@@ -8,6 +8,7 @@ export const ko: Resource = {
     you: "(나)",
   },
   band: {
+    // YOUR BAND / MEMBERS / MANAGE는 디자인의 모노 라벨 chrome이라 의도적으로 영어를 유지한다
     header: {
       yourBand: "YOUR BAND",
       members: "MEMBERS · {{n}}",

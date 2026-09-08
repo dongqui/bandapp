@@ -1,30 +1,27 @@
 import { BAND_PART_PRESETS } from "@bandapp/types";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextInput, View } from "react-native";
 import { radius, useTheme } from "@/theme";
-import { AppText, BottomSheet, PressableOpacity } from "@/ui";
+import { AppText, PressableOpacity } from "@/ui";
 import { normalizePartInput } from "./partValue";
 import { SheetRow } from "./SheetRow";
 
-/** 프리셋 5개 + 직접 입력. onSubmit은 정규화된 값(프리셋 키 또는 trim된 자유 문자열)만 받는다. */
+/**
+ * 프리셋 5개 + 직접 입력. onSubmit은 정규화된 값(프리셋 키 또는 trim된 자유 문자열)만 받는다.
+ * BandScreen의 공용 BottomSheet 안에서만 렌더된다 — sheet.kind === "part"일 때만 마운트되므로
+ * 마운트 시점의 초기 state가 곧 "열릴 때 리셋"이다.
+ */
 export function PartSheet({
-  visible,
-  onClose,
   current,
   onSubmit,
 }: {
-  visible: boolean;
-  onClose: () => void;
   current: string | null;
   onSubmit: (part: string) => void;
 }) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [input, setInput] = useState("");
-  useEffect(() => {
-    if (visible) setInput("");
-  }, [visible]);
 
   const submitCustom = () => {
     const value = normalizePartInput(input, t);
@@ -33,7 +30,7 @@ export function PartSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t("band.part.title")} subtitle={t("band.part.subtitle")}>
+    <>
       {BAND_PART_PRESETS.map((key) => (
         <SheetRow
           key={key}
@@ -50,6 +47,7 @@ export function PartSheet({
           placeholder={t("band.part.placeholder")}
           placeholderTextColor={colors.textFaint}
           returnKeyType="done"
+          maxLength={20}
           style={{
             flex: 1,
             backgroundColor: colors.surfaceSunken,
@@ -76,6 +74,6 @@ export function PartSheet({
           <AppText style={{ color: colors.bg, fontSize: 16 }}>✓</AppText>
         </PressableOpacity>
       </View>
-    </BottomSheet>
+    </>
   );
 }

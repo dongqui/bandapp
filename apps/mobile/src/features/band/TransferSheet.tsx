@@ -2,25 +2,24 @@ import type { BandMember } from "@bandapp/types";
 import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { radius, useTheme } from "@/theme";
-import { AppText, Avatar, BottomSheet, PressableOpacity } from "@/ui";
+import { AppText, Avatar, PressableOpacity } from "@/ui";
 import { partLabel } from "./partValue";
 
-/** 본인을 제외한 멤버 중 새 owner를 고른다. 선택 → 확인 다이얼로그는 호출자가 띄운다. */
+/**
+ * 본인을 제외한 멤버 중 새 owner를 고른다. 선택 → 확인 다이얼로그는 호출자가 띄운다.
+ * BandScreen의 공용 BottomSheet 안에서만 렌더된다.
+ */
 export function TransferSheet({
-  visible,
-  onClose,
   candidates,
   onPick,
 }: {
-  visible: boolean;
-  onClose: () => void;
   candidates: BandMember[];
   onPick: (member: BandMember) => void;
 }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t("band.transfer.title")} subtitle={t("band.transfer.subtitle")}>
+    <>
       {candidates.map((m) => (
         <PressableOpacity
           key={m.id}
@@ -37,6 +36,6 @@ export function TransferSheet({
           <AppText style={{ fontSize: 18, color: colors.borderHover }}>›</AppText>
         </PressableOpacity>
       ))}
-    </BottomSheet>
+    </>
   );
 }

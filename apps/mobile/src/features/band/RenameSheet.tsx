@@ -1,27 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextInput } from "react-native";
 import { radius, useTheme } from "@/theme";
-import { AppText, BottomSheet, PressableOpacity } from "@/ui";
+import { AppText, PressableOpacity } from "@/ui";
 
-/** 이름 입력. trim 후 빈 값이면 무시. 길이 제한(50)은 서버 400 → 토스트. */
+/**
+ * 이름 입력. trim 후 빈 값이면 무시. 길이 제한은 입력에서 client-side로 막는다(서버 400은 방어선).
+ * BandScreen의 공용 BottomSheet 안에서만 렌더된다 — sheet.kind === "rename"일 때만 마운트되므로
+ * 마운트 시점의 초기 state가 곧 "열릴 때 리셋"이다.
+ */
 export function RenameSheet({
-  visible,
-  onClose,
   initial,
   onSave,
 }: {
-  visible: boolean;
-  onClose: () => void;
   initial: string;
   onSave: (name: string) => void;
 }) {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const [value, setValue] = useState(initial);
+  const inputRef = useRef<TextInput>(null);
   useEffect(() => {
-    if (visible) setValue(initial);
-  }, [visible, initial]);
+    inputRef.current?.focus();
+  }, []);
 
   const save = () => {
     const name = value.trim();
@@ -30,13 +31,14 @@ export function RenameSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t("band.rename.title")}>
+    <>
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={setValue}
         onSubmitEditing={save}
-        autoFocus
         returnKeyType="done"
+        maxLength={50}
         style={{
           marginTop: 2,
           marginHorizontal: 4,
@@ -63,6 +65,6 @@ export function RenameSheet({
       >
         <AppText style={{ fontSize: 14, fontWeight: "600", color: colors.bg }}>{t("common.save")}</AppText>
       </PressableOpacity>
-    </BottomSheet>
+    </>
   );
 }

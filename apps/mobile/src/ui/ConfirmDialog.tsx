@@ -33,7 +33,7 @@ export function ConfirmDialog({
 }) {
   const { colors } = useTheme();
   return (
-    <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={busy ? undefined : onCancel}>
       <Pressable
         style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "center", paddingHorizontal: 32 }}
         onPress={busy ? undefined : onCancel}

@@ -173,9 +173,11 @@ export const comments = pgTable(
   "comments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    takeId: uuid("take_id")
+    // 모든 코멘트가 세션에 속한다 — 원본 녹음 코멘트는 take_id가 NULL (2026-09-09 스펙 결정 4)
+    sessionId: uuid("session_id")
       .notNull()
-      .references(() => takes.id, { onDelete: "cascade" }),
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    takeId: uuid("take_id").references(() => takes.id, { onDelete: "cascade" }),
     authorId: uuid("author_id")
       .notNull()
       .references(() => users.id),
@@ -184,6 +186,8 @@ export const comments = pgTable(
     atMs: integer("at_ms").notNull(),
     text: text("text").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    // 본문을 수정할 때만 채운다 → "edited" (2026-09-09 스펙 결정 2)
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
-  (t) => [index("comments_take_at_idx").on(t.takeId, t.atMs)],
+  (t) => [index("comments_take_at_idx").on(t.takeId, t.atMs), index("comments_session_at_idx").on(t.sessionId, t.atMs)],
 );

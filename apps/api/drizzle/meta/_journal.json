@@ -43,6 +43,13 @@
       "when": 1788856252855,
       "tag": "0005_wandering_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788959554914,
+      "tag": "0006_brown_sleeper",
+      "breakpoints": true
     }
   ]
 }

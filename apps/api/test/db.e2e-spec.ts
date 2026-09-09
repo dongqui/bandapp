@@ -53,9 +53,11 @@ describe("db schema", () => {
       .returning();
     const [parent] = await db
       .insert(comments)
-      .values({ takeId: take!.id, authorId: user!.id, atMs: 5000, text: "hi" })
+      .values({ sessionId: session!.id, takeId: take!.id, authorId: user!.id, atMs: 5000, text: "hi" })
       .returning();
-    await db.insert(comments).values({ takeId: take!.id, authorId: user!.id, parentId: parent!.id, atMs: 5000, text: "reply" });
+    await db
+      .insert(comments)
+      .values({ sessionId: session!.id, takeId: take!.id, authorId: user!.id, parentId: parent!.id, atMs: 5000, text: "reply" });
 
     await db.delete(sessions).where(eq(sessions.id, session!.id));
     expect(await db.select().from(comments)).toHaveLength(0);

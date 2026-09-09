@@ -208,19 +208,52 @@ describe("HttpApiClient", () => {
     expect(listener).toHaveBeenCalled();
   });
 
+  it("comments.list/create는 target에 따라 takes 또는 sessions 경로를 쓴다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(200, []));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.comments.list({ takeId: "t1" });
+    expect(fetchFn).toHaveBeenLastCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "GET" }));
+    await client.comments.list({ sessionId: "s1" });
+    expect(fetchFn).toHaveBeenLastCalledWith("https://api.test/sessions/s1/comments", expect.objectContaining({ method: "GET" }));
+  });
+
   it("comments.create는 takes 경로로 POST한다", async () => {
     const tokens = memoryTokens({ accessToken: "a1" });
     const fetchFn = vi.fn(async () => json(201, { id: "c1" }));
     const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
-    await client.comments.create("t1", { atSec: 3, text: "x" });
+    await client.comments.create({ takeId: "t1" }, { atSec: 3, text: "x" });
     expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ atSec: 3, text: "x" }) }));
   });
 
-  it("답글은 parentId만 싣고 atSec 없이 POST한다", async () => {
+  it("원본 녹음 코멘트는 sessions 경로로 POST하고, 답글은 parentId만 싣는다", async () => {
     const tokens = memoryTokens({ accessToken: "a1" });
     const fetchFn = vi.fn(async () => json(201, { id: "c2" }));
     const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
-    await client.comments.create("t1", { parentId: "c1", text: "y" });
-    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ parentId: "c1", text: "y" }) }));
+    await client.comments.create({ sessionId: "s1" }, { parentId: "c1", text: "y" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/sessions/s1/comments", expect.objectContaining({ method: "POST", body: JSON.stringify({ parentId: "c1", text: "y" }) }));
+  });
+
+  it("comments.update는 PATCH /comments/:id 후 구독자에게 알린다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(200, { id: "c1", text: "fixed" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    const res = await client.comments.update("c1", { text: "fixed" });
+    expect(res).toMatchObject({ text: "fixed" });
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/comments/c1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ text: "fixed" }) }));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("comments.remove는 DELETE /comments/:id (204) 후 구독자에게 알린다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    await expect(client.comments.remove("c1")).resolves.toBeUndefined();
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/comments/c1", expect.objectContaining({ method: "DELETE" }));
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });

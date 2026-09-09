@@ -5,6 +5,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -14,6 +15,7 @@ import type {
   Session,
   Take,
   TakeComment,
+  UpdateCommentInput,
   UploadPartUrl,
   UploadStatus,
   UploadedPart,
@@ -29,6 +31,11 @@ import { uploadRecording } from "../upload";
 import { ApiError } from "../errors";
 
 export { ApiError };
+
+/** take 코멘트와 원본 녹음(세션) 코멘트는 경로만 다르다 (2026-09-09 스펙 결정 8) */
+function commentsPath(target: CommentTarget): string {
+  return "takeId" in target ? `/takes/${target.takeId}/comments` : `/sessions/${target.sessionId}/comments`;
+}
 
 export interface HttpApiClientOptions {
   baseUrl: string;
@@ -270,11 +277,20 @@ export class HttpApiClient implements RehearsalApiClient {
   };
 
   comments = {
-    list: (takeId: string): Promise<TakeComment[]> => this.request<TakeComment[]>("GET", `/takes/${takeId}/comments`),
-    create: async (takeId: string, input: CreateCommentInput): Promise<TakeComment> => {
-      const comment = await this.request<TakeComment>("POST", `/takes/${takeId}/comments`, input);
+    list: (target: CommentTarget): Promise<TakeComment[]> => this.request<TakeComment[]>("GET", commentsPath(target)),
+    create: async (target: CommentTarget, input: CreateCommentInput): Promise<TakeComment> => {
+      const comment = await this.request<TakeComment>("POST", commentsPath(target), input);
       this.emit();
       return comment;
+    },
+    update: async (id: string, input: UpdateCommentInput): Promise<TakeComment> => {
+      const comment = await this.request<TakeComment>("PATCH", `/comments/${id}`, input);
+      this.emit();
+      return comment;
+    },
+    remove: async (id: string): Promise<void> => {
+      await this.request<void>("DELETE", `/comments/${id}`);
+      this.emit();
     },
   };
 }

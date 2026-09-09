@@ -5,6 +5,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -14,13 +15,14 @@ import type {
   Session,
   Take,
   TakeComment,
+  UpdateCommentInput,
   UploadPartUrl,
   UploadStatus,
   UploadedPart,
   User,
 } from "@bandapp/types";
 
-export type { CreateCommentInput, CreateSessionInput } from "@bandapp/types";
+export type { CommentTarget, CreateCommentInput, CreateSessionInput, UpdateCommentInput } from "@bandapp/types";
 
 /**
  * PUT body로 그대로 넘길 수 있는 파트 한 조각. 웹은 Blob(게으른 slice), RN은 Uint8Array를
@@ -100,8 +102,13 @@ export interface RehearsalApiClient {
     audioUrl(takeId: string): Promise<AudioUrl>;
   };
   comments: {
-    list(takeId: string): Promise<TakeComment[]>;
-    create(takeId: string, input: CreateCommentInput): Promise<TakeComment>;
+    /** target이 { takeId }면 take 코멘트, { sessionId }면 원본 녹음 코멘트 */
+    list(target: CommentTarget): Promise<TakeComment[]>;
+    create(target: CommentTarget, input: CreateCommentInput): Promise<TakeComment>;
+    /** 작성자만. 본문만 바꾸고 updatedAt이 채워진다 */
+    update(id: string, input: UpdateCommentInput): Promise<TakeComment>;
+    /** 작성자만. 최상위 코멘트를 지우면 답글도 함께 사라진다 */
+    remove(id: string): Promise<void>;
   };
   /** 데이터 변경 통지. 반환값은 구독 해제 함수. */
   subscribe(listener: () => void): () => void;

@@ -19,6 +19,7 @@
 - **실제 파형.** 워커가 take별 피크 배열을 만들어 저장하고 앱이 그린다. 지금은 시드 기반 가짜 파형.
 - **코멘트 owner 중재.** 지금은 작성자만 수정·삭제한다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 결정 1). 밴드 owner가 남의 코멘트를 지울 수 있게 하려면 서비스의 작성자 검사에 role 분기를 더한다.
 - **코멘트 시점 수정.** 본문만 고칠 수 있다. 시점을 바꾸려면 답글의 `at_ms`도 같이 옮겨야 한다.
+- **삭제된 코멘트 흔적(tombstone).** 지금은 행이 사라진다. 답글이 달린 코멘트를 지웠을 때 "삭제된 코멘트"로 남기려면 soft delete가 필요하다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 범위 제외).
 
 ## 팀·설정
 - **삭제된 밴드 영구 삭제 배치.** `bands.deleted_at`이 채워진 밴드의 행과 R2 객체(원본·take)를 N일 뒤 지운다 ([2026-09-08 스펙](superpowers/specs/2026-09-08-team-management-screen-design.md) 결정 3). 세션 삭제 정리 배치와 같이 진행.

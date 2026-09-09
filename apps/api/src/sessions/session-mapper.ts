@@ -39,7 +39,7 @@ export function toSession(row: SessionRow): Session {
   return session;
 }
 
-/** 세션 목록·단건 조회가 공유하는 select 컬럼. commentCount는 takes를 거쳐 집계한다. */
+/** 세션 목록·단건 조회가 공유하는 select 컬럼. commentCount는 session_id로 직접 집계한다 (take 코멘트·원본 녹음 코멘트 모두 포함). */
 export const SESSION_WITH_COUNTS = {
   id: sessions.id,
   bandId: sessions.bandId,
@@ -51,8 +51,7 @@ export const SESSION_WITH_COUNTS = {
   takeCount: sessions.takeCount,
   // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
   updatedAt: sessions.updatedAt,
-  // ${sessions.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
-  // takes.id/comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
+  // 상관 서브쿼리이므로 "sessions"."id"를 테이블명까지 명시해 comments.id와의 모호성을 없앤다.
   // 답글은 세지 않는다 (스레드 스펙 결정 5). 원본 녹음 코멘트도 session_id로 함께 센다 (2026-09-09 스펙 결정 6).
   commentCount: sql<number>`(select count(*)::int from comments c where c.session_id = "sessions"."id" and c.parent_id is null)`,
 };

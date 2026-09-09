@@ -223,6 +223,8 @@ describe("comments API", () => {
       await request(app.getHttpServer()).delete(`/comments/${c.body.id}`).set(auth(owner.accessToken)).expect(204);
       const orig = await request(app.getHttpServer()).get(`/sessions/${sessionId}/comments`).set(auth(owner.accessToken)).expect(200);
       expect(orig.body).toEqual([]);
+      const session = await request(app.getHttpServer()).get(`/sessions/${sessionId}`).set(auth(owner.accessToken)).expect(200);
+      expect(session.body.commentCount).toBe(0);
     });
   });
 });

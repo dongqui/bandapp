@@ -168,6 +168,13 @@ describe("MockApiClient", () => {
     await expect(api.comments.update("nope", { text: "x" })).rejects.toThrow();
   });
 
+  it("comments.update rejects whitespace-only text, comments.create rejects an unknown session", async () => {
+    const api = new MockApiClient();
+    const mine = await api.comments.create({ takeId: "s1-t2" }, { atSec: 42, text: "typo" });
+    await expect(api.comments.update(mine.id, { text: "   " })).rejects.toThrow();
+    await expect(api.comments.create({ sessionId: "no-such-session" }, { atSec: 1, text: "x" })).rejects.toThrow();
+  });
+
   it("comments.remove deletes the comment and its replies and decrements counts", async () => {
     const api = new MockApiClient();
     const parent = await api.comments.create({ takeId: "s1-t2" }, { atSec: 10, text: "p" });

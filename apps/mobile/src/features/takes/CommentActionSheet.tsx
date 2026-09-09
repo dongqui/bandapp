@@ -19,7 +19,7 @@ export function CommentActionSheet({
   onDelete: (comment: TakeComment) => void;
 }) {
   const { colors } = useTheme();
-  const isReply = comment?.parentId !== null;
+  const isReply = comment !== null && comment.parentId !== null;
   const kind = isReply ? "reply" : "comment";
   return (
     <BottomSheet visible={comment !== null} onClose={onClose}>

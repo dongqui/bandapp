@@ -33,7 +33,8 @@ export function CommentInput({
   const { colors } = useTheme();
   const inputRef = useRef<TextInput>(null);
   // 같은 사람에게 다시 답글을 시작해도 포커스가 가도록 replyingTo 객체 자체를 의존성으로 둔다 —
-  // 호출자가 답글 시작마다 새 객체를 만든다.
+  // 호출자가 답글 시작마다 새 객체를 만든다. editing은 편집 대상(editTarget)에 대해 메모이즈되어
+  // 편집을 시작할 때 한 번만 새 객체가 되므로, 재생 중 재렌더로 effect가 반복 실행되지 않는다.
   useEffect(() => {
     if (replyingTo || editing) inputRef.current?.focus();
   }, [replyingTo, editing]);

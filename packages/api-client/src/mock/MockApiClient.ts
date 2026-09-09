@@ -27,6 +27,15 @@ import { commentKey, createSeedState, generateTakes, type MockState } from "./se
 const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
 const week = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
+/** 서버의 text 길이 검증(1~500자)과 짝을 맞춘다 — Mock에서만 통과해서는 안 된다. */
+function normalizeText(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length < 1 || trimmed.length > 500) {
+    throw new ApiError(400, "text must be 1-500 characters");
+  }
+  return trimmed;
+}
+
 export class MockApiClient implements RehearsalApiClient {
   private state: MockState = createSeedState();
   private listeners = new Set<() => void>();
@@ -293,7 +302,11 @@ export class MockApiClient implements RehearsalApiClient {
       const takeId = "takeId" in target ? target.takeId : null;
       const take = takeId ? this.findTake(takeId) : undefined;
       if (takeId && !take) throw new ApiError(404, "Take를 찾을 수 없어요.");
-      const sessionId = take ? take.sessionId : (target as { sessionId: string }).sessionId;
+      if (!("takeId" in target) && !this.state.sessions.some((s) => s.id === target.sessionId)) {
+        throw new ApiError(404, "세션을 찾을 수 없어요.");
+      }
+      const sessionId = "takeId" in target ? take!.sessionId : target.sessionId;
+      const text = normalizeText(input.text);
       let atSec: number;
       if (input.parentId) {
         // 스레드는 1단계 — 부모는 같은 대상의 최상위 코멘트여야 한다
@@ -312,7 +325,7 @@ export class MockApiClient implements RehearsalApiClient {
         authorName: "You",
         parentId: input.parentId ?? null,
         atSec,
-        text: input.text,
+        text,
         createdAt: new Date().toISOString(),
         updatedAt: null,
       };
@@ -324,7 +337,7 @@ export class MockApiClient implements RehearsalApiClient {
     },
     update: async (id: string, input: UpdateCommentInput): Promise<TakeComment> => {
       const { comment } = this.findOwnComment(id);
-      comment.text = input.text;
+      comment.text = normalizeText(input.text);
       comment.updatedAt = new Date().toISOString();
       this.emit();
       return { ...comment };

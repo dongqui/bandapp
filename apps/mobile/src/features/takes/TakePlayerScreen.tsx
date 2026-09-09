@@ -1,6 +1,6 @@
 import type { CommentTarget, TakeComment } from "@bandapp/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useApi } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
@@ -73,10 +73,10 @@ export function TakePlayerScreen() {
   const [confirmDelete, setConfirmDelete] = useState<TakeComment | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     setEditTarget(null);
     setInput("");
-  };
+  }, []);
   // 편집을 시작하면 답글 모드는 끊는다 (디자인 caEdit)
   const startEdit = (c: TakeComment) => {
     setActionTarget(null);
@@ -98,15 +98,25 @@ export function TakePlayerScreen() {
         toast.show(c.parentId ? "Reply deleted" : "Comment deleted");
         // 부모를 지우면 답글도 cascade로 사라진다 — 편집 중이던 답글도 정리
         if (editTarget?.id === c.id || editTarget?.parentId === c.id) cancelEdit();
+        // 답글 대상이 지워진 부모였다면 답글 모드도 끊는다
+        if (replyTo?.parentId === c.id) cancelReply();
         reload();
       })
-      .catch(() => toast.show("Something went wrong"))
+      .catch(() => {
+        toast.show("Something went wrong");
+        reload();
+      })
       .finally(() => {
         setDeleting(false);
         setConfirmDelete(null);
       });
   };
-  const editing: EditTarget | null = editTarget ? { isReply: editTarget.parentId !== null, onCancel: cancelEdit } : null;
+  // 재생 중에는 200ms마다 재렌더되므로, 매번 새 객체를 만들면 입력창 포커스 effect가 계속 다시 돈다 —
+  // editTarget이 실제로 바뀔 때만 새 객체를 만든다.
+  const editing = useMemo<EditTarget | null>(
+    () => (editTarget ? { isReply: editTarget.parentId !== null, onCancel: cancelEdit } : null),
+    [editTarget, cancelEdit],
+  );
 
   const cancelReply = () => {
     setReplyTo(null);
@@ -146,7 +156,10 @@ export function TakePlayerScreen() {
       void api.comments
         .update(id, { text })
         .then(() => reload())
-        .catch(() => toast.show("Something went wrong"));
+        .catch(() => {
+          toast.show("Something went wrong");
+          reload();
+        });
       return;
     }
     const parentId = replyTo?.parentId;
@@ -294,15 +307,17 @@ export function TakePlayerScreen() {
         />
       </KeyboardAvoidingView>
       <CommentActionSheet comment={actionTarget} onClose={() => setActionTarget(null)} onEdit={startEdit} onDelete={askDelete} />
-      <ConfirmDialog
-        visible={confirmDelete !== null}
-        title={confirmDelete?.parentId ? "Delete reply?" : "Delete comment?"}
-        body={`“${quote(confirmDelete?.text ?? "")}” will be removed for everyone in the band.`}
-        primary={{ label: confirmDelete?.parentId ? "Delete reply" : "Delete comment", danger: true, onPress: doDelete }}
-        cancelLabel="Cancel"
-        onCancel={() => (deleting ? undefined : setConfirmDelete(null))}
-        busy={deleting}
-      />
+      {confirmDelete ? (
+        <ConfirmDialog
+          visible
+          title={confirmDelete.parentId ? "Delete reply?" : "Delete comment?"}
+          body={`“${quote(confirmDelete.text)}” will be removed for everyone in the band.`}
+          primary={{ label: confirmDelete.parentId ? "Delete reply" : "Delete comment", danger: true, onPress: doDelete }}
+          cancelLabel="Cancel"
+          onCancel={() => (deleting ? undefined : setConfirmDelete(null))}
+          busy={deleting}
+        />
+      ) : null}
     </Screen>
   );
 }

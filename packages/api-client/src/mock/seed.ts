@@ -1,4 +1,4 @@
-import type { Band, BandMember, Session, Take, TakeComment } from "@bandapp/types";
+import type { Band, BandMember, CommentTarget, Session, Take, TakeComment } from "@bandapp/types";
 import { seedOf, seededUnit } from "./rand";
 
 export interface MockState {
@@ -6,7 +6,17 @@ export interface MockState {
   members: Record<string, BandMember[]>;
   sessions: Session[];
   takes: Record<string, Take[]>; // sessionId -> takes
-  comments: Record<string, TakeComment[]>; // takeId -> comments
+  comments: Record<string, TakeComment[]>; // commentKey(target) -> comments
+}
+
+/** state.comments의 키 — take 코멘트와 원본 녹음 코멘트를 한 맵에 둔다 */
+export function commentKey(target: CommentTarget): string {
+  return "takeId" in target ? `take:${target.takeId}` : `session:${target.sessionId}`;
+}
+
+/** 시드 take id는 `${sessionId}-t${index}` — 세션 id를 되돌린다 */
+function sessionOfTake(takeId: string): string {
+  return takeId.slice(0, takeId.lastIndexOf("-t"));
 }
 
 export function generateTakes(sessionId: string, count: number): Take[] {
@@ -54,13 +64,15 @@ interface SeedComment {
   t: number;
   text: string;
   replies?: SeedReply[];
+  /** 본문을 고친 적 있는 것으로 시드 — "edited" 표기를 웹 프리뷰에서 본다 */
+  edited?: boolean;
 }
 
 /** 시드 작성자 이름 → 멤버 id. 없는 이름은 m2. */
 const AUTHOR_IDS: Record<string, string> = { Dongjin: "u-mock", Minsu: "m2", Jihoon: "m3", Suhyun: "m4" };
 
 const SEED_COMMENTS: Record<string, SeedComment[]> = {
-  "s1-t0": [
+  "take:s1-t0": [
     { who: "Suhyun", t: 28, text: "Drums a bit loud in the intro?" },
     {
       who: "Minsu",
@@ -74,23 +86,28 @@ const SEED_COMMENTS: Record<string, SeedComment[]> = {
         { who: "Suhyun", text: "Can we run just the transition a few times?" },
       ],
     },
-    { who: "Dongjin", t: 158, text: "Second chorus vocals sitting better here" },
+    { who: "Dongjin", t: 158, text: "Second chorus vocals sitting better here", edited: true },
     { who: "Jihoon", t: 182, text: "Guitar tone is great here" },
     { who: "Suhyun", t: 210, text: "Outro cymbal swell too early", replies: [{ who: "Suhyun", text: "Never mind, it was the room" }] },
   ],
-  "s1-t1": [{ who: "Jihoon", t: 95, text: "This one felt tight — keep this arrangement" }],
-  "s1-t3": [
+  "take:s1-t1": [{ who: "Jihoon", t: 95, text: "This one felt tight — keep this arrangement" }],
+  "take:s1-t3": [
     { who: "Minsu", t: 62, text: "Bass and kick drifting apart here" },
     { who: "Suhyun", t: 201, text: "Nice ending" },
   ],
-  "s1-t5": [{ who: "Dongjin", t: 148, text: "Best run of the night" }],
-  "s2-t1": [
+  "take:s1-t5": [{ who: "Dongjin", t: 148, text: "Best run of the night" }],
+  "take:s2-t1": [
     { who: "Minsu", t: 88, text: "Second verse harmony works" },
     { who: "Jihoon", t: 190, text: "Bridge still shaky — slow it down next time" },
   ],
-  "s2-t4": [
+  "take:s2-t4": [
     { who: "Dongjin", t: 15, text: "Count-in was off" },
     { who: "Suhyun", t: 120, text: "Check tuning before this one" },
+  ],
+  // 원본 녹음 코멘트 — take 밖 구간에 남긴다 (2026-09-09 스펙)
+  "session:s1": [
+    { who: "Dongjin", t: 412, text: "Soundcheck ends here — takes start after this" },
+    { who: "Suhyun", t: 3125, text: "Break chatter, skip this bit" },
   ],
 };
 
@@ -118,12 +135,16 @@ export function createSeedState(): MockState {
   let cid = 0;
   // 답글은 부모 뒤에 1분 간격으로 쓴 것으로 둔다 — createdAt 순 정렬이 시드 순서를 유지하게
   const base = new Date("2026-08-27T19:03:00").getTime();
-  for (const [takeId, rows] of Object.entries(SEED_COMMENTS)) {
+  for (const [key, rows] of Object.entries(SEED_COMMENTS)) {
+    const [kind, id] = key.split(":") as ["take" | "session", string];
+    const takeId = kind === "take" ? id : null;
+    const sessionId = kind === "take" ? sessionOfTake(id) : id;
     const list: TakeComment[] = [];
     for (const r of rows) {
       const parentId = `c${cid++}`;
       list.push({
         id: parentId,
+        sessionId,
         takeId,
         authorId: AUTHOR_IDS[r.who] ?? "m2",
         authorName: r.who,
@@ -131,10 +152,12 @@ export function createSeedState(): MockState {
         atSec: r.t,
         text: r.text,
         createdAt: new Date(base).toISOString(),
+        updatedAt: r.edited ? new Date(base + 5 * 60_000).toISOString() : null,
       });
       (r.replies ?? []).forEach((rep, i) => {
         list.push({
           id: `c${cid++}`,
+          sessionId,
           takeId,
           authorId: AUTHOR_IDS[rep.who] ?? "m2",
           authorName: rep.who,
@@ -142,17 +165,19 @@ export function createSeedState(): MockState {
           atSec: r.t,
           text: rep.text,
           createdAt: new Date(base + (i + 1) * 60_000).toISOString(),
+          updatedAt: null,
         });
       });
     }
-    comments[takeId] = list;
+    comments[key] = list;
   }
-  // commentCount 반영 — 답글은 세지 않는다
+  // commentCount 반영 — 답글은 세지 않는다. 세션은 take 코멘트 + 원본 코멘트 (2026-09-09 스펙 결정 6)
+  const topLevel = (key: string) => (comments[key] ?? []).filter((c) => c.parentId === null).length;
   for (const list of Object.values(takes)) {
-    for (const t of list) t.commentCount = (comments[t.id] ?? []).filter((c) => c.parentId === null).length;
+    for (const t of list) t.commentCount = topLevel(commentKey({ takeId: t.id }));
   }
   for (const s of sessions) {
-    s.commentCount = (takes[s.id] ?? []).reduce((a, t) => a + t.commentCount, 0);
+    s.commentCount = (takes[s.id] ?? []).reduce((a, t) => a + t.commentCount, 0) + topLevel(commentKey({ sessionId: s.id }));
   }
 
   return {

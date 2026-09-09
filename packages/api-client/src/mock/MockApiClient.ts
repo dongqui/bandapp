@@ -4,6 +4,7 @@ import type {
   Band,
   BandInvite,
   BandMember,
+  CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
   CreateSessionResult,
@@ -13,6 +14,7 @@ import type {
   Session,
   Take,
   TakeComment,
+  UpdateCommentInput,
   UploadPartUrl,
   UploadStatus,
   User,
@@ -20,7 +22,7 @@ import type {
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { seededUnit } from "./rand";
-import { createSeedState, generateTakes, type MockState } from "./seed";
+import { commentKey, createSeedState, generateTakes, type MockState } from "./seed";
 
 const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
 const week = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -283,21 +285,28 @@ export class MockApiClient implements RehearsalApiClient {
   };
 
   comments = {
-    list: async (takeId: string): Promise<TakeComment[]> => (this.state.comments[takeId] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
-    create: async (takeId: string, input: CreateCommentInput): Promise<TakeComment> => {
-      const list = (this.state.comments[takeId] ??= []);
+    list: async (target: CommentTarget): Promise<TakeComment[]> =>
+      (this.state.comments[commentKey(target)] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
+    create: async (target: CommentTarget, input: CreateCommentInput): Promise<TakeComment> => {
+      const key = commentKey(target);
+      const list = (this.state.comments[key] ??= []);
+      const takeId = "takeId" in target ? target.takeId : null;
+      const take = takeId ? this.findTake(takeId) : undefined;
+      if (takeId && !take) throw new ApiError(404, "Take를 찾을 수 없어요.");
+      const sessionId = take ? take.sessionId : (target as { sessionId: string }).sessionId;
       let atSec: number;
       if (input.parentId) {
-        // 스레드는 1단계 — 부모는 이 take의 최상위 코멘트여야 한다
+        // 스레드는 1단계 — 부모는 같은 대상의 최상위 코멘트여야 한다
         const parent = list.find((c) => c.id === input.parentId);
-        if (!parent || parent.parentId !== null) throw new Error("parentId must be a top-level comment on this take");
+        if (!parent || parent.parentId !== null) throw new ApiError(400, "parentId must be a top-level comment on this target");
         atSec = parent.atSec;
       } else {
-        if (input.atSec === undefined) throw new Error("atSec is required");
+        if (input.atSec === undefined) throw new ApiError(400, "atSec is required");
         atSec = Math.floor(input.atSec);
       }
       const c: TakeComment = {
         id: `u${this.nextId++}`,
+        sessionId,
         takeId,
         authorId: MOCK_USER.id,
         authorName: "You",
@@ -305,21 +314,54 @@ export class MockApiClient implements RehearsalApiClient {
         atSec,
         text: input.text,
         createdAt: new Date().toISOString(),
+        updatedAt: null,
       };
       list.push(c);
       // 답글은 commentCount에 세지 않는다
-      if (!input.parentId) {
-        for (const takes of Object.values(this.state.takes)) {
-          const take = takes.find((t) => t.id === takeId);
-          if (take) {
-            take.commentCount += 1;
-            const s = this.state.sessions.find((x) => x.id === take.sessionId);
-            if (s) s.commentCount += 1;
-          }
-        }
-      }
+      if (!input.parentId) this.bumpCounts(take, sessionId, +1);
       this.emit();
       return { ...c };
     },
+    update: async (id: string, input: UpdateCommentInput): Promise<TakeComment> => {
+      const { comment } = this.findOwnComment(id);
+      comment.text = input.text;
+      comment.updatedAt = new Date().toISOString();
+      this.emit();
+      return { ...comment };
+    },
+    remove: async (id: string): Promise<void> => {
+      const { key, comment } = this.findOwnComment(id);
+      const list = this.state.comments[key] ?? [];
+      // 최상위를 지우면 답글도 함께 (서버의 ON DELETE CASCADE와 같게)
+      this.state.comments[key] = list.filter((c) => c.id !== id && c.parentId !== id);
+      if (comment.parentId === null) this.bumpCounts(comment.takeId ? this.findTake(comment.takeId) : undefined, comment.sessionId, -1);
+      this.emit();
+    },
   };
+
+  private findTake(takeId: string): Take | undefined {
+    for (const takes of Object.values(this.state.takes)) {
+      const take = takes.find((t) => t.id === takeId);
+      if (take) return take;
+    }
+    return undefined;
+  }
+
+  /** 없으면 404, 내 것이 아니면 403 — 서버와 같은 순서 */
+  private findOwnComment(id: string): { key: string; comment: TakeComment } {
+    for (const [key, list] of Object.entries(this.state.comments)) {
+      const comment = list.find((c) => c.id === id);
+      if (comment) {
+        if (comment.authorId !== MOCK_USER.id) throw new ApiError(403, "내 코멘트만 고치거나 지울 수 있어요.");
+        return { key, comment };
+      }
+    }
+    throw new ApiError(404, "코멘트를 찾을 수 없어요.");
+  }
+
+  private bumpCounts(take: Take | undefined, sessionId: string, delta: number): void {
+    if (take) take.commentCount += delta;
+    const s = this.state.sessions.find((x) => x.id === sessionId);
+    if (s) s.commentCount += delta;
+  }
 }

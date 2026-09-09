@@ -4,6 +4,7 @@ import { groupThreads } from "./threads";
 
 const c = (id: string, atSec: number, createdAt: string, parentId: string | null = null): TakeComment => ({
   id,
+  sessionId: "s1",
   takeId: "t1",
   authorId: "u1",
   authorName: "A",
@@ -11,6 +12,7 @@ const c = (id: string, atSec: number, createdAt: string, parentId: string | null
   atSec,
   text: id,
   createdAt,
+  updatedAt: null,
 });
 
 describe("groupThreads", () => {

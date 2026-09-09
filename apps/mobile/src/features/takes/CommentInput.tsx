@@ -8,12 +8,18 @@ export interface ReplyTarget {
   onCancel: () => void;
 }
 
+export interface EditTarget {
+  isReply: boolean;
+  onCancel: () => void;
+}
+
 export function CommentInput({
   value,
   onChangeText,
   placeholder,
   onSubmit,
   replyingTo,
+  editing,
 }: {
   value: string;
   onChangeText: (text: string) => void;
@@ -21,14 +27,16 @@ export function CommentInput({
   onSubmit: () => void;
   /** 답글 모드 — 입력창 위에 "Replying to 이름" 배너가 뜨고 입력창에 포커스가 간다 */
   replyingTo?: ReplyTarget | null;
+  /** 편집 모드 — "Editing comment/reply" 배너. 답글 모드와 동시에 켜지지 않는다 */
+  editing?: EditTarget | null;
 }) {
   const { colors } = useTheme();
   const inputRef = useRef<TextInput>(null);
   // 같은 사람에게 다시 답글을 시작해도 포커스가 가도록 replyingTo 객체 자체를 의존성으로 둔다 —
   // 호출자가 답글 시작마다 새 객체를 만든다.
   useEffect(() => {
-    if (replyingTo) inputRef.current?.focus();
-  }, [replyingTo]);
+    if (replyingTo || editing) inputRef.current?.focus();
+  }, [replyingTo, editing]);
 
   return (
     <View style={{ borderTopWidth: 1, borderTopColor: colors.surfaceRaised, backgroundColor: colors.bg }}>
@@ -50,6 +58,27 @@ export function CommentInput({
             </AppText>
           </AppText>
           <PressableOpacity onPress={replyingTo.onCancel} hitSlop={8} style={{ paddingVertical: 2, paddingHorizontal: 6 }}>
+            <AppText variant="small" color={colors.textFaint}>
+              ✕
+            </AppText>
+          </PressableOpacity>
+        </View>
+      ) : null}
+      {editing ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingVertical: 9,
+            paddingHorizontal: 20,
+            backgroundColor: colors.surfaceSunken,
+          }}
+        >
+          <AppText variant="small" color={colors.textMuted}>
+            {editing.isReply ? "Editing reply" : "Editing comment"}
+          </AppText>
+          <PressableOpacity onPress={editing.onCancel} hitSlop={8} style={{ paddingVertical: 2, paddingHorizontal: 6 }}>
             <AppText variant="small" color={colors.textFaint}>
               ✕
             </AppText>

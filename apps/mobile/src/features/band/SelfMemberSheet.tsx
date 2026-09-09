@@ -1,10 +1,9 @@
 import type { BandMember } from "@bandapp/types";
 import { useTranslation } from "react-i18next";
-import { AppText } from "@/ui";
+import { AppText, SheetRow } from "@/ui";
 import { useTheme } from "@/theme";
 import { MemberHeader } from "./MemberHeader";
 import { partLabel } from "./partValue";
-import { SheetRow } from "./SheetRow";
 
 /** 본인 행을 눌렀을 때. 파트 변경, owner면 소유권 이전. BandScreen의 공용 BottomSheet 안에서만 렌더된다. */
 export function SelfMemberSheet({

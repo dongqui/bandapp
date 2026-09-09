@@ -10,6 +10,7 @@ export * from "./ProgressBar";
 export * from "./BottomSheet";
 export * from "./ConfirmDialog";
 export * from "./SheetActionRow";
+export * from "./SheetRow";
 export * from "./Toast";
 export * from "./Fab";
 export * from "./TabBar";

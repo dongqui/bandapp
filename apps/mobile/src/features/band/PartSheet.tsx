@@ -3,9 +3,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextInput, View } from "react-native";
 import { radius, useTheme } from "@/theme";
-import { AppText, PressableOpacity } from "@/ui";
+import { AppText, PressableOpacity, SheetRow } from "@/ui";
 import { normalizePartInput } from "./partValue";
-import { SheetRow } from "./SheetRow";
 
 /**
  * 프리셋 5개 + 직접 입력. onSubmit은 정규화된 값(프리셋 키 또는 trim된 자유 문자열)만 받는다.

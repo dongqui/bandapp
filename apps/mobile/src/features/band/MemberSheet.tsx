@@ -1,8 +1,8 @@
 import type { BandMember } from "@bandapp/types";
 import { useTranslation } from "react-i18next";
+import { SheetRow } from "@/ui";
 import { MemberHeader } from "./MemberHeader";
 import { partLabel } from "./partValue";
-import { SheetRow } from "./SheetRow";
 
 /**
  * owner가 다른 멤버를 눌렀을 때. member가 null이면 아무것도 렌더하지 않는다.

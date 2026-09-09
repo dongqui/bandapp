@@ -17,12 +17,12 @@
 
 ## 재생·피드백
 - **실제 파형.** 워커가 take별 피크 배열을 만들어 저장하고 앱이 그린다. 지금은 시드 기반 가짜 파형.
-- **코멘트 수정·삭제.** 스레드([2026-09-07 스펙](superpowers/specs/2026-09-07-comment-threads-design.md))는 작성만 있다. 삭제 시 답글은 DB cascade로 함께 지워진다.
-- **원본 녹음에 대한 코멘트.** `comments.take_id`를 nullable로 바꾸고 `session_id`를 더한다.
+- **코멘트 owner 중재.** 지금은 작성자만 수정·삭제한다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 결정 1). 밴드 owner가 남의 코멘트를 지울 수 있게 하려면 서비스의 작성자 검사에 role 분기를 더한다.
+- **코멘트 시점 수정.** 본문만 고칠 수 있다. 시점을 바꾸려면 답글의 `at_ms`도 같이 옮겨야 한다.
 
 ## 팀·설정
 - **삭제된 밴드 영구 삭제 배치.** `bands.deleted_at`이 채워진 밴드의 행과 R2 객체(원본·take)를 N일 뒤 지운다 ([2026-09-08 스펙](superpowers/specs/2026-09-08-team-management-screen-design.md) 결정 3). 세션 삭제 정리 배치와 같이 진행.
-- **기존 화면 문구의 i18n 이관.** 세션·녹음·설정·초대 랜딩의 하드코딩 문구를 `src/i18n` 리소스로. 설정 화면의 `Alert.alert`를 `ConfirmDialog`로.
+- **기존 화면 문구의 i18n 이관.** 세션·녹음·설정·초대 랜딩의 하드코딩 문구를 `src/i18n` 리소스로. 설정 화면의 `Alert.alert`를 `ConfirmDialog`로. 코멘트 수정·삭제 문구(`···` 시트, 편집 배너, 삭제 확인)도 영어 하드코딩이다.
 - **언어 전환 UI.** 지금은 기기 언어만 따른다.
 - **파트 해제 UI.** `setMyPart(null)`은 서버·클라이언트 모두 지원하지만 파트 시트에 "해제" 행이 없다 (2026-09-08 스펙 갭).
 - **밴드가 바뀌면 열린 시트·다이얼로그를 닫기.** BandScreen의 `sheet`/`confirm`이 `band.id` 변경에도 살아남는다. 지금은 `band_member_not_found` 토스트로 끝난다.

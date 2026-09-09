@@ -35,7 +35,7 @@ describe("takes API", () => {
 
   it("세션의 take를 index 순으로 commentCount와 함께 준다", async () => {
     const [first] = await db.select().from(takes).where(eq(takes.index, 0));
-    await db.insert(comments).values({ takeId: first!.id, authorId: owner.userId, atMs: 1000, text: "x" });
+    await db.insert(comments).values({ sessionId, takeId: first!.id, authorId: owner.userId, atMs: 1000, text: "x" });
     const res = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
     expect(res.body).toEqual([
       { id: first!.id, sessionId, index: 0, name: "Take 1", durationSec: 241, startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", commentCount: 1 },

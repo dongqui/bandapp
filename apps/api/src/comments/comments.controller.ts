@@ -11,18 +11,19 @@ export class CommentsController {
   constructor(private readonly comments: CommentsService) {}
 
   @Get(":id/comments")
-  list(@CurrentUserId() userId: string, @Param("id") id: string): Promise<TakeComment[]> {
+  async list(@CurrentUserId() userId: string, @Param("id") id: string): Promise<TakeComment[]> {
     requireUuidParam(id, "id");
-    return this.comments.list(id, userId);
+    return this.comments.list(await this.comments.scopeForTake(id, userId));
   }
 
   @Post(":id/comments")
-  create(@CurrentUserId() userId: string, @Param("id") id: string, @Body() body: unknown): Promise<TakeComment> {
+  async create(@CurrentUserId() userId: string, @Param("id") id: string, @Body() body: unknown): Promise<TakeComment> {
     requireUuidParam(id, "id");
+    const scope = await this.comments.scopeForTake(id, userId);
     const text = requireString(body, "text");
     const parentId = optionalUuid(body, "parentId");
     // 답글은 부모의 시점을 물려받으므로 atSec을 받지 않는다 (스펙 결정 2)
-    if (parentId) return this.comments.create(id, userId, { parentId, text });
-    return this.comments.create(id, userId, { atSec: requireNumber(body, "atSec", { min: 0 }), text });
+    if (parentId) return this.comments.create(scope, userId, { parentId, text });
+    return this.comments.create(scope, userId, { atSec: requireNumber(body, "atSec", { min: 0 }), text });
   }
 }

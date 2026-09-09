@@ -96,7 +96,8 @@ export function TakePlayerScreen() {
       .remove(c.id)
       .then(() => {
         toast.show(c.parentId ? "Reply deleted" : "Comment deleted");
-        if (editTarget?.id === c.id) cancelEdit();
+        // 부모를 지우면 답글도 cascade로 사라진다 — 편집 중이던 답글도 정리
+        if (editTarget?.id === c.id || editTarget?.parentId === c.id) cancelEdit();
         reload();
       })
       .catch(() => toast.show("Something went wrong"))

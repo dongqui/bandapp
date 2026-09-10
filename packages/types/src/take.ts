@@ -12,6 +12,8 @@ export interface Take {
   endMs: number;
   type: TakeCandidateType;
   commentCount: number;
+  /** 원본 타임라인의 startMs~endMs 구간 피크 (길이 PEAK_BUCKETS). 워커가 못 만들었거나 옛 데이터면 null */
+  peaks: number[] | null;
 }
 
 export interface TakeComment {

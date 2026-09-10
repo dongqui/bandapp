@@ -17,6 +17,7 @@ export const TAKE_WITH_COUNT = {
   endMs: takes.endMs,
   type: takes.type,
   objectKey: takes.objectKey,
+  peaks: takes.peaks,
   // ${takes.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
   // comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
   // 답글은 세지 않는다 — "N comments"는 스레드 수다 (스레드 스펙 결정 5).
@@ -32,6 +33,7 @@ export interface TakeRow {
   endMs: number;
   type: TakeCandidateType;
   objectKey: string;
+  peaks: number[] | null;
   commentCount: number;
 }
 
@@ -46,6 +48,7 @@ export function toTake(row: TakeRow): Take {
     endMs: row.endMs,
     type: row.type,
     commentCount: row.commentCount,
+    peaks: row.peaks ?? null,
   };
 }
 

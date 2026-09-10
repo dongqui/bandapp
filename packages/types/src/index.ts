@@ -3,6 +3,7 @@ export * from "./auth";
 export * from "./band";
 export * from "./health";
 export * from "./invite";
+export * from "./peaks";
 export * from "./session";
 export * from "./take";
 export * from "./user";

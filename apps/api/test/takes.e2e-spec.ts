@@ -6,6 +6,9 @@ import { comments, sessions, takes } from "../src/db/schema.js";
 import { FakeStorage, createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
+/** 길이 128, 0~254 — 워커가 저장한 피크가 그대로 돌아오는지 본다 */
+const SEED_PEAKS = Array.from({ length: 128 }, (_, i) => i * 2);
+
 describe("takes API", () => {
   const db = createTestDb();
   let app: INestApplication;
@@ -26,7 +29,7 @@ describe("takes API", () => {
     sessionId = s!.id;
     await db.insert(takes).values([
       { sessionId, index: 1, name: "Take 2", startMs: 300_000, endMs: 420_000, type: "PARTIAL_PRACTICE", confidence: 0.6, objectKey: `bands/${bandId}/sessions/${sessionId}/takes/t2.m4a` },
-      { sessionId, index: 0, name: "Take 1", startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", confidence: 0.9, objectKey: `bands/${bandId}/sessions/${sessionId}/takes/t1.m4a` },
+      { sessionId, index: 0, name: "Take 1", startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", confidence: 0.9, objectKey: `bands/${bandId}/sessions/${sessionId}/takes/t1.m4a`, peaks: SEED_PEAKS },
     ]);
   });
   afterEach(() => app.close());
@@ -38,8 +41,8 @@ describe("takes API", () => {
     await db.insert(comments).values({ sessionId, takeId: first!.id, authorId: owner.userId, atMs: 1000, text: "x" });
     const res = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
     expect(res.body).toEqual([
-      { id: first!.id, sessionId, index: 0, name: "Take 1", durationSec: 241, startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", commentCount: 1 },
-      expect.objectContaining({ index: 1, name: "Take 2", durationSec: 120, commentCount: 0 }),
+      { id: first!.id, sessionId, index: 0, name: "Take 1", durationSec: 241, startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", commentCount: 1, peaks: SEED_PEAKS },
+      expect.objectContaining({ index: 1, name: "Take 2", durationSec: 120, commentCount: 0, peaks: null }),
     ]);
   });
 

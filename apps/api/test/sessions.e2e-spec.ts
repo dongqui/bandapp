@@ -203,4 +203,16 @@ describe("sessions API", () => {
     await db.insert(bandMembers).values({ bandId, userId: member.userId, role: "member" });
     await request(app.getHttpServer()).get(`/sessions/${session.id}`).set(auth(member.accessToken)).expect(200);
   });
+
+  it("세션 응답은 peaks를 싣는다 — 새 세션은 null, 워커가 채운 값은 그대로", async () => {
+    const { session } = await createSession();
+    const fresh = await request(app.getHttpServer()).get(`/sessions/${session.id}`).set(auth(owner.accessToken)).expect(200);
+    expect(fresh.body.peaks).toBeNull();
+    const peaks = Array.from({ length: 128 }, (_, i) => 255 - i);
+    await db.update(sessions).set({ peaks }).where(eq(sessions.id, session.id));
+    const filled = await request(app.getHttpServer()).get(`/sessions/${session.id}`).set(auth(owner.accessToken)).expect(200);
+    expect(filled.body.peaks).toEqual(peaks);
+    const list = await request(app.getHttpServer()).get(`/bands/${bandId}/sessions`).set(auth(owner.accessToken)).expect(200);
+    expect(list.body[0].peaks).toEqual(peaks);
+  });
 });

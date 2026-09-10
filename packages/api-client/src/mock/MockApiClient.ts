@@ -245,6 +245,7 @@ export class MockApiClient implements RehearsalApiClient {
         durationSec: Math.round((input.durationMs ?? 0) / 1000),
         takeCount: 0,
         commentCount: 0,
+        peaks: null,
       };
       this.state.sessions.unshift(s);
       this.emit();

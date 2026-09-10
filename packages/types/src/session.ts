@@ -15,6 +15,8 @@ export interface Session {
   takeCount: number;
   /** 세션 내 전체 코멘트 수 (목록 meta 표시용) */
   commentCount: number;
+  /** 원본 녹음 전체 피크 (길이 PEAK_BUCKETS). ready가 아니거나 옛 데이터면 null */
+  peaks: number[] | null;
 }
 
 export type RecordingContentType = "audio/mp4" | "audio/x-m4a";

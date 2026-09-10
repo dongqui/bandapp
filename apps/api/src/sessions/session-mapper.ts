@@ -21,6 +21,7 @@ export interface SessionRow {
   durationMs: number | null;
   takeCount: number;
   commentCount: number;
+  peaks: number[] | null;
   updatedAt: Date;
 }
 
@@ -34,6 +35,7 @@ export function toSession(row: SessionRow): Session {
     durationSec: Math.round((row.durationMs ?? 0) / 1000),
     takeCount: row.takeCount,
     commentCount: row.commentCount,
+    peaks: row.peaks ?? null,
   };
   if (row.name !== null) session.name = row.name;
   return session;
@@ -49,6 +51,7 @@ export const SESSION_WITH_COUNTS = {
   startedAt: sessions.startedAt,
   durationMs: sessions.durationMs,
   takeCount: sessions.takeCount,
+  peaks: sessions.peaks,
   // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
   updatedAt: sessions.updatedAt,
   // 상관 서브쿼리이므로 "sessions"."id"를 테이블명까지 명시해 comments.id와의 모호성을 없앤다.

@@ -4,10 +4,10 @@
 
 ## 업로드·녹음
 - **가져오기 원본 업로드 + 서버 변환.** wav·영상 등 원본을 그대로 올리고 워커가 ffmpeg으로 m4a로 바꾼다. `recordings`가 세션당 원본·변환본 두 행을 갖게 된다.
-- **앱 종료 후 업로드 재개.** `{ sessionId, fileUri }`를 로컬에 남기고, 세션 목록의 `uploading` 행을 눌러 이어 올린다. 서버 `GET /sessions/:id/upload`(ListParts)는 준비돼 있다.
 - **3시간 백그라운드 녹음 안정성.** 백그라운드 오디오 모드, 중단(전화·앱 종료) 복구, 저장 공간 부족 처리.
-- **업로드 성공 후 캐시 디렉터리 정리.** 캐시 디렉터리의 녹음 m4a·가져오기 복사본을 삭제한다 (지금은 쌓인다).
 - **녹음 중 `+MARK`를 분석 힌트로.** 마크 타임스탬프를 세션에 저장하고 Gemini 프롬프트·병합에 반영.
+- **끊긴 업로드 자동 재개.** 지금은 세션 목록의 uploading 행을 눌러야 이어 올린다 ([2026-09-10 스펙](superpowers/specs/2026-09-10-upload-resume-design.md) 범위 제외). 앱 시작 시 백그라운드에서 이어 올리려면 화면 밖 진행 상태 관리가 필요하다.
+- **2026-09-10 이전에 캐시에 쌓인 녹음·가져오기 파일 청소.** 지금은 새 파일만 `uploads/`로 옮겨 관리한다. 옛 캐시 파일은 어떤 게 우리 것인지 알 수 없어 손대지 않았다.
 
 ## 분석
 - **검출기 전처리(Python 워커).** POC의 YAMNet/PANNs 등으로 음악 구간 후보를 먼저 뽑아 `planChunks()`를 "후보 구간 목록"으로 교체. Gemini 토큰과 시간을 줄인다. 모델 선정이 선행돼야 한다.
@@ -34,7 +34,7 @@
 - **밴드 soft delete 시 활성 초대 revoke.** 지금은 preview/join이 404로 막지만, 삭제를 되돌리면 옛 링크가 살아난다. `removeMember`와 같은 방식으로 `markDeleted`에서 revoke.
 - **소유권 이전 TOCTOU.** 트랜잭션 안의 FOR UPDATE 재확인이 `bands.deleted_at`은 다시 보지 않는다. 창이 극히 좁아 방치.
 - **api-client 정리.** Mock 테스트 파일이 `.test.ts`/`.spec.ts` 둘로 나뉘어 있고, `index.ts`가 `ApiError`를 `errors.ts` 대신 `HttpApiClient`를 거쳐 export한다.
-- **기기 검증(dev build) 필요.** 시트→다이얼로그 Modal 전환, 시트 안 TextInput 키보드 회피, 토스트와 Modal의 z-order, 한국어 기기의 `getLocales()[0].languageCode`가 `ko`인지.
+- **기기 검증(dev build) 필요.** 시트→다이얼로그 Modal 전환, 시트 안 TextInput 키보드 회피, 토스트와 Modal의 z-order, 한국어 기기의 `getLocales()[0].languageCode`가 `ko`인지. 녹음 파일을 uploads/로 옮긴 뒤 expo-audio가 문제없는지, 앱 강제 종료 후 목록에서 이어 올리기가 되는지.
 - **oxlint를 mobile·api-client에도.** `pnpm lint`는 `apps/api`만 돈다 — `apps/mobile`, `packages/api-client`에 lint 스크립트가 없다.
 
 ## 운영

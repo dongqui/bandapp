@@ -5,10 +5,14 @@ const rec = (sessionId: string, fileUri: string): PendingUpload => ({
   sessionId, bandId: "b1", fileUri, source: "recording", createdAt: "2026-09-10T10:00:00.000Z",
 });
 
+// TTL(7일) 판정에 실제 시계를 쓰면 createdAt이 고정된 레코드가 시간이 지날수록 만료되어 버린다.
+// TTL 자체를 검증하지 않는 테스트는 이 고정 시계를 넘겨 sweepOrphans()가 항상 신선한 레코드로 보게 한다.
+const NOW = () => Date.parse("2026-09-10T12:00:00.000Z");
+
 describe("createPendingUploads", () => {
   it("stage moves the file into uploads/ and returns the new URI", async () => {
     const fs = createMemoryFs({ "file:///cache/rec.m4a": "audio" });
-    const store = createPendingUploads(fs);
+    const store = createPendingUploads(fs, NOW);
     const staged = await store.stage("file:///cache/rec.m4a");
     expect(staged.startsWith("file:///docs/uploads/")).toBe(true);
     expect(staged.endsWith(".m4a")).toBe(true);
@@ -17,25 +21,25 @@ describe("createPendingUploads", () => {
   });
 
   it("stage throws when the source file does not exist", async () => {
-    const store = createPendingUploads(createMemoryFs());
+    const store = createPendingUploads(createMemoryFs(), NOW);
     await expect(store.stage("blob:http://localhost/abc")).rejects.toThrow();
   });
 
   it("add/get/list round-trip through pending.json", async () => {
     const fs = createMemoryFs();
-    const store = createPendingUploads(fs);
+    const store = createPendingUploads(fs, NOW);
     await store.add(rec("s1", "file:///docs/uploads/a.m4a"));
     await store.add(rec("s2", "file:///docs/uploads/b.m4a"));
     expect(await store.get("s1")).toEqual(rec("s1", "file:///docs/uploads/a.m4a"));
     expect(await store.get("zz")).toBeNull();
     expect((await store.list()).map((r) => r.sessionId).sort()).toEqual(["s1", "s2"]);
     // 새 스토어 인스턴스가 같은 fs를 읽어도 보인다 (앱 재시작 흉내)
-    expect(await createPendingUploads(fs).get("s2")).not.toBeNull();
+    expect(await createPendingUploads(fs, NOW).get("s2")).not.toBeNull();
   });
 
   it("discard removes the record and the file, and succeeds when the file is already gone", async () => {
     const fs = createMemoryFs({ "file:///docs/uploads/a.m4a": "x" });
-    const store = createPendingUploads(fs);
+    const store = createPendingUploads(fs, NOW);
     await store.add(rec("s1", "file:///docs/uploads/a.m4a"));
     await store.add(rec("s2", "file:///docs/uploads/missing.m4a"));
     await store.discard("s1");
@@ -51,7 +55,7 @@ describe("createPendingUploads", () => {
       "file:///docs/uploads/keep.m4a": "k",
       "file:///docs/uploads/orphan.m4a": "o",
     });
-    const store = createPendingUploads(fs);
+    const store = createPendingUploads(fs, NOW);
     await store.add(rec("s1", "file:///docs/uploads/keep.m4a"));
     await store.sweepOrphans();
     expect(fs.files.has("file:///docs/uploads/keep.m4a")).toBe(true);
@@ -62,7 +66,7 @@ describe("createPendingUploads", () => {
   it("treats a corrupt pending.json as empty and warns", async () => {
     const fs = createMemoryFs({ "file:///docs/uploads/pending.json": "{not json" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const store = createPendingUploads(fs);
+    const store = createPendingUploads(fs, NOW);
     expect(await store.list()).toEqual([]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -77,7 +81,7 @@ describe("createPendingUploads", () => {
     broken.readDirectoryAsync = async () => { throw new Error("EIO"); };
     broken.deleteAsync = async () => { throw new Error("EIO"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const store = createPendingUploads(broken);
+    const store = createPendingUploads(broken, NOW);
     await expect(store.add(rec("s2", "file:///docs/uploads/b.m4a"))).resolves.toBeUndefined();
     await expect(store.sweepOrphans()).resolves.toBeUndefined();
     await expect(store.dropFile("file:///docs/uploads/none.m4a")).resolves.toBeUndefined();

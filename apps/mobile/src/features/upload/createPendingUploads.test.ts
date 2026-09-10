@@ -1,0 +1,83 @@
+import { describe, expect, it, vi } from "vitest";
+import { createMemoryFs, createPendingUploads, type PendingUpload } from "./createPendingUploads";
+
+const rec = (sessionId: string, fileUri: string): PendingUpload => ({
+  sessionId, bandId: "b1", fileUri, source: "recording", createdAt: "2026-09-10T10:00:00.000Z",
+});
+
+describe("createPendingUploads", () => {
+  it("stage moves the file into uploads/ and returns the new URI", async () => {
+    const fs = createMemoryFs({ "file:///cache/rec.m4a": "audio" });
+    const store = createPendingUploads(fs);
+    const staged = await store.stage("file:///cache/rec.m4a");
+    expect(staged.startsWith("file:///docs/uploads/")).toBe(true);
+    expect(staged.endsWith(".m4a")).toBe(true);
+    expect(fs.files.has("file:///cache/rec.m4a")).toBe(false);
+    expect(fs.files.get(staged)).toBe("audio");
+  });
+
+  it("stage throws when the source file does not exist", async () => {
+    const store = createPendingUploads(createMemoryFs());
+    await expect(store.stage("blob:http://localhost/abc")).rejects.toThrow();
+  });
+
+  it("add/get/list round-trip through pending.json", async () => {
+    const fs = createMemoryFs();
+    const store = createPendingUploads(fs);
+    await store.add(rec("s1", "file:///docs/uploads/a.m4a"));
+    await store.add(rec("s2", "file:///docs/uploads/b.m4a"));
+    expect(await store.get("s1")).toEqual(rec("s1", "file:///docs/uploads/a.m4a"));
+    expect(await store.get("zz")).toBeNull();
+    expect((await store.list()).map((r) => r.sessionId).sort()).toEqual(["s1", "s2"]);
+    // 새 스토어 인스턴스가 같은 fs를 읽어도 보인다 (앱 재시작 흉내)
+    expect(await createPendingUploads(fs).get("s2")).not.toBeNull();
+  });
+
+  it("discard removes the record and the file, and succeeds when the file is already gone", async () => {
+    const fs = createMemoryFs({ "file:///docs/uploads/a.m4a": "x" });
+    const store = createPendingUploads(fs);
+    await store.add(rec("s1", "file:///docs/uploads/a.m4a"));
+    await store.add(rec("s2", "file:///docs/uploads/missing.m4a"));
+    await store.discard("s1");
+    expect(fs.files.has("file:///docs/uploads/a.m4a")).toBe(false);
+    expect(await store.get("s1")).toBeNull();
+    await expect(store.discard("s2")).resolves.toBeUndefined();
+    expect(await store.get("s2")).toBeNull();
+    await expect(store.discard("never")).resolves.toBeUndefined();
+  });
+
+  it("sweepOrphans deletes uploads/*.m4a that no record points to, keeping pending.json", async () => {
+    const fs = createMemoryFs({
+      "file:///docs/uploads/keep.m4a": "k",
+      "file:///docs/uploads/orphan.m4a": "o",
+    });
+    const store = createPendingUploads(fs);
+    await store.add(rec("s1", "file:///docs/uploads/keep.m4a"));
+    await store.sweepOrphans();
+    expect(fs.files.has("file:///docs/uploads/keep.m4a")).toBe(true);
+    expect(fs.files.has("file:///docs/uploads/orphan.m4a")).toBe(false);
+    expect(fs.files.has("file:///docs/uploads/pending.json")).toBe(true);
+  });
+
+  it("treats a corrupt pending.json as empty and warns", async () => {
+    const fs = createMemoryFs({ "file:///docs/uploads/pending.json": "{not json" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = createPendingUploads(fs);
+    expect(await store.list()).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("never throws from add/get/list/discard/sweepOrphans when the fs fails", async () => {
+    const broken = createMemoryFs();
+    broken.writeAsStringAsync = async () => { throw new Error("EIO"); };
+    broken.readDirectoryAsync = async () => { throw new Error("EIO"); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const store = createPendingUploads(broken);
+    await expect(store.add(rec("s1", "file:///docs/uploads/a.m4a"))).resolves.toBeUndefined();
+    await expect(store.sweepOrphans()).resolves.toBeUndefined();
+    await expect(store.dropFile("file:///docs/uploads/none.m4a")).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});

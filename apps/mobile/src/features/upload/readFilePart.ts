@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { EncodingType, getInfoAsync, readAsStringAsync } from "expo-file-system/legacy";
 import type { UploadSource } from "@bandapp/api-client";
+import { MissingUploadFileError } from "./uploadErrors";
 
 /**
  * RN의 Blob은 게으른 핸들이 아니다 — fetch(uri).blob()은 파일 전체를 네이티브 메모리에 올리고
@@ -22,7 +23,7 @@ export async function fileUploadSource(uri: string): Promise<UploadSource> {
   }
 
   const info = await getInfoAsync(uri);
-  if (!info.exists) throw new Error("recording file not found");
+  if (!info.exists) throw new MissingUploadFileError();
   if (typeof info.size !== "number") throw new Error("recording file size is unknown");
   return {
     sizeBytes: info.size,

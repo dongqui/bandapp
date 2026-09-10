@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useApi } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
-import { seedOf } from "@/lib/seed";
 import { fmtClock, fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, MonoLabel, PlayerWaveform, PressableOpacity, Screen, useToast } from "@/ui";
@@ -48,10 +47,10 @@ export function TakePlayerScreen() {
   const take = useMemo(() => {
     if (!session) return undefined;
     if (isOriginal) {
-      return { id: "orig", name: "Original recording", durationSec: session.durationSec };
+      return { id: "orig", name: "Original recording", durationSec: session.durationSec, peaks: session.peaks };
     }
     const t = (takes ?? []).find((x) => x.id === takeId);
-    return t ? { id: t.id, name: t.name, durationSec: t.durationSec } : undefined;
+    return t ? { id: t.id, name: t.name, durationSec: t.durationSec, peaks: t.peaks } : undefined;
   }, [session, takes, takeId, isOriginal]);
 
   // 원본 녹음도 같은 목록·입력을 쓴다 — 대상만 다르다 (2026-09-09 스펙 결정 4, 8)
@@ -200,7 +199,7 @@ export function TakePlayerScreen() {
         </View>
         <View style={{ paddingHorizontal: space.screenX, paddingTop: 18, paddingBottom: 8, alignItems: "center", gap: 16 }}>
           <PlayerWaveform
-            seed={seedOf(isOriginal ? `${session.id}-orig` : take.id)}
+            peaks={take.peaks}
             durationSec={take.durationSec}
             positionSec={playback.positionSec}
             markers={threads.map((t) => t.comment.atSec)}

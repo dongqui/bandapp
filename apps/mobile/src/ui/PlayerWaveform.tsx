@@ -1,17 +1,18 @@
 import { View, type LayoutChangeEvent, type GestureResponderEvent } from "react-native";
-import { useRef } from "react";
-import { seededUnit } from "@/lib/seed";
+import { useMemo, useRef } from "react";
+import { barHeight, resamplePeaks } from "@/lib/peaks";
 import { useTheme } from "@/theme";
 
 export function PlayerWaveform({
-  seed,
+  peaks,
   durationSec,
   positionSec,
   markers = [],
   onSeek,
   height = 88,
 }: {
-  seed: number;
+  /** null이면 평평한 플레이스홀더 */
+  peaks: number[] | null;
   durationSec: number;
   positionSec: number;
   markers?: number[];
@@ -21,6 +22,7 @@ export function PlayerWaveform({
   const { colors } = useTheme();
   const width = useRef(1);
   const bars = 64;
+  const units = useMemo(() => resamplePeaks(peaks, bars), [peaks, bars]);
   const frac = durationSec ? positionSec / durationSec : 0;
   const onLayout = (e: LayoutChangeEvent) => {
     width.current = e.nativeEvent.layout.width;
@@ -59,14 +61,14 @@ export function PlayerWaveform({
         />
       ))}
       <View pointerEvents="none" style={{ flexDirection: "row", alignItems: "center", gap: 2, height }}>
-        {Array.from({ length: bars }, (_, i) => (
+        {units.map((u, i) => (
           <View
             key={i}
             style={{
               flex: 1,
               borderRadius: 1,
               backgroundColor: i / bars <= frac ? colors.accent : colors.borderStronger,
-              height: Math.max(3, Math.round((0.12 + 0.88 * seededUnit(seed * 97 + i * 13)) * height)),
+              height: barHeight(u, height, 3),
             }}
           />
         ))}

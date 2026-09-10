@@ -1,6 +1,5 @@
 import type { Take } from "@bandapp/types";
 import { View } from "react-native";
-import { seedOf } from "@/lib/seed";
 import { fmtClock } from "@/lib/time";
 import { useTheme } from "@/theme";
 import { AppText, PressableOpacity, StaticWaveform } from "@/ui";
@@ -29,7 +28,7 @@ export function TakeRow({ take, onPress }: { take: Take; onPress: () => void }) 
           <AppText variant="monoMeta">{fmtClock(take.durationSec)}</AppText>
         </View>
         <View style={{ marginTop: 10 }}>
-          <StaticWaveform seed={seedOf(take.id)} />
+          <StaticWaveform peaks={take.peaks} />
         </View>
         {take.commentCount > 0 ? (
           <AppText variant="small" color={colors.accent} style={{ marginTop: 9 }}>

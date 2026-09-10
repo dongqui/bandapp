@@ -21,6 +21,7 @@ import type {
 } from "@bandapp/types";
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
+import { UploadRecordingError } from "../upload";
 import { seededUnit } from "./rand";
 import { commentKey, createSeedState, fakePeaks, generateTakes, type MockState } from "./seed";
 
@@ -282,8 +283,14 @@ export class MockApiClient implements RehearsalApiClient {
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
     upload: async (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void, onCreated?: (sessionId: string) => Promise<void>): Promise<Session> => {
       const { session } = await this.sessions.create(bandId, input);
-      await onCreated?.(session.id);
-      return this.sessions.resumeUpload(session.id, source, onProgress);
+      // Http의 uploadRecording과 같은 계약: onCreated(또는 그 이후 업로드)가 던지면
+      // UploadRecordingError로 감싸서 호출자가 session.id로 이어 올리기를 할 수 있게 한다.
+      try {
+        await onCreated?.(session.id);
+        return await this.sessions.resumeUpload(session.id, source, onProgress);
+      } catch (err) {
+        throw new UploadRecordingError(err instanceof Error ? err.message : String(err), session.id, err);
+      }
     },
     resumeUpload: async (id: string, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> => {
       this.mustSession(id);

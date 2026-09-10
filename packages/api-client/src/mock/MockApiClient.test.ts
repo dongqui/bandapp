@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockApiClient } from "./MockApiClient";
+import { UploadRecordingError } from "../upload";
 
 const BAND = "b1";
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -128,6 +129,27 @@ describe("MockApiClient", () => {
     );
     expect(seen).toEqual([done.id]);
     expect(done.status).toBe("analyzing");
+  });
+
+  it("upload wraps an onCreated failure in UploadRecordingError and leaves the session uploading", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    const source = { sizeBytes: 5, readPart: async () => new Uint8Array(1) };
+    let caught: unknown;
+    try {
+      await api.sessions.upload(
+        BAND,
+        { startedAt: new Date().toISOString(), durationMs: 60_000, sizeBytes: 5, contentType: "audio/mp4", source: "recording" },
+        source,
+        undefined,
+        async () => { throw new Error("onCreated boom"); },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UploadRecordingError);
+    const err = caught as InstanceType<typeof UploadRecordingError>;
+    const session = await api.sessions.get(err.sessionId);
+    expect(session.status).toBe("uploading");
   });
 
   it("resumeUpload reports progress and completes an uploading session", async () => {

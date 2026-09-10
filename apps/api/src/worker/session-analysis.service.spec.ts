@@ -80,13 +80,23 @@ function fakeStorage(orphanKeys: string[] = ["bands/b/sessions/s/takes/orphan.m4
   return { storage, calls };
 }
 
-function fakeFfmpeg(durationMs: number) {
+/**
+ * 가짜 ffmpeg. peaks는 길이에 맞는 초당 50개 램프(i % 256)를 돌려준다 — 정규화 후 128버킷이 되는지만 본다.
+ * peaksError를 주면 피크 추출만 실패한다 (컷·probe는 정상).
+ */
+function fakeFfmpeg(durationMs: number, peaksError?: Error) {
   const cuts: Array<{ startMs: number; endMs: number }> = [];
+  const peaksCalls: number[] = [];
   const ffmpeg: FfmpegRunner = {
     probeDurationMs: async () => durationMs,
     cut: async (_i, startMs, endMs) => { cuts.push({ startMs, endMs }); },
+    peaks: async (_i, peaksPerSec) => {
+      peaksCalls.push(peaksPerSec);
+      if (peaksError) throw peaksError;
+      return Uint8Array.from({ length: Math.ceil((durationMs / 1000) * peaksPerSec) }, (_, i) => i % 256);
+    },
   };
-  return { ffmpeg, cuts };
+  return { ffmpeg, cuts, peaksCalls };
 }
 
 describe("SessionAnalysisService.run", () => {
@@ -97,7 +107,7 @@ describe("SessionAnalysisService.run", () => {
   it("downloads, chunks, analyzes, merges, cuts takes, uploads them, and marks the session ready", async () => {
     const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
     const { storage, calls } = fakeStorage();
-    const { ffmpeg, cuts } = fakeFfmpeg(45 * MIN);
+    const { ffmpeg, cuts, peaksCalls } = fakeFfmpeg(45 * MIN);
     // 청크 0: 0..20:30, 청크 1: 19:30..40:30, 청크 2: 39:30..45:00
     const perChunk: TakeCandidate[][] = [
       [{ startMs: 1 * MIN, endMs: 5 * MIN, type: "PERFORMANCE", confidence: 0.9 }, { startMs: 19 * MIN, endMs: 20 * MIN + 30_000, type: "PERFORMANCE", confidence: 0.8 }],
@@ -133,6 +143,15 @@ describe("SessionAnalysisService.run", () => {
     expect(calls.puts).toHaveLength(2);
     expect(calls.puts[0]).toMatch(/^bands\/b\/sessions\/s\/takes\/.+\.m4a$/);
     expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 2, durationMs: 45 * MIN });
+    // take 행과 세션 update 모두 128버킷 피크를 싣는다 — 원본을 한 번만 디코드한다
+    expect(peaksCalls).toEqual([50]);
+    for (const t of state.insertedTakes) {
+      const peaks = t.peaks as number[];
+      expect(peaks).toHaveLength(128);
+      expect(Math.max(...peaks)).toBe(255);
+      expect(peaks.every((p) => Number.isInteger(p) && p >= 0 && p <= 255)).toBe(true);
+    }
+    expect((state.updates.at(-1)!.peaks as number[])).toHaveLength(128);
   });
 
   it("retries a chunk once and succeeds", async () => {
@@ -143,6 +162,26 @@ describe("SessionAnalysisService.run", () => {
     await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     expect(analyzeFile).toHaveBeenCalledTimes(2);
     expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 0 });
+  });
+
+  it("stores null peaks and still marks the session ready when peak extraction fails", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const { storage } = fakeStorage();
+    const { ffmpeg } = fakeFfmpeg(5 * MIN, new Error("ffmpeg peaks failed"));
+    const analyzeFile = vi.fn().mockResolvedValue([{ startMs: 0, endMs: 30_000, type: "PERFORMANCE", confidence: 0.9 }]);
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
+    expect(state.insertedTakes).toHaveLength(1);
+    expect(state.insertedTakes[0]!.peaks).toBeNull();
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 1, peaks: null });
+  });
+
+  it("does not decode peaks when Gemini fails", async () => {
+    const { db } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const { storage } = fakeStorage();
+    const { ffmpeg, peaksCalls } = fakeFfmpeg(5 * MIN);
+    const analyzeFile = vi.fn().mockRejectedValue(new Error("gemini down"));
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
+    expect(peaksCalls).toEqual([]);
   });
 
   it("marks the session failed with the error when a chunk fails twice", async () => {

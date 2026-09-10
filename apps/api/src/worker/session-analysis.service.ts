@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import type { TakeCandidate } from "@bandapp/types";
+import { PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
 import { mergeCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { DB } from "../db/db.constants.js";
@@ -14,6 +14,7 @@ import { recordings, sessions, takes } from "../db/schema.js";
 import { takeKey, takesPrefix } from "../sessions/session-mapper.js";
 import { StorageService } from "../storage/storage.service.js";
 import { ExecFfmpegRunner, type FfmpegRunner } from "./ffmpeg.js";
+import { PEAKS_PER_SEC, slicePeaks } from "./peaks.js";
 
 const CHUNK_ATTEMPTS = 2;
 const TAKE_CONTENT_TYPE = "audio/mp4";
@@ -79,6 +80,8 @@ export class SessionAnalysisService {
         candidates.push(...(await this.analyzeChunk(original, chunk, workDir)));
       }
       const merged = mergeCandidates(candidates);
+      // Gemini가 끝난 뒤에 디코드한다 — 분석이 실패하면 디코드 비용을 쓰지 않는다 (스펙 결정 7)
+      const hires = await this.extractPeaks(sessionId, original);
 
       const rows: (typeof takes.$inferInsert)[] = [];
       for (const [index, candidate] of merged.entries()) {
@@ -100,6 +103,7 @@ export class SessionAnalysisService {
           type: candidate.type,
           confidence: candidate.confidence,
           objectKey: key,
+          peaks: hires ? slicePeaks(hires, PEAKS_PER_SEC, candidate.startMs, candidate.endMs, PEAK_BUCKETS) : null,
         });
       }
 
@@ -116,6 +120,7 @@ export class SessionAnalysisService {
             durationMs,
             analysisError: null,
             analysisModel: model,
+            peaks: hires ? slicePeaks(hires, PEAKS_PER_SEC, 0, durationMs, PEAK_BUCKETS) : null,
             updatedAt: new Date(),
           })
           .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")))
@@ -170,6 +175,19 @@ export class SessionAnalysisService {
       // 청크 분석이 끝나면(성공하든 실패하든) 로컬 사본은 바로 지운다 — 임시 디스크 압박을 줄인다.
       // 스펙의 가짜 ffmpeg는 파일을 실제로 만들지 않으니 ENOENT는 무시한다.
       await unlink(path).catch(() => undefined);
+    }
+  }
+
+  /**
+   * 파형은 재생 화면의 장식이지 분석 결과가 아니다 — 피크 추출이 실패해도 세션은 ready가 되고
+   * peaks만 null로 남긴다 (스펙 결정 5). 앱은 null을 평평한 플레이스홀더로 그린다.
+   */
+  private async extractPeaks(sessionId: string, original: string): Promise<Uint8Array | null> {
+    try {
+      return await this.ffmpeg.peaks(original, PEAKS_PER_SEC);
+    } catch (err) {
+      this.logger.warn(`session ${sessionId}: peaks failed, storing null: ${String(err)}`);
+      return null;
     }
   }
 

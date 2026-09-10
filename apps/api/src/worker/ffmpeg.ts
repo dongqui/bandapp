@@ -1,16 +1,22 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { PeakAccumulator } from "./peaks.js";
 
 const execFileAsync = promisify(execFile);
 
 // 멈춰버린 ffmpeg/ffprobe 프로세스가 heartbeat만 계속 갱신하며 워커를 영원히 붙잡지 않도록 상한을 둔다.
 const FFPROBE_TIMEOUT_MS = 60_000;
 const FFMPEG_CUT_TIMEOUT_MS = 10 * 60_000;
+const FFMPEG_PEAKS_TIMEOUT_MS = 10 * 60_000;
+/** 피크용 디코드 샘플레이트 — 파형 모양만 필요하니 낮춰서 디코드 시간과 파이프 양을 줄인다 */
+const PEAKS_SAMPLE_RATE = 8000;
 
 export interface FfmpegRunner {
   probeDurationMs(input: string): Promise<number>;
   /** 재인코딩 없이(`-c copy`) 구간을 잘라낸다. AAC는 프레임이 독립적이라 ~23ms 정밀도로 충분하다. */
   cut(input: string, startMs: number, endMs: number, output: string): Promise<void>;
+  /** 전체를 모노 s16le로 디코드해 초당 peaksPerSec개의 피크(0~255)를 돌려준다 (2026-09-10 스펙 결정 3). */
+  peaks(input: string, peaksPerSec: number): Promise<Uint8Array>;
 }
 
 export class ExecFfmpegRunner implements FfmpegRunner {
@@ -48,5 +54,25 @@ export class ExecFfmpegRunner implements FfmpegRunner {
       ],
       { timeout: FFMPEG_CUT_TIMEOUT_MS },
     );
+  }
+
+  peaks(input: string, peaksPerSec: number): Promise<Uint8Array> {
+    const acc = new PeakAccumulator(Math.max(1, Math.round(PEAKS_SAMPLE_RATE / peaksPerSec)));
+    return new Promise((resolve, reject) => {
+      // stdout으로 raw PCM을 흘려 파일을 만들지 않는다 — 3시간이면 8kHz s16le로 86MB라 디스크에 두지 않는다.
+      const child = spawn(
+        this.ffmpegBin,
+        ["-v", "error", "-i", input, "-vn", "-ac", "1", "-ar", String(PEAKS_SAMPLE_RATE), "-f", "s16le", "-"],
+        { stdio: ["ignore", "pipe", "pipe"], timeout: FFMPEG_PEAKS_TIMEOUT_MS },
+      );
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => acc.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.on("error", reject);
+      child.on("close", (code, signal) => {
+        if (code === 0) resolve(acc.finish());
+        else reject(new Error(`ffmpeg peaks failed for ${input} (code ${code}, signal ${signal}): ${stderr.trim()}`));
+      });
+    });
   }
 }

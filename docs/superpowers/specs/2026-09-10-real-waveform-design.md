@@ -72,7 +72,7 @@ export interface Session {
 
 ## 워커
 
-**`FfmpegRunner.peaks(input, peaksPerSec): Promise<Uint8Array>`** — `ffmpeg -v error -i <input> -vn -ac 1 -ar 8000 -f s16le -`를 `spawn`하고 stdout을 스트리밍으로 `PeakAccumulator`에 넣는다. 타임아웃은 `cut`과 같은 10분. 종료 코드가 0이 아니거나 stderr에 오류가 있으면 reject. 8000이 `peaksPerSec`로 나누어떨어지지 않으면 창 크기는 `Math.round`.
+**`FfmpegRunner.peaks(input, peaksPerSec): Promise<Uint8Array>`** — `ffmpeg -v error -i <input> -vn -ac 1 -ar 8000 -f s16le -`를 `spawn`하고 stdout을 스트리밍으로 `PeakAccumulator`에 넣는다. 타임아웃은 `cut`과 같은 10분. 종료 코드가 0이 아니면 stderr를 담아 reject (`-v error`라 stderr에는 오류만 남는다). 8000이 `peaksPerSec`로 나누어떨어지지 않으면 창 크기는 `Math.round`.
 
 **`apps/api/src/worker/peaks.ts`** — ffmpeg 없이 테스트하는 순수 모듈:
 - `class PeakAccumulator(samplesPerPeak)` — `push(buf: Buffer)`가 s16le 샘플을 읽으며 창마다 `max|s|`를 0~255(`Math.round(max / 32767 * 255)`)로 기록한다. 청크 경계의 홀수 바이트와 창 자투리는 이월한다. `finish(): Uint8Array`는 마지막 자투리 창도 포함한다.

@@ -16,7 +16,9 @@
 - **워커 e2e(실 Postgres)로 `analyzing` 가드 두 곳을 실제로 검증.** 지금 단위 테스트의 가짜 DB는 where 조건을 보지 않는다.
 
 ## 재생·피드백
-- **실제 파형.** 워커가 take별 피크 배열을 만들어 저장하고 앱이 그린다. 지금은 시드 기반 가짜 파형.
+- **녹음 중 라이브 파형 실제 미터링.** `LiveWaveform`은 아직 시드 애니메이션이다. expo-audio metering 값으로 그리려면 기기 검증이 필요하다 ([2026-09-10 스펙](superpowers/specs/2026-09-10-real-waveform-design.md) 범위 제외).
+- **파형 표시 곡선 튜닝.** 선형 진폭을 그대로 그린다. 조용한 구간이 너무 낮아 보이면 `apps/mobile/src/lib/peaks.ts`의 `barHeight` 한 곳에서 sqrt 등으로 바꾼다.
+- **기존 세션 피크 백필.** 2026-09-10 이전에 분석된 세션은 `peaks`가 null이라 평평한 플레이스홀더로 보인다. 필요해지면 Gemini 없이 R2 원본만 내려받아 `slicePeaks`로 채우는 일회성 스크립트를 만든다. 지금은 retry로 재분석한다.
 - **코멘트 owner 중재.** 지금은 작성자만 수정·삭제한다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 결정 1). 밴드 owner가 남의 코멘트를 지울 수 있게 하려면 서비스의 작성자 검사에 role 분기를 더한다.
 - **코멘트 시점 수정.** 본문만 고칠 수 있다. 시점을 바꾸려면 답글의 `at_ms`도 같이 옮겨야 한다.
 - **삭제된 코멘트 흔적(tombstone).** 지금은 행이 사라진다. 답글이 달린 코멘트를 지웠을 때 "삭제된 코멘트"로 남기려면 soft delete가 필요하다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 범위 제외).

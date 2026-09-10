@@ -66,8 +66,13 @@ export class ExecFfmpegRunner implements FfmpegRunner {
         { stdio: ["ignore", "pipe", "pipe"], timeout: FFMPEG_PEAKS_TIMEOUT_MS },
       );
       let stderr = "";
-      child.stdout.on("data", (chunk: Buffer) => acc.push(chunk));
-      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      // data 핸들러 안에서 던지면 이벤트 이미터라 프로미스를 거부하지 못하고 uncaught exception으로
+      // 새 나가 워커 프로세스 전체가 죽는다 — 자식 프로세스를 정리하고 직접 reject해야 한다 (스펙 결정 5).
+      const fail = (err: Error) => { child.kill("SIGKILL"); reject(err); };
+      child.stdout.on("data", (chunk: Buffer) => { try { acc.push(chunk); } catch (e) { fail(e as Error); } });
+      child.stdout.on("error", fail);
+      child.stderr.on("error", fail);
+      child.stderr.on("data", (chunk: Buffer) => { if (stderr.length < 8192) stderr += chunk.toString(); });
       child.on("error", reject);
       child.on("close", (code, signal) => {
         if (code === 0) resolve(acc.finish());

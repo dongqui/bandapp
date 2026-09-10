@@ -81,7 +81,9 @@ function fakeStorage(orphanKeys: string[] = ["bands/b/sessions/s/takes/orphan.m4
 }
 
 /**
- * 가짜 ffmpeg. peaks는 길이에 맞는 초당 50개 램프(i % 256)를 돌려준다 — 정규화 후 128버킷이 되는지만 본다.
+ * 가짜 ffmpeg. peaks는 10분 지점에서 0→255로 뛰는 계단 함수를 돌려준다 — 램프(i % 256)로는 어떤
+ * 구간을 슬라이스해도 값이 나오니 per-take 슬라이싱이 실제로 startMs/endMs를 쓰는지 구분이 안 됐다.
+ * 계단이면 앞쪽 구간만 자른 take는 전부 0, 뒤쪽 구간만 자른 take는 전부 255여야 해서 증명이 된다.
  * peaksError를 주면 피크 추출만 실패한다 (컷·probe는 정상).
  */
 function fakeFfmpeg(durationMs: number, peaksError?: Error) {
@@ -93,7 +95,9 @@ function fakeFfmpeg(durationMs: number, peaksError?: Error) {
     peaks: async (_i, peaksPerSec) => {
       peaksCalls.push(peaksPerSec);
       if (peaksError) throw peaksError;
-      return Uint8Array.from({ length: Math.ceil((durationMs / 1000) * peaksPerSec) }, (_, i) => i % 256);
+      const length = Math.ceil((durationMs / 1000) * peaksPerSec);
+      const stepAt = 10 * 60 * peaksPerSec;
+      return Uint8Array.from({ length }, (_, i) => (i < stepAt ? 0 : 255));
     },
   };
   return { ffmpeg, cuts, peaksCalls };
@@ -148,10 +152,17 @@ describe("SessionAnalysisService.run", () => {
     for (const t of state.insertedTakes) {
       const peaks = t.peaks as number[];
       expect(peaks).toHaveLength(128);
-      expect(Math.max(...peaks)).toBe(255);
       expect(peaks.every((p) => Number.isInteger(p) && p >= 0 && p <= 255)).toBe(true);
     }
-    expect((state.updates.at(-1)!.peaks as number[])).toHaveLength(128);
+    // 계단(10분 지점에서 0→255)을 실제로 startMs/endMs로 슬라이스했는지 증명한다.
+    // Take 1(1:00~5:00)은 10분 이전이라 전부 무음(0)이고, Take 2(19:00~21:30)는 10분 이후라 전부 255다.
+    const [t0, t1] = state.insertedTakes as Array<{ peaks: number[] }>;
+    expect(t0!.peaks).toEqual(Array.from({ length: 128 }, () => 0));
+    expect(t1!.peaks.every((p) => p === 255)).toBe(true);
+    const sessionPeaks = state.updates.at(-1)!.peaks as number[];
+    expect(sessionPeaks).toHaveLength(128);
+    expect(sessionPeaks[0]).toBe(0);
+    expect(sessionPeaks[127]).toBe(255);
   });
 
   it("retries a chunk once and succeeds", async () => {

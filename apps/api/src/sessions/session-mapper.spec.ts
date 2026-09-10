@@ -40,7 +40,7 @@ describe("toSession", () => {
     expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, peaks: null, updatedAt: new Date() }).durationSec).toBe(0);
   });
   it("passes an existing peaks array through unchanged", () => {
-    const peaks = [0, 0.5, 1, 0.5, 0];
+    const peaks = Array.from({ length: 128 }, (_, i) => i * 2);
     const session = toSession({
       id: "s2",
       bandId: "b1",

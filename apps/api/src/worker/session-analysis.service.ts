@@ -127,7 +127,7 @@ export class SessionAnalysisService {
           .returning({ id: sessions.id });
         if (updated.length === 0) throw new StaleSessionError(sessionId);
       });
-      this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks`);
+      this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}`);
     } catch (err) {
       if (err instanceof StaleSessionError) {
         this.logger.warn(err.message);

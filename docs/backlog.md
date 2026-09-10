@@ -35,6 +35,7 @@
 - **소유권 이전 TOCTOU.** 트랜잭션 안의 FOR UPDATE 재확인이 `bands.deleted_at`은 다시 보지 않는다. 창이 극히 좁아 방치.
 - **api-client 정리.** Mock 테스트 파일이 `.test.ts`/`.spec.ts` 둘로 나뉘어 있고, `index.ts`가 `ApiError`를 `errors.ts` 대신 `HttpApiClient`를 거쳐 export한다.
 - **기기 검증(dev build) 필요.** 시트→다이얼로그 Modal 전환, 시트 안 TextInput 키보드 회피, 토스트와 Modal의 z-order, 한국어 기기의 `getLocales()[0].languageCode`가 `ko`인지.
+- **oxlint를 mobile·api-client에도.** `pnpm lint`는 `apps/api`만 돈다 — `apps/mobile`, `packages/api-client`에 lint 스크립트가 없다.
 
 ## 운영
 - **세션 삭제 API와 R2 객체 정리.** 세션을 지울 때 원본·take 객체를 함께 지운다.

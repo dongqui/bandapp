@@ -5,6 +5,7 @@ import { SectionList, View } from "react-native";
 import { useApi } from "@/api";
 import { BandSwitchSheet } from "@/features/band/BandSwitchSheet";
 import { useCurrentBand } from "@/features/band/useCurrentBand";
+import { usePendingUploadIds } from "@/features/upload/usePendingUploadIds";
 import { monthLabel } from "@/lib/time";
 import { space, useTheme } from "@/theme";
 import { AppText, Chip, MonoLabel, Screen, useToast } from "@/ui";
@@ -14,6 +15,7 @@ import { useSessions } from "./useSessions";
 export function SessionsScreen() {
   const { band } = useCurrentBand();
   const { data: sessions } = useSessions(band?.id);
+  const pendingIds = usePendingUploadIds(sessions);
   const [bandsOpen, setBandsOpen] = useState(false);
   const router = useRouter();
   const api = useApi();
@@ -35,7 +37,11 @@ export function SessionsScreen() {
     if (s.status === "ready") router.push(`/session/${s.id}`);
     else if (s.status === "failed")
       void api.sessions.retryAnalysis(s.id).catch(() => toast.show("Something went wrong"));
-    else toast.show("Still finding takes…");
+    else if (s.status === "uploading") {
+      // 로컬 레코드가 있으면 이어 올린다. 없으면 다른 기기에서 시작한 업로드라 이 기기에서는 할 수 있는 게 없다.
+      if (pendingIds.has(s.id)) router.push({ pathname: "/processing", params: { sessionId: s.id } });
+      else toast.show("This upload was started on another device");
+    } else toast.show("Still finding takes…");
   };
 
   return (
@@ -57,7 +63,9 @@ export function SessionsScreen() {
         renderSectionHeader={({ section }) => (
           <MonoLabel style={{ paddingTop: 14, paddingBottom: 4 }}>{section.title}</MonoLabel>
         )}
-        renderItem={({ item }) => <SessionRow session={item} onPress={() => onRowPress(item)} />}
+        renderItem={({ item }) => (
+          <SessionRow session={item} resumable={pendingIds.has(item.id)} onPress={() => onRowPress(item)} />
+        )}
         stickySectionHeadersEnabled={false}
       />
       <BandSwitchSheet visible={bandsOpen} onClose={() => setBandsOpen(false)} />

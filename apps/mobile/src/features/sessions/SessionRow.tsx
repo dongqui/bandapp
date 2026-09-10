@@ -4,7 +4,15 @@ import { dateLabel, fmtDuration, startLabel } from "@/lib/time";
 import { useTheme } from "@/theme";
 import { AppText, PressableOpacity, StatusDot } from "@/ui";
 
-export function SessionRow({ session, onPress }: { session: Session; onPress: () => void }) {
+export function SessionRow({
+  session,
+  onPress,
+  resumable = false,
+}: {
+  session: Session;
+  onPress: () => void;
+  resumable?: boolean;
+}) {
   const { colors } = useTheme();
   const s = session;
   const ready = s.status === "ready";
@@ -39,7 +47,7 @@ export function SessionRow({ session, onPress }: { session: Session; onPress: ()
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <StatusDot color={colors.accent} />
             <AppText variant="caption" color={colors.accent}>
-              {s.status === "uploading" ? "Uploading…" : "Finding takes…"}
+              {s.status === "uploading" ? (resumable ? "Tap to continue uploading" : "Uploading…") : "Finding takes…"}
             </AppText>
           </View>
         ) : s.status === "failed" ? (

@@ -71,7 +71,7 @@ function clamp(n: number, lo: number, hi: number): number {
  * 범위가 비거나 전부 0이면 전부 0 (스펙 결정 2).
  */
 export function slicePeaks(hires: Uint8Array, peaksPerSec: number, startMs: number, endMs: number, buckets: number): number[] {
-  const out = Array.from<number>({ length: buckets }, () => 0);
+  const out: number[] = Array.from({ length: buckets }, () => 0);
   const start = clamp(Math.floor((startMs / 1000) * peaksPerSec), 0, hires.length);
   const end = clamp(Math.ceil((endMs / 1000) * peaksPerSec), start, hires.length);
   const span = end - start;

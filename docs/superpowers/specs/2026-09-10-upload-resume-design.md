@@ -39,7 +39,7 @@
    - `ApiError` 409(이미 업로드 완료) → discard 후 `sessions.get(id)`로 현재 세션을 받아 analyzing/ready 흐름에 합류.
    - 그 외(네트워크) → 레코드 유지, "Try again"이 resume을 다시 부른다.
 
-7. **정리 시점.** complete 성공 직후 `discard(sessionId)`(파일+레코드). create 전에 실패하면 옮겨 둔 파일만 지운다. 앱 시작 시 루트 레이아웃에서 `sweepOrphans()` 한 번. 세션 목록이 로드되면 목록에 있으면서 상태가 `uploading`이 아닌 레코드를 discard한다(목록에 없는 레코드는 다른 밴드의 것일 수 있어 건드리지 않는다).
+7. **정리 시점.** complete 성공 직후 `discard(sessionId)`(파일+레코드). create 전에 실패하면 옮겨 둔 파일만 지운다. 앱 시작 시 루트 레이아웃에서 `sweepOrphans()` 한 번. 세션 목록이 로드되면 목록에 있으면서 상태가 `uploading`이 아닌 레코드를 discard한다(목록에 없는 레코드는 다른 밴드의 것일 수 있어 건드리지 않는다). `sweepOrphans()`는 그 전에 `createdAt`이 7일(R2 멀티파트 업로드 만료 규칙과 같은 값) 넘었거나 파싱할 수 없는 레코드부터 파일과 함께 discard한다 — 그 이후엔 서버에도 이어 올릴 파트가 없다.
 
 8. **스토어 실패는 업로드를 막지 않는다.** 읽기·쓰기·삭제는 모두 try/catch로 감싸 `console.warn`만 남긴다. 레코드를 못 남기면 재개가 안 될 뿐 업로드는 진행된다. 예외: `stage`(파일 이동) 실패는 원래 URI로 그대로 업로드한다 — 재개는 못 하지만 지금과 같은 동작.
 

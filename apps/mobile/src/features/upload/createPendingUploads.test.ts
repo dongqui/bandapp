@@ -69,15 +69,51 @@ describe("createPendingUploads", () => {
   });
 
   it("never throws from add/get/list/discard/sweepOrphans when the fs fails", async () => {
-    const broken = createMemoryFs();
+    const broken = createMemoryFs({
+      "file:///docs/uploads/pending.json": JSON.stringify({ s1: rec("s1", "file:///docs/uploads/a.m4a") }),
+      "file:///docs/uploads/a.m4a": "audio",
+    });
     broken.writeAsStringAsync = async () => { throw new Error("EIO"); };
     broken.readDirectoryAsync = async () => { throw new Error("EIO"); };
+    broken.deleteAsync = async () => { throw new Error("EIO"); };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const store = createPendingUploads(broken);
-    await expect(store.add(rec("s1", "file:///docs/uploads/a.m4a"))).resolves.toBeUndefined();
+    await expect(store.add(rec("s2", "file:///docs/uploads/b.m4a"))).resolves.toBeUndefined();
     await expect(store.sweepOrphans()).resolves.toBeUndefined();
     await expect(store.dropFile("file:///docs/uploads/none.m4a")).resolves.toBeUndefined();
+    await expect(store.discard("s1")).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  describe("7-day TTL (finding B)", () => {
+    const fixedNow = Date.parse("2026-09-10T00:00:00.000Z");
+
+    it("sweepOrphans discards a record (and its file) older than 7 days", async () => {
+      const fs = createMemoryFs({ "file:///docs/uploads/old.m4a": "o" });
+      const store = createPendingUploads(fs, () => fixedNow);
+      await store.add({ ...rec("old", "file:///docs/uploads/old.m4a"), createdAt: "2026-09-02T00:00:00.000Z" }); // 8일 전
+      await store.sweepOrphans();
+      expect(await store.get("old")).toBeNull();
+      expect(fs.files.has("file:///docs/uploads/old.m4a")).toBe(false);
+    });
+
+    it("sweepOrphans keeps a fresh record and its file", async () => {
+      const fs = createMemoryFs({ "file:///docs/uploads/fresh.m4a": "f" });
+      const store = createPendingUploads(fs, () => fixedNow);
+      await store.add({ ...rec("fresh", "file:///docs/uploads/fresh.m4a"), createdAt: "2026-09-09T00:00:00.000Z" }); // 1일 전
+      await store.sweepOrphans();
+      expect(await store.get("fresh")).not.toBeNull();
+      expect(fs.files.has("file:///docs/uploads/fresh.m4a")).toBe(true);
+    });
+
+    it("treats an unparseable createdAt as expired", async () => {
+      const fs = createMemoryFs({ "file:///docs/uploads/bad.m4a": "b" });
+      const store = createPendingUploads(fs, () => fixedNow);
+      await store.add({ ...rec("bad", "file:///docs/uploads/bad.m4a"), createdAt: "not-a-date" });
+      await store.sweepOrphans();
+      expect(await store.get("bad")).toBeNull();
+      expect(fs.files.has("file:///docs/uploads/bad.m4a")).toBe(false);
+    });
   });
 });

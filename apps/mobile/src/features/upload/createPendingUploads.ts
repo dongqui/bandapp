@@ -41,6 +41,13 @@ export interface PendingUploadsStore {
 
 const INDEX_NAME = "pending.json";
 
+/**
+ * R2 버킷의 멀티파트 업로드는 7일 뒤 라이프사이클 규칙으로 자동 중단된다 — 그 이후엔 서버에
+ * 이어 올릴 파트가 없으니 재개가 애초에 불가능하다. 같은 값으로 로컬 레코드·파일도 정리해서
+ * "영원히 uploading으로 남는 레코드 + ~170MB 파일"이 쌓이지 않게 한다 (finding B).
+ */
+export const PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 const warn = (what: string, err: unknown) =>
   console.warn(`[pendingUploads] ${what}: ${err instanceof Error ? err.message : String(err)}`);
 
@@ -54,7 +61,7 @@ function baseName(uri: string): string {
   return uri.slice(uri.lastIndexOf("/") + 1);
 }
 
-export function createPendingUploads(fs: UploadFs): PendingUploadsStore {
+export function createPendingUploads(fs: UploadFs, now: () => number = Date.now): PendingUploadsStore {
   // documentDirectory가 null인 환경(웹)은 메모리 fs를 물려 쓰므로 여기서는 항상 문자열이지만 방어한다
   const dir = `${fs.documentDirectory ?? "memory:///"}uploads/`;
   const indexUri = dir + INDEX_NAME;
@@ -84,61 +91,78 @@ export function createPendingUploads(fs: UploadFs): PendingUploadsStore {
 
   const list = async (): Promise<PendingUpload[]> => Object.values(await readIndex());
 
-  return {
-    async stage(uri) {
-      await ensureDir();
-      // crypto.randomUUID는 Hermes에 없다 — 충돌만 피하면 되는 이름이라 시각+난수로 충분하다
-      const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}.m4a`;
-      const to = dir + name;
-      await fs.moveAsync({ from: uri, to });
-      return to;
-    },
-    async add(rec) {
-      try {
-        const map = await readIndex();
-        map[rec.sessionId] = rec;
-        await writeIndex(map);
-      } catch (err) {
-        warn(`add ${rec.sessionId} failed`, err);
-      }
-    },
-    async get(sessionId) {
-      return (await readIndex())[sessionId] ?? null;
-    },
-    list,
-    async discard(sessionId) {
-      try {
-        const map = await readIndex();
-        const rec = map[sessionId];
-        if (rec) await fs.deleteAsync(rec.fileUri, { idempotent: true }).catch((err) => warn(`delete ${rec.fileUri} failed`, err));
-        if (sessionId in map) {
-          delete map[sessionId];
-          await writeIndex(map);
-        }
-      } catch (err) {
-        warn(`discard ${sessionId} failed`, err);
-      }
-    },
-    async dropFile(uri) {
-      try {
-        await fs.deleteAsync(uri, { idempotent: true });
-      } catch (err) {
-        warn(`drop ${uri} failed`, err);
-      }
-    },
-    async sweepOrphans() {
-      try {
-        if (!(await fs.getInfoAsync(dir)).exists) return;
-        const referenced = new Set((await list()).map((r) => baseName(r.fileUri)));
-        for (const name of await fs.readDirectoryAsync(dir)) {
-          if (name === INDEX_NAME || referenced.has(name)) continue;
-          await fs.deleteAsync(dir + name, { idempotent: true }).catch((err) => warn(`sweep ${name} failed`, err));
-        }
-      } catch (err) {
-        warn("sweep failed", err);
-      }
-    },
+  const stage: PendingUploadsStore["stage"] = async (uri) => {
+    await ensureDir();
+    // crypto.randomUUID는 Hermes에 없다 — 충돌만 피하면 되는 이름이라 시각+난수로 충분하다
+    const name = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}.m4a`;
+    const to = dir + name;
+    await fs.moveAsync({ from: uri, to });
+    return to;
   };
+
+  const add: PendingUploadsStore["add"] = async (rec) => {
+    try {
+      const map = await readIndex();
+      map[rec.sessionId] = rec;
+      await writeIndex(map);
+    } catch (err) {
+      warn(`add ${rec.sessionId} failed`, err);
+    }
+  };
+
+  const get: PendingUploadsStore["get"] = async (sessionId) => (await readIndex())[sessionId] ?? null;
+
+  const discard: PendingUploadsStore["discard"] = async (sessionId) => {
+    try {
+      const map = await readIndex();
+      const rec = map[sessionId];
+      if (rec) await fs.deleteAsync(rec.fileUri, { idempotent: true }).catch((err) => warn(`delete ${rec.fileUri} failed`, err));
+      if (sessionId in map) {
+        delete map[sessionId];
+        await writeIndex(map);
+      }
+    } catch (err) {
+      warn(`discard ${sessionId} failed`, err);
+    }
+  };
+
+  const dropFile: PendingUploadsStore["dropFile"] = async (uri) => {
+    try {
+      await fs.deleteAsync(uri, { idempotent: true });
+    } catch (err) {
+      warn(`drop ${uri} failed`, err);
+    }
+  };
+
+  /** createdAt이 없거나 파싱할 수 없으면 만료로 취급한다 — 언제 만들어졌는지 모르는 레코드를 계속 쥐고 있을 이유가 없다 */
+  const isExpired = (rec: PendingUpload, cutoff: number): boolean => {
+    const createdAt = Date.parse(rec.createdAt);
+    return Number.isNaN(createdAt) || cutoff - createdAt > PENDING_TTL_MS;
+  };
+
+  const sweepOrphans: PendingUploadsStore["sweepOrphans"] = async () => {
+    try {
+      // 1) 7일 넘은(또는 createdAt을 못 읽는) 레코드는 파일까지 discard로 지운다 — R2 쪽도 이미
+      //    이어 올릴 수 없는 상태라 이 레코드는 더 이상 쓸모가 없다 (finding B).
+      const cutoff = now();
+      const expiredIds = Object.values(await readIndex())
+        .filter((rec) => isExpired(rec, cutoff))
+        .map((rec) => rec.sessionId);
+      for (const sessionId of expiredIds) await discard(sessionId);
+
+      // 2) 남은 레코드가 가리키지 않는 uploads/*.m4a를 지운다 (기존 고아 정리)
+      if (!(await fs.getInfoAsync(dir)).exists) return;
+      const referenced = new Set((await list()).map((r) => baseName(r.fileUri)));
+      for (const name of await fs.readDirectoryAsync(dir)) {
+        if (name === INDEX_NAME || referenced.has(name)) continue;
+        await fs.deleteAsync(dir + name, { idempotent: true }).catch((err) => warn(`sweep ${name} failed`, err));
+      }
+    } catch (err) {
+      warn("sweep failed", err);
+    }
+  };
+
+  return { stage, add, get, list, discard, dropFile, sweepOrphans };
 }
 
 /**

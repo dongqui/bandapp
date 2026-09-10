@@ -8,6 +8,7 @@ import {
   pgTable,
   primaryKey,
   real,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -129,6 +130,8 @@ export const sessions = pgTable("sessions", {
   takeCount: integer("take_count").notNull().default(0),
   analysisError: text("analysis_error"),
   analysisModel: text("analysis_model"),
+  // 원본 녹음 전체 피크 — 길이 128, 0~255. 워커가 ready로 바꿀 때 채운다. 옛 데이터·추출 실패면 null (2026-09-10 스펙 결정 1, 5)
+  peaks: smallint("peaks").array(),
   ...timestamps,
 });
 
@@ -164,6 +167,8 @@ export const takes = pgTable(
     type: takeType("type").notNull(),
     confidence: real("confidence").notNull(),
     objectKey: text("object_key").notNull(),
+    // 원본 타임라인의 start_ms~end_ms 구간 피크 — 길이 128, 0~255. 추출 실패면 null (2026-09-10 스펙 결정 3, 5)
+    peaks: smallint("peaks").array(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("takes_session_index_uq").on(t.sessionId, t.index)],

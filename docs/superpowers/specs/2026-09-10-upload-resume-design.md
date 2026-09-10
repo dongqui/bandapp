@@ -29,7 +29,7 @@
 
 3. **재개는 목록 행 탭으로만.** 로컬 레코드가 있는 `uploading` 행은 "Tap to continue uploading"을 보이고, 탭하면 `/processing?sessionId=<id>`로 간다. 레코드가 없는 `uploading` 행은 "This upload was started on another device" 토스트.
 
-4. **`onCreated` 콜백.** `uploadRecording`과 `RehearsalApiClient.sessions.upload`에 `onCreated?(sessionId: string): Promise<void>`를 더한다. create 직후, 파트 PUT 전에 호출한다. 콜백이 던지면 세션은 이미 만들어졌으니 `UploadRecordingError(sessionId)`로 감싼다. Mock도 같은 시점에 부른다.
+4. **`onCreated` 콜백.** `uploadRecording`과 `RehearsalApiClient.sessions.upload`에 `onCreated?(sessionId: string): Promise<void>`를 더한다. create 직후, 파트 PUT 전에 호출한다. 콜백이 던지면 세션은 이미 만들어졌으니 `UploadRecordingError(sessionId)`로 감싼다. Mock도 같은 시점에 부른다. 이어 올리기도 클라이언트 메서드 `sessions.resumeUpload(id, source, onProgress?)`로 노출한다 — Http는 `resumeRecordingUpload`에 위임하고 Mock은 진행률만 흉내 내므로 웹 프리뷰에서 재개 화면이 돈다.
 
 5. **스토어가 이어 올리기의 단일 진실.** 훅의 `pendingSessionIdRef`를 없앤다. 첫 업로드도 재개도 "레코드가 있으면 `resumeRecordingUpload`, 없으면 처음부터"로 판단한다.
 
@@ -93,7 +93,7 @@ export const pendingUploads = createPendingUploads(Platform.OS === "web" ? memor
 ### `apps/mobile/src/features/upload/useUploadSession.ts`
 - 입력: `UploadParams | ResumeParams`(`{ sessionId }`) | null.
 - 첫 업로드: `stagedUri = await pendingUploads.stage(fileUri).catch(() => fileUri)` → `fileUploadSource(stagedUri)` → `api.sessions.upload(..., onProgress, (id) => pendingUploads.add({...}))` → settle 시 `discard(id)`. create 전 실패(`UploadRecordingError`가 아님)면 `dropFile(stagedUri)`(stage가 성공했을 때만).
-- 재개: `pendingUploads.get(sessionId)` → 없으면 결정 6 첫째 분기 → `fileUploadSource(record.fileUri)` → `resumeRecordingUpload` → settle 시 `discard`.
+- 재개: `pendingUploads.get(sessionId)` → 없으면 결정 6 첫째 분기 → `fileUploadSource(record.fileUri)` → `api.sessions.resumeUpload` → settle 시 `discard`.
 - `retry`: 서버 failed → `retryAnalysis`(기존), 레코드 있음 → 재개, 그 외 → 처음부터(첫 업로드 params가 있을 때만).
 - 오류 → 상태 매핑은 순수 함수 `classifyUploadFailure(err, mode): { message; discard: boolean; retryable: boolean; refetch: boolean }`로 빼서 테스트한다. 훅은 결과대로 discard·`sessions.get`·phase를 처리한다.
 - 반환에 `retryable: boolean` 추가 — `ProcessingScreen`이 false면 "Try again" 칩을 숨긴다.
@@ -131,7 +131,7 @@ export const pendingUploads = createPendingUploads(Platform.OS === "web" ? memor
 
 - `packages/api-client/src/upload.spec.ts`: `onCreated`가 create 뒤·첫 파트 전에 sessionId로 호출된다; `onCreated`가 던지면 `UploadRecordingError.sessionId`가 채워지고 파트 PUT은 없다.
 - `packages/api-client/src/mock/MockApiClient.test.ts`: Mock `upload`도 `onCreated`를 부른다.
-- `apps/mobile/src/features/upload/pendingUploads.test.ts`(메모리 fs): stage가 파일을 옮기고 새 URI를 준다; add/get/list/discard; discard는 파일이 없어도 성공; sweepOrphans는 레코드 없는 파일만 지운다; 깨진 pending.json은 빈 맵.
+- `apps/mobile/src/features/upload/createPendingUploads.test.ts`(메모리 fs): stage가 파일을 옮기고 새 URI를 준다; add/get/list/discard; discard는 파일이 없어도 성공; sweepOrphans는 레코드 없는 파일만 지운다; 깨진 pending.json은 빈 맵.
 - `apps/mobile/src/features/upload/classifyUploadFailure.test.ts`: 파일 없음/404/409/네트워크 네 분기.
 - 수동: 웹 프리뷰(Mock, 메모리 fs)에서 가져오기 → Processing → 목록. 기기 검증(dev build)은 백로그 "기기 검증" 항목에 추가: 이동 후 expo-audio 파일 접근, 앱 강제 종료 후 재개.
 

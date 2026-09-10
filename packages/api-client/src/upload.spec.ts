@@ -5,7 +5,7 @@ import { resumeRecordingUpload, uploadRecording, UploadRecordingError } from "./
 
 const MB = 1024 * 1024;
 const session = (status: Session["status"]): Session => ({
-  id: "s1", bandId: "b1", title: "Sep 4 Rehearsal", status, startedAt: "2026-09-04T10:00:00.000Z", durationSec: 0, takeCount: 0, commentCount: 0,
+  id: "s1", bandId: "b1", title: "Sep 4 Rehearsal", status, startedAt: "2026-09-04T10:00:00.000Z", durationSec: 0, takeCount: 0, commentCount: 0, peaks: null,
 });
 
 function fakeClient(partCount: number, uploaded: number[] = []) {

@@ -20,6 +20,7 @@ describe("toSession", () => {
       durationMs: 2716601,
       takeCount: 3,
       commentCount: 2,
+      peaks: null,
       updatedAt: new Date("2026-09-04T10:00:00Z"),
     });
     expect(session).toEqual({
@@ -31,11 +32,29 @@ describe("toSession", () => {
       durationSec: 2717,
       takeCount: 3,
       commentCount: 2,
+      peaks: null,
     });
     expect("name" in session).toBe(false);
   });
   it("reports 0 seconds while duration is unknown", () => {
-    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, updatedAt: new Date() }).durationSec).toBe(0);
+    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, peaks: null, updatedAt: new Date() }).durationSec).toBe(0);
+  });
+  it("passes an existing peaks array through unchanged", () => {
+    const peaks = [0, 0.5, 1, 0.5, 0];
+    const session = toSession({
+      id: "s2",
+      bandId: "b1",
+      title: "Sep 4 Rehearsal",
+      name: null,
+      status: "ready",
+      startedAt: new Date("2026-09-04T10:00:00Z"),
+      durationMs: 1000,
+      takeCount: 1,
+      commentCount: 0,
+      peaks,
+      updatedAt: new Date("2026-09-04T10:00:00Z"),
+    });
+    expect(session.peaks).toEqual(peaks);
   });
 });
 

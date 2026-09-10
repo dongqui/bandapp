@@ -280,14 +280,19 @@ export class MockApiClient implements RehearsalApiClient {
       return { ...s };
     },
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
-    upload: async (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> => {
+    upload: async (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void, onCreated?: (sessionId: string) => Promise<void>): Promise<Session> => {
       const { session } = await this.sessions.create(bandId, input);
+      await onCreated?.(session.id);
+      return this.sessions.resumeUpload(session.id, source, onProgress);
+    },
+    resumeUpload: async (id: string, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> => {
+      this.mustSession(id);
       // 실제 PUT 없이 진행률만 흘려보낸다 — 화면이 업로드 단계를 그리게 하려는 것
       for (let i = 1; i <= 5; i++) {
         await new Promise((r) => setTimeout(r, 150));
         onProgress?.({ uploadedBytes: Math.round((source.sizeBytes * i) / 5), totalBytes: source.sizeBytes });
       }
-      return this.sessions.completeUpload(session.id);
+      return this.sessions.completeUpload(id);
     },
   };
 

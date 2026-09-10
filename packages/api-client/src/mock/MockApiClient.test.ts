@@ -115,6 +115,35 @@ describe("MockApiClient", () => {
     off();
   });
 
+  it("upload calls onCreated with the new session id before finishing", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    const seen: string[] = [];
+    const source = { sizeBytes: 5, readPart: async () => new Uint8Array(1) };
+    const done = await api.sessions.upload(
+      BAND,
+      { startedAt: new Date().toISOString(), durationMs: 60_000, sizeBytes: 5, contentType: "audio/mp4", source: "recording" },
+      source,
+      undefined,
+      async (id) => { seen.push(id); },
+    );
+    expect(seen).toEqual([done.id]);
+    expect(done.status).toBe("analyzing");
+  });
+
+  it("resumeUpload reports progress and completes an uploading session", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    const { session: created } = await api.sessions.create(BAND, {
+      startedAt: new Date().toISOString(), durationMs: 60_000, sizeBytes: 100, contentType: "audio/mp4", source: "recording",
+    });
+    const progress: number[] = [];
+    const source = { sizeBytes: 100, readPart: async () => new Uint8Array(1) };
+    const done = await api.sessions.resumeUpload(created.id, source, (p) => progress.push(p.uploadedBytes));
+    expect(done.id).toBe(created.id);
+    expect(done.status).toBe("analyzing");
+    expect(progress.at(-1)).toBe(100);
+    await expect(api.sessions.resumeUpload("nope", source)).rejects.toThrow();
+  });
+
   describe("bands.removeMember", () => {
     it("존재하지 않는 밴드면 거부한다", async () => {
       const api = new MockApiClient();

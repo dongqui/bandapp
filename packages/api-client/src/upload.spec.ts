@@ -120,6 +120,34 @@ describe("uploadRecording", () => {
     expect(calls.partUrls.map((b) => b.length)).toEqual([100, 50]);
   });
 
+  it("calls onCreated with the session id after create and before the first part PUT", async () => {
+    const { client, sessions } = fakeClient(1);
+    const order: string[] = [];
+    const fetchFn = vi.fn(async () => { order.push("put"); return okPut("e1"); });
+    await uploadRecording({
+      client, bandId: "b1", source: source(MB), fetchFn,
+      onCreated: async (id) => { order.push(`created:${id}`); },
+      input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: MB, contentType: "audio/mp4", source: "recording" },
+    });
+    expect(sessions.create).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(["created:s1", "put"]);
+  });
+
+  it("wraps an onCreated failure in UploadRecordingError and uploads no parts", async () => {
+    const { client, sessions } = fakeClient(1);
+    const fetchFn = vi.fn(async () => okPut("e1"));
+    const err = await uploadRecording({
+      client, bandId: "b1", source: source(MB), fetchFn,
+      onCreated: async () => { throw new Error("disk full"); },
+      input: { startedAt: "2026-09-04T19:00:00+09:00", sizeBytes: MB, contentType: "audio/mp4", source: "recording" },
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UploadRecordingError);
+    expect((err as UploadRecordingError).sessionId).toBe("s1");
+    expect((err as UploadRecordingError).message).toBe("disk full");
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(sessions.completeUpload).not.toHaveBeenCalled();
+  });
+
   it("stops issuing new PUTs once a part exhausts its attempts, instead of racing ahead on other workers", async () => {
     const { client, sessions } = fakeClient(4);
     const fetchFn = vi.fn(async (url: RequestInfo | URL) => {

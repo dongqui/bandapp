@@ -13,6 +13,11 @@ export interface UploadRecordingOptions {
   /** 동시에 올리는 파트 수. 기본 2 — 모바일 회선에서 더 올려도 총 처리량은 거의 늘지 않는다. */
   concurrency?: number;
   attemptsPerPart?: number;
+  /**
+   * create가 끝나 sessionId가 생긴 직후, 첫 파트 PUT 전에 호출한다. 앱이 "이어 올리기" 레코드를
+   * 남기는 시점이다 (2026-09-10 업로드 재개 스펙 결정 4). 던지면 UploadRecordingError로 감싼다.
+   */
+  onCreated?: (sessionId: string) => Promise<void>;
 }
 
 /**
@@ -40,6 +45,7 @@ export async function uploadRecording(opts: UploadRecordingOptions): Promise<Ses
   const { sessions } = opts.client;
   const { session } = await sessions.create(opts.bandId, opts.input);
   try {
+    await opts.onCreated?.(session.id);
     return await resumeUpload({
       client: opts.client,
       source: opts.source,

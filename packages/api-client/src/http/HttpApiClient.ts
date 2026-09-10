@@ -27,7 +27,7 @@ import type {
   UploadProgress,
   UploadSource,
 } from "../client";
-import { uploadRecording } from "../upload";
+import { resumeRecordingUpload, uploadRecording } from "../upload";
 import { ApiError } from "../errors";
 
 export { ApiError };
@@ -266,9 +266,11 @@ export class HttpApiClient implements RehearsalApiClient {
       return session;
     },
     audioUrl: (id: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/sessions/${id}/audio`),
-    upload: (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> =>
+    upload: (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void, onCreated?: (sessionId: string) => Promise<void>): Promise<Session> =>
       // presigned URL로의 PUT은 API 서버가 아니라 R2로 가므로 Authorization 없이 fetchFn을 그대로 쓴다
-      uploadRecording({ client: this, bandId, input, source, fetchFn: this.fetchFn, onProgress }),
+      uploadRecording({ client: this, bandId, input, source, fetchFn: this.fetchFn, onProgress, onCreated }),
+    resumeUpload: (id: string, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session> =>
+      resumeRecordingUpload({ client: this, sessionId: id, source, fetchFn: this.fetchFn, onProgress }),
   };
 
   takes = {

@@ -89,13 +89,16 @@ export interface RehearsalApiClient {
     completeUpload(id: string, parts: UploadedPart[]): Promise<Session>;
     retryAnalysis(id: string): Promise<Session>;
     audioUrl(id: string): Promise<AudioUrl>;
-    /** create → 파트 업로드 → complete를 한 번에. Mock은 진행률만 흉내 낸다. */
+    /** create → 파트 업로드 → complete를 한 번에. onCreated는 create 직후 sessionId를 준다. Mock은 진행률만 흉내 낸다. */
     upload(
       bandId: string,
       input: CreateSessionInput,
       source: UploadSource,
       onProgress?: (p: UploadProgress) => void,
+      onCreated?: (sessionId: string) => Promise<void>,
     ): Promise<Session>;
+    /** 이미 create된 uploading 세션의 남은 파트를 올리고 complete한다 (앱 종료 후 이어 올리기). */
+    resumeUpload(id: string, source: UploadSource, onProgress?: (p: UploadProgress) => void): Promise<Session>;
   };
   takes: {
     list(sessionId: string): Promise<Take[]>;

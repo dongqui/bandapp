@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi } from "@/api";
 import { useCurrentBand } from "@/features/band/useCurrentBand";
 import { classifyUploadFailure } from "./classifyUploadFailure";
+import { inFlightUploads } from "./inFlightUploads";
 import { pendingUploads } from "./pendingUploads";
 import { fileUploadSource } from "./readFilePart";
 import { MissingUploadFileError } from "./uploadErrors";
@@ -56,10 +57,17 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
   const stagedInPlaceRef = useRef(false);
   // upload()가 create 응답(sessionId)을 받기 전에 실패했으면 true — 이때만 옮겨 둔 파일이 고아가 된다.
   const failedBeforeCreateRef = useRef(false);
+  // 이 훅 인스턴스가 inFlightUploads에 올려 둔 세션 id — 디버깅·정리용 참조일 뿐, 언마운트 시 이 값을
+  // inFlightUploads에서 지우지는 않는다: 화면을 벗어나도 실제 네트워크 요청(파트 PUT)은 계속 진행되고,
+  // 그 요청이 끝나야(성공 settle 또는 실패 fail) 비로소 "더 이상 진행 중이 아님"이 참이 된다. 여기서
+  // 지우면 요청이 실제로는 살아있는데도 목록이 "이어 올리기 가능"으로 잘못 표시해 finding A가 재발한다.
+  const inFlightIdRef = useRef<string | null>(null);
 
   // 업로드가 끝난 뒤 처리는 첫 시도든 재시도든 같다 — 파일과 레코드는 여기서 지운다 (스펙 결정 7)
   const settle = useCallback((created: Session) => {
     void pendingUploads.discard(created.id);
+    inFlightUploads.delete(created.id);
+    if (inFlightIdRef.current === created.id) inFlightIdRef.current = null;
     setSession(created);
     if (created.status === "failed") {
       setError(ANALYZE_ERROR);
@@ -79,6 +87,12 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
   const fail = useCallback(
     async (err: unknown, mode: "upload" | "resume", sessionId: string | null) => {
       console.warn(`[upload] ${mode} failed:`, err instanceof Error ? err.message : err);
+      // settle()에 기대지 않고 실패 경로 전체에서 무조건 지운다 — 409 재조회(refetch)가 다시 실패하면
+      // settle()이 끝내 호출되지 않아 in-flight 표시가 영원히 남을 수 있다.
+      if (sessionId) {
+        inFlightUploads.delete(sessionId);
+        if (inFlightIdRef.current === sessionId) inFlightIdRef.current = null;
+      }
       const outcome = classifyUploadFailure(err, mode);
       if (outcome.discard && sessionId) await pendingUploads.discard(sessionId);
       if (outcome.refetch && sessionId) {
@@ -107,6 +121,8 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
   /** fileUri를 알면(같은 화면의 재시도) 레코드를 거치지 않는다 — 레코드 기록이 실패했어도 파일은 있다 */
   const resume = useCallback(
     async (sessionId: string, fileUri?: string) => {
+      inFlightUploads.add(sessionId);
+      inFlightIdRef.current = sessionId;
       begin();
       try {
         const uri = fileUri ?? (await pendingUploads.get(sessionId))?.fileUri;
@@ -151,6 +167,8 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
           onProgress,
           async (sessionId) => {
             createdIdRef.current = sessionId;
+            inFlightUploads.add(sessionId);
+            inFlightIdRef.current = sessionId;
             await pendingUploads.add({ sessionId, bandId: band.id, fileUri, source: params.source, createdAt: new Date().toISOString() });
           },
         ),
@@ -188,6 +206,11 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
       if (staged && failedBeforeCreateRef.current && !stagedInPlaceRef.current) {
         void pendingUploads.dropFile(staged);
       }
+      // 일부러 inFlightUploads는 여기서 지우지 않는다 (finding A). 여기서 지우면 화면을 벗어난
+      // 직후 세션 목록이 아직 실제로는 진행 중인 업로드를 "이어 올리기 가능"으로 보여줘 두 번째
+      // resumeUpload를 동시에 시작시킨다 — 정확히 이 fix가 막으려는 이중 업로드다. 실제 네트워크
+      // 요청(파트 PUT)은 언마운트와 무관하게 계속 진행되고, 그 요청이 끝났을 때(성공 settle 또는
+      // 실패 fail, 마운트 여부와 무관하게 항상 호출된다)만 in-flight 표시를 지운다.
     },
     [],
   );

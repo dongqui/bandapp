@@ -5,6 +5,7 @@ import { SectionList, View } from "react-native";
 import { useApi } from "@/api";
 import { BandSwitchSheet } from "@/features/band/BandSwitchSheet";
 import { useCurrentBand } from "@/features/band/useCurrentBand";
+import { inFlightUploads } from "@/features/upload/inFlightUploads";
 import { usePendingUploadIds } from "@/features/upload/usePendingUploadIds";
 import { monthLabel } from "@/lib/time";
 import { space, useTheme } from "@/theme";
@@ -38,8 +39,10 @@ export function SessionsScreen() {
     else if (s.status === "failed")
       void api.sessions.retryAnalysis(s.id).catch(() => toast.show("Something went wrong"));
     else if (s.status === "uploading") {
-      // 로컬 레코드가 있으면 이어 올린다. 없으면 다른 기기에서 시작한 업로드라 이 기기에서는 할 수 있는 게 없다.
+      // 로컬 레코드가 있으면 이어 올린다. 없고 지금 이 프로세스에서 실제로 업로드 중이면(finding A)
+      // 새 요청을 또 시작하지 않고 안내만 한다. 둘 다 아니면 다른 기기에서 시작한 업로드다.
       if (pendingIds.has(s.id)) router.push({ pathname: "/processing", params: { sessionId: s.id } });
+      else if (inFlightUploads.has(s.id)) toast.show("This upload is still running");
       else toast.show("This upload was started on another device");
     } else toast.show("Still finding takes…");
   };

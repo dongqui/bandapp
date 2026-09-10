@@ -33,6 +33,19 @@ describe("MockApiClient", () => {
     expect(replies.every((r) => r.atSec === rushing.atSec)).toBe(true);
   });
 
+  it("seeded takes and ready sessions carry 128-bucket peaks, and s1's last take is null (placeholder preview)", async () => {
+    const api = new MockApiClient();
+    const takes = await api.takes.list("s1");
+    const first = takes[0]!.peaks!;
+    expect(first).toHaveLength(128);
+    expect(Math.max(...first)).toBe(255);
+    expect(first.every((p) => Number.isInteger(p) && p >= 0 && p <= 255)).toBe(true);
+    expect(takes.at(-1)!.peaks).toBeNull();
+    const sessions = await api.sessions.list(BAND);
+    expect(sessions.find((s) => s.id === "s1")!.peaks).toHaveLength(128);
+    expect(sessions.find((s) => s.id === "p1")!.peaks).toBeNull();
+  });
+
   it("comments.create with parentId appends a reply that inherits the parent's atSec and leaves counts alone", async () => {
     const api = new MockApiClient();
     const [parent] = await api.comments.list({ takeId: "s1-t1" });
@@ -83,6 +96,10 @@ describe("MockApiClient", () => {
     expect(retried.status).toBe("analyzing");
     await wait(50);
     expect((await api.sessions.get("f1")).status).toBe("ready");
+    const ready = await api.sessions.get("f1");
+    expect(ready.peaks).toHaveLength(128);
+    const takes = await api.takes.list("f1");
+    expect(takes.every((t) => t.peaks?.length === 128)).toBe(true);
   });
 
   it("comments.create appends, bumps counts, notifies subscribers", async () => {

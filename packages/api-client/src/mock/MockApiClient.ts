@@ -22,7 +22,7 @@ import type {
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { seededUnit } from "./rand";
-import { commentKey, createSeedState, generateTakes, type MockState } from "./seed";
+import { commentKey, createSeedState, fakePeaks, generateTakes, type MockState } from "./seed";
 
 const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
 const week = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -90,6 +90,8 @@ export class MockApiClient implements RehearsalApiClient {
         t.endMs = t.startMs + t.durationSec * 1000;
       });
       this.state.takes[s.id] = takes;
+      // 워커가 ready로 바꿀 때 세션 피크도 채우는 것을 흉내 낸다 (take는 generateTakes가 채운다)
+      s.peaks = fakePeaks(s.id.length * 31 + s.durationSec);
       s.status = "ready";
       s.takeCount = takes.length;
       this.emit();

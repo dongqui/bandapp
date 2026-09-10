@@ -1,4 +1,4 @@
-import type { Band, BandMember, CommentTarget, Session, Take, TakeComment } from "@bandapp/types";
+import { PEAK_BUCKETS, type Band, type BandMember, type CommentTarget, type Session, type Take, type TakeComment } from "@bandapp/types";
 import { seedOf, seededUnit } from "./rand";
 
 export interface MockState {
@@ -19,6 +19,13 @@ function sessionOfTake(takeId: string): string {
   return takeId.slice(0, takeId.lastIndexOf("-t"));
 }
 
+/** 결정적 가짜 피크 — 길이 PEAK_BUCKETS, 0~255, 최댓값 255 (워커 출력과 같은 형식) */
+export function fakePeaks(seed: number): number[] {
+  const raw = Array.from({ length: PEAK_BUCKETS }, (_, i) => 0.15 + 0.85 * seededUnit(seed * 97 + i * 13));
+  const max = Math.max(...raw);
+  return raw.map((v) => Math.round((v / max) * 255));
+}
+
 export function generateTakes(sessionId: string, count: number): Take[] {
   const seed = seedOf(sessionId);
   let cursorMs = 60_000;
@@ -26,7 +33,7 @@ export function generateTakes(sessionId: string, count: number): Take[] {
     const durationSec = 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150);
     const startMs = cursorMs;
     cursorMs += durationSec * 1000 + 45_000;
-    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: null };
+    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: fakePeaks(seed * 7 + i) };
   });
 }
 
@@ -47,7 +54,7 @@ const session = (
   durationSec,
   takeCount,
   commentCount: 0,
-  peaks: null,
+  peaks: status === "ready" ? fakePeaks(seedOf(id)) : null,
 });
 
 function titleFor(startedAt: string): string {
@@ -127,6 +134,8 @@ export function createSeedState(): MockState {
       if (s.id === "s1" && sessionTakes.length > 1) {
         sessionTakes[0]!.durationSec = 272;
         sessionTakes[1]!.durationSec = 268;
+        // 옛 데이터·추출 실패 상태를 프리뷰에서 본다 — 평평한 플레이스홀더 (2026-09-10 스펙 결정 6)
+        sessionTakes.at(-1)!.peaks = null;
       }
       takes[s.id] = sessionTakes;
     }

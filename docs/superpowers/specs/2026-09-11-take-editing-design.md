@@ -208,7 +208,7 @@ shiftCommentAtSec(atSec, oldStartMs, newStartMs): number   // (Mock·플레이�
 - 다른 take 선택·뒤로 가기(`router.back` 가로채기 `beforeRemove`)·화면 blur 시 dirty면 `ConfirmDialog` "Discard changes?".
 - Delete: ··· 시트 → `ConfirmDialog`(제목 "Delete Take 3?", 본문에 코멘트 수가 0보다 크면 "N comments will be deleted too") → `api.takes.remove` → 새로고침·선택 해제.
 - 폴링: 목록에 `audioStatus === "updating"`이 하나라도 있으면 3초 간격 `reload`, 없어지면 정지. 타임라인·세션 상세 둘 다.
-- `TakeRow`: `updating`이면 파형 자리에 "Updating audio…", `failed`면 "Audio update failed". `TakePlayerScreen`: `updating`이면 재생 버튼 비활성 + 안내, `failed`면 "Retry" 버튼(현재 값으로 `update`). 마커는 `Math.min(Math.max(0, atSec), durationSec)`로 clamp(결정 2).
+- `TakeRow`: `updating`이면 파형 자리에 "Updating audio…", `failed`면 "Audio update failed". `TakePlayerScreen`: `updating`이면 재생 버튼 비활성 + 안내, `failed`면 "타임라인에서 다시 시도" 안내(Retry 버튼은 타임라인 카드에만 — 한 곳에서만 `update`를 부른다). 마커는 `Math.min(Math.max(0, atSec), durationSec)`로 clamp(결정 2).
 - 세션 상세 칩: "Edit takes".
 
 ### 디자인 브리프 (Claude Design)

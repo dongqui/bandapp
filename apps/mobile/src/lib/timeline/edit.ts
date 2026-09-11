@@ -57,9 +57,3 @@ export function previewSeekMs(draft: Draft, handle: Handle): number {
   "worklet";
   return handle === "start" ? draft.startMs : Math.max(draft.startMs, draft.endMs - PREVIEW_BEFORE_END_MS);
 }
-
-/** 코멘트 atSec(take 상대, 초)를 start 이동에 맞춰 옮긴다 — 절대 시각 보존 (결정 2) */
-export function shiftCommentAtSec(atSec: number, oldStartMs: number, newStartMs: number): number {
-  "worklet";
-  return atSec + (oldStartMs - newStartMs) / 1000;
-}

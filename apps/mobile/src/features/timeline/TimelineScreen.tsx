@@ -370,7 +370,11 @@ export function TimelineScreen() {
             </>
           ) : selectedTake.audioStatus === "failed" ? (
             <CardButton label={saving ? "Saving…" : "Retry"} onPress={saving ? undefined : () => void save()} />
-          ) : selectedTake.audioStatus === "updating" ? null : (
+          ) : selectedTake.audioStatus === "updating" ? (
+            // 재컷 메시지가 유실되면 서버가 failed로 바꿔 주지 않아(재전달 3회 후 DLQ로 빠질 뿐) 사용자가 직접
+            // 재요청할 수 있어야 한다 — 최종 리뷰 결정. save()는 초안이 없으면 저장된 값 그대로 같은-값 PATCH를 보낸다
+            <CardOutlineButton label={saving ? "Saving…" : "Retry"} onPress={() => { if (!saving) void save(); }} />
+          ) : (
             <>
               <PressableOpacity
                 onPress={() => setActionTake(selectedTake)}

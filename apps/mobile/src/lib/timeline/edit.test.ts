@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoPanPxPerFrame, EDGE_MAX_PX_PER_FRAME, hitTestHandle, previewSeekMs, shiftCommentAtSec, trimDraft } from "./edit";
+import { autoPanPxPerFrame, EDGE_MAX_PX_PER_FRAME, hitTestHandle, previewSeekMs, trimDraft } from "./edit";
 
 const v = { startMs: 0, msPerPx: 100, widthPx: 400 }; // 0~40s
 const draft = { startMs: 10_000, endMs: 30_000 }; // x 100 ~ 300
@@ -48,14 +48,10 @@ describe("autoPanPxPerFrame", () => {
   });
 });
 
-describe("previewSeekMs / shiftCommentAtSec", () => {
+describe("previewSeekMs", () => {
   it("start 핸들은 start, end 핸들은 end − 2s (start 아래로는 안 감)", () => {
     expect(previewSeekMs(draft, "start")).toBe(10_000);
     expect(previewSeekMs(draft, "end")).toBe(28_000);
     expect(previewSeekMs({ startMs: 10_000, endMs: 11_000 }, "end")).toBe(10_000);
-  });
-  it("코멘트는 절대 시각 유지", () => {
-    expect(shiftCommentAtSec(30, 10_000, 20_000)).toBe(20);
-    expect(shiftCommentAtSec(5, 10_000, 20_000)).toBe(-5);
   });
 });

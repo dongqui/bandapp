@@ -104,3 +104,15 @@ export function encodePeaksFile(hires: Uint8Array, peaksPerSec: number): Buffer 
   out.set(hires, PEAKS_FILE_HEADER_BYTES);
   return out;
 }
+
+/** peaks.bin → 고해상도 피크. encodePeaksFile의 역. 형식이 다르면 throw (호출자가 peaks null로 내려간다) */
+export function decodePeaksFile(buf: Buffer): { peaksPerSec: number; hires: Uint8Array } {
+  if (buf.length < PEAKS_FILE_HEADER_BYTES) throw new Error("peaks file too short");
+  const magic = buf.subarray(0, 4).toString("ascii");
+  if (magic !== PEAKS_FILE_MAGIC) throw new Error(`bad peaks magic: ${magic}`);
+  const version = buf.readUInt8(4);
+  if (version !== PEAKS_FILE_VERSION) throw new Error(`unsupported peaks version: ${version}`);
+  const peaksPerSec = buf.readUInt16LE(5);
+  if (peaksPerSec === 0) throw new Error("peaksPerSec is 0");
+  return { peaksPerSec, hires: new Uint8Array(buf.subarray(PEAKS_FILE_HEADER_BYTES)) };
+}

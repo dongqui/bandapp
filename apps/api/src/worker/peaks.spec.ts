@@ -1,6 +1,6 @@
 import { PEAKS_FILE_HEADER_BYTES, PEAKS_FILE_MAGIC, PEAKS_FILE_VERSION } from "@bandapp/types";
 import { describe, expect, it } from "vitest";
-import { encodePeaksFile, PeakAccumulator, slicePeaks } from "./peaks.js";
+import { decodePeaksFile, encodePeaksFile, PeakAccumulator, slicePeaks } from "./peaks.js";
 
 /** s16le 버퍼 — ffmpeg stdout과 같은 바이트 순서 */
 function pcm(samples: number[]): Buffer {
@@ -96,5 +96,27 @@ describe("encodePeaksFile", () => {
     expect(() => encodePeaksFile(new Uint8Array(0), 0)).toThrow();
     expect(() => encodePeaksFile(new Uint8Array(0), 70_000)).toThrow();
     expect(() => encodePeaksFile(new Uint8Array(0), 1.5)).toThrow();
+  });
+});
+
+describe("decodePeaksFile", () => {
+  it("encodePeaksFile의 역이다", () => {
+    const hires = Uint8Array.from([0, 7, 255, 128]);
+    const out = decodePeaksFile(encodePeaksFile(hires, 50));
+    expect(out.peaksPerSec).toBe(50);
+    expect(Array.from(out.hires)).toEqual([0, 7, 255, 128]);
+  });
+  it("magic·version·peaksPerSec가 틀리면 throw", () => {
+    const ok = encodePeaksFile(new Uint8Array(0), 50);
+    const badMagic = Buffer.from(ok);
+    badMagic.write("XXXX", 0, "ascii");
+    expect(() => decodePeaksFile(badMagic)).toThrow(/magic/);
+    const badVersion = Buffer.from(ok);
+    badVersion.writeUInt8(9, 4);
+    expect(() => decodePeaksFile(badVersion)).toThrow(/version/);
+    const zero = Buffer.from(ok);
+    zero.writeUInt16LE(0, 5);
+    expect(() => decodePeaksFile(zero)).toThrow(/peaksPerSec/);
+    expect(() => decodePeaksFile(Buffer.alloc(3))).toThrow(/short/);
   });
 });

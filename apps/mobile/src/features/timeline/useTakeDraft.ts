@@ -27,15 +27,23 @@ export function useTakeDraft(): TakeDraftState {
   const neighbors = useSharedValue<Neighbors>({ prevEndMs: null, nextStartMs: null });
   const [original, setOriginal] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
+  // original의 shared value 미러 — begin()이 draft.value를 바로 바꾸는데 React state(original)는
+  // 나중에 커밋되므로, reaction worklet이 React 값을 보면 take 전환 때 이전 take 기준으로 dirty를 오판한다
+  const originalSV = useSharedValue<Draft | null>(null);
+  // 매 프레임 draft가 바뀌어도 dirty 값 자체가 안 바뀌면 JS로 안 넘긴다
+  const lastDirty = useSharedValue(false);
 
   useAnimatedReaction(
     () => draft.value,
-    (d, prev) => {
-      if (d === prev) return;
-      const changed = d !== null && original !== null && (d.startMs !== original.startMs || d.endMs !== original.endMs);
-      scheduleOnRN(setDirty, changed);
+    (d) => {
+      const o = originalSV.value;
+      const changed = d !== null && o !== null && (d.startMs !== o.startMs || d.endMs !== o.endMs);
+      if (changed !== lastDirty.value) {
+        lastDirty.value = changed;
+        scheduleOnRN(setDirty, changed);
+      }
     },
-    [original],
+    [],
   );
 
   const begin = useCallback(
@@ -44,19 +52,25 @@ export function useTakeDraft(): TakeDraftState {
       setOriginal(o);
       setDirty(false);
       neighbors.value = neighborsOf(siblings, take.index);
+      // originalSV를 draft보다 먼저 갱신해야 reaction worklet이 새 take 기준으로 dirty를 계산한다
+      originalSV.value = o;
+      lastDirty.value = false;
       draft.value = o;
     },
-    [draft, neighbors],
+    [draft, neighbors, originalSV, lastDirty],
   );
   const reset = useCallback(() => {
     if (original) draft.value = { ...original };
+    lastDirty.value = false;
     setDirty(false);
-  }, [draft, original]);
+  }, [draft, original, lastDirty]);
   const clear = useCallback(() => {
     draft.value = null;
+    originalSV.value = null;
+    lastDirty.value = false;
     setOriginal(null);
     setDirty(false);
-  }, [draft]);
+  }, [draft, originalSV, lastDirty]);
   const current = useCallback(() => draft.value, [draft]);
 
   return { draft, neighbors, original, dirty, begin, reset, clear, current };

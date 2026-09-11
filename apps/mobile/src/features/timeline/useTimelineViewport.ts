@@ -64,6 +64,8 @@ export function useTimelineViewport(
   // 핸들 드래그 상태 (스펙 B) — 잡은 핸들과 마지막 손가락 x
   const editMode = useSharedValue<EditMode>(null);
   const fingerX = useSharedValue(0);
+  // onBegin은 팬이 활성화되기 전(탭에서도) 불린다 — 실제로 핸들이 움직였을 때만 onHandleRelease를 예약한다
+  const handleMoved = useSharedValue(false);
 
   /** 핸들 모드일 때 초안을 손가락 아래 시각으로 옮긴다 */
   const moveHandleTo = (mode: EditMode, xPx: number) => {
@@ -81,6 +83,7 @@ export function useTimelineViewport(
     onBegin: (e) => {
       "worklet";
       follow.value = false;
+      handleMoved.value = false;
       const d = editing?.draft.value ?? null;
       const v = { startMs: startMs.value, msPerPx: msPerPx.value, widthPx: widthPx.value };
       const hit = d ? hitTestHandle(v, d, e.x) : null;
@@ -97,6 +100,7 @@ export function useTimelineViewport(
       "worklet";
       if (editMode.value) {
         fingerX.value = e.x;
+        handleMoved.value = true;
         moveHandleTo(editMode.value, e.x);
         return;
       }
@@ -110,7 +114,8 @@ export function useTimelineViewport(
       const mode = editMode.value;
       editMode.value = null;
       activeGesture.value = null;
-      if (mode && editing) {
+      // onBegin은 탭에서도 불리므로, 실제로 핸들을 움직였을 때만 release를 예약한다 (탭 제스처의 seek와 경합 방지)
+      if (mode && editing && handleMoved.value) {
         const d = editing.draft.value;
         if (d) scheduleOnRN(editing.onHandleRelease, mode === "handle-start" ? "start" : "end", d);
       }
@@ -149,6 +154,7 @@ export function useTimelineViewport(
     if (dx === 0) return;
     const v = panViewport({ startMs: startMs.value, msPerPx: msPerPx.value, widthPx: widthPx.value }, -dx, durationMs);
     startMs.value = v.startMs;
+    handleMoved.value = true;
     moveHandleTo(mode, fingerX.value);
   });
 

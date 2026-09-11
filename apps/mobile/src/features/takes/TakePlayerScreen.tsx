@@ -47,10 +47,10 @@ export function TakePlayerScreen() {
   const take = useMemo(() => {
     if (!session) return undefined;
     if (isOriginal) {
-      return { id: "orig", name: "Original recording", durationSec: session.durationSec, peaks: session.peaks };
+      return { id: "orig", name: "Original recording", durationSec: session.durationSec, peaks: session.peaks, audioStatus: "ready" as const };
     }
     const t = (takes ?? []).find((x) => x.id === takeId);
-    return t ? { id: t.id, name: t.name, durationSec: t.durationSec, peaks: t.peaks } : undefined;
+    return t ? { id: t.id, name: t.name, durationSec: t.durationSec, peaks: t.peaks, audioStatus: t.audioStatus } : undefined;
   }, [session, takes, takeId, isOriginal]);
 
   // 원본 녹음도 같은 목록·입력을 쓴다 — 대상만 다르다 (2026-09-09 스펙 결정 4, 8)
@@ -144,6 +144,8 @@ export function TakePlayerScreen() {
   if (!session || !take) return <Screen>{null}</Screen>;
   const sub = `${session.title} · ${isOriginal ? fmtDuration(take.durationSec) : fmtClock(take.durationSec)}`;
   const hiddenThreads = Math.max(0, threads.length - shownThreads);
+  // 경계가 바뀌면 코멘트 시점이 take 밖으로 나갈 수 있다 — 타임라인 안으로 clamp (스펙 B 결정 2)
+  const markers = threads.map((t) => Math.min(Math.max(0, t.comment.atSec), take.durationSec));
 
   const send = () => {
     const text = input.trim();
@@ -196,13 +198,23 @@ export function TakePlayerScreen() {
           <AppText variant="caption" style={{ marginTop: 4 }}>
             {sub}
           </AppText>
+          {/* 재컷 상태 (디자인 노트). updating이면 새 오디오가 아직 없어 재생을 막는다 (스펙 B 결정 3) */}
+          {take.audioStatus === "updating" ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 7 }}>
+              <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: colors.accent }} />
+              <AppText style={{ fontSize: 12, color: colors.accent }}>Updating take…</AppText>
+            </View>
+          ) : null}
+          {take.audioStatus === "failed" ? (
+            <AppText style={{ fontSize: 12, color: colors.danger, marginTop: 7 }}>Audio not updated — retry from the timeline</AppText>
+          ) : null}
         </View>
         <View style={{ paddingHorizontal: space.screenX, paddingTop: 18, paddingBottom: 8, alignItems: "center", gap: 16 }}>
           <PlayerWaveform
             peaks={take.peaks}
             durationSec={take.durationSec}
             positionSec={playback.positionSec}
-            markers={threads.map((t) => t.comment.atSec)}
+            markers={markers}
             onSeek={(sec) => playback.seekTo(sec)}
           />
           {/* 피드백 시점 미세 조정 — 1초씩 앞뒤로. 재생 상태는 건드리지 않는다 */}
@@ -230,6 +242,7 @@ export function TakePlayerScreen() {
           </View>
           <PressableOpacity
             onPress={playback.toggle}
+            disabled={take.audioStatus === "updating"}
             style={{
               width: 60,
               height: 60,
@@ -238,6 +251,7 @@ export function TakePlayerScreen() {
               borderColor: playback.playing ? colors.accent : colors.borderStronger,
               alignItems: "center",
               justifyContent: "center",
+              opacity: take.audioStatus === "updating" ? 0.4 : 1,
             }}
           >
             {playback.playing ? (

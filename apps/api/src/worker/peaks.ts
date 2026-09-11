@@ -1,3 +1,5 @@
+import { PEAKS_FILE_HEADER_BYTES, PEAKS_FILE_MAGIC, PEAKS_FILE_VERSION } from "@bandapp/types";
+
 /**
  * 파형 피크 계산 — ffmpeg 없이 테스트하는 순수 모듈 (2026-09-10 스펙).
  * 워커는 원본을 한 번 s16le 모노로 디코드해 PeakAccumulator에 흘리고, 세션 전체와 take 구간을
@@ -87,4 +89,18 @@ export function slicePeaks(hires: Uint8Array, peaksPerSec: number, startMs: numb
   }
   if (max === 0) return out;
   return out.map((v) => Math.round((v / max) * 255));
+}
+
+/** 고해상도 피크를 peaks.bin 바이트로. 헤더 형식은 @bandapp/types의 PEAKS_FILE_* 참고 (2026-09-11 스펙 결정 4). */
+export function encodePeaksFile(hires: Uint8Array, peaksPerSec: number): Buffer {
+  if (!Number.isInteger(peaksPerSec) || peaksPerSec <= 0 || peaksPerSec > 0xffff) {
+    throw new Error(`peaksPerSec must be an integer in 1..65535, got ${peaksPerSec}`);
+  }
+  const out = Buffer.alloc(PEAKS_FILE_HEADER_BYTES + hires.length);
+  out.write(PEAKS_FILE_MAGIC, 0, "ascii");
+  out.writeUInt8(PEAKS_FILE_VERSION, 4);
+  out.writeUInt16LE(peaksPerSec, 5);
+  out.writeUInt8(0, 7);
+  out.set(hires, PEAKS_FILE_HEADER_BYTES);
+  return out;
 }

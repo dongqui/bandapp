@@ -15,7 +15,7 @@ export interface FollowPlayhead {
  * follow 자체는 vp.follow shared value에 산다 — 제스처 worklet과 이 훅이 같은 값을 본다.
  */
 export function useFollowPlayhead(vp: TimelineViewportState, playheadMs: SharedValue<number>, durationMs: number, playing: boolean): FollowPlayhead {
-  const [following, setFollowing] = useState(false);
+  const [following, setFollowing] = useState(true);
 
   useEffect(() => {
     if (playing) vp.follow.value = true;

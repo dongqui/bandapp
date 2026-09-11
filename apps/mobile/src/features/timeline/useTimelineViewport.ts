@@ -41,7 +41,8 @@ export function useTimelineViewport(durationMs: number, onTap: (xPx: number, yPx
   const startMs = useSharedValue(0);
   const msPerPx = useSharedValue(1);
   const widthPx = useSharedValue(0);
-  const follow = useSharedValue(false);
+  // 처음에는 ON — 디자인(tlFollow: true)대로 "⟲ PLAYHEAD" 필이 사용자가 움직인 뒤에만 보인다
+  const follow = useSharedValue(true);
   const activeGesture = useSharedValue<ActiveGesture>(null);
   const pinchOrigin = useSharedValue<Viewport | null>(null);
 

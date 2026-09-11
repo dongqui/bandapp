@@ -2,7 +2,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { FlatList, View } from "react-native";
 import { clockRange, fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
-import { AppText, Chip, PressableOpacity, Screen, useToast } from "@/ui";
+import { AppText, Chip, PressableOpacity, Screen } from "@/ui";
 import { TakeRow } from "./TakeRow";
 import { useSession } from "./useSession";
 import { useTakes } from "./useTakes";
@@ -12,7 +12,6 @@ export function SessionDetailScreen() {
   const { data: session } = useSession(id);
   const { data: takes } = useTakes(id);
   const router = useRouter();
-  const toast = useToast();
   const { colors } = useTheme();
   if (!session) return <Screen>{null}</Screen>;
   return (
@@ -37,7 +36,8 @@ export function SessionDetailScreen() {
       </View>
       <View style={{ flexDirection: "row", gap: 10, paddingHorizontal: space.screenX, paddingBottom: 6 }}>
         <Chip label="Original recording" onPress={() => router.push(`/session/${session.id}/take/orig`)} />
-        <Chip label="Edit takes" onPress={() => toast.show("Take editing is not in this prototype")} />
+        {/* 스펙 A 동안은 읽기 전용 타임라인이라 "Timeline". 편집(스펙 B)이 들어오면 디자인대로 "Edit takes"로 되돌린다 (2026-09-11 스펙 결정 1) */}
+        <Chip label="Timeline" onPress={() => router.push(`/session/${session.id}/timeline`)} />
       </View>
       <FlatList
         data={takes ?? []}

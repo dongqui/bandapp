@@ -53,6 +53,7 @@ docker compose up --build -d
 - 새 네이티브 모듈(expo-audio, expo-document-picker, expo-file-system)이 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
 - 서버 없이 UI만 볼 때는 `EXPO_PUBLIC_API_URL`을 비워 Mock으로 띄운다. Mock은 업로드 진행률만 흉내 내고 재생은 시뮬레이션이다.
 - 웹 프리뷰(`pnpm --filter mobile dev`)에서 의미 있는 건 가져오기뿐이다. 녹음은 브라우저에서 webm이 나와 서버가 받는 m4a와 맞지 않으니 네이티브(dev build)에서만 쓴다.
+- USB로 꽂은 안드로이드 폰(dev client)에서 테스트할 때는 `pnpm --filter mobile phone` 한 줄이면 된다 — adb reverse(8081·3001) + Metro(dev-client) + 앱 자동 실행. 재빌드는 네이티브 모듈이나 app.json이 바뀔 때만 필요하다 (Windows 절차: `docs/superpowers/specs/2026-09-03-google-signin-setup-record.md`).
 - 피드백은 take와 원본 녹음 둘 다에 남길 수 있고, 본인 코멘트는 `···`로 수정·삭제한다 (`PATCH/DELETE /comments/:id`, `GET/POST /sessions/:id/comments`). `0006` 마이그레이션이 `comments.session_id`를 더하고 `take_id`를 nullable로 바꾼다 — 기존 체크아웃은 `db:migrate`(컨테이너는 기동 시 자동).
 
 ### 팀 관리·i18n (모바일)

@@ -13,10 +13,10 @@ GPT와 쓴 초안 문서("Take N — Original Recording Timeline Editor")의 원
 **포함:**
 - 워커가 고해상도 피크를 R2 사이드카(`peaks.bin`)로 올리고, `sessions.peaks_key`에 키를 저장 — 마이그레이션 `0008`
 - `GET /sessions/:id/peaks` — presigned URL 발급. api-client `sessions.peaksUrl(id)`
-- 앱: 타임라인 화면 `/session/[id]/timeline` — 파형(Skia), 시간 눈금, take 오버레이·선택·자동 줌, playhead, 팬·핀치·탭, 재생/일시정지/seek, follow playhead, 오버뷰, 디버그 오버레이(dev)
+- 앱: 타임라인 화면 `/session/[id]/timeline` — 파형(react-native-svg + Reanimated), 시간 눈금, take 오버레이·선택·자동 줌, playhead, 팬·핀치·탭, 재생/일시정지/seek, follow playhead, 오버뷰, 디버그 오버레이(dev)
 - 순수 함수 모듈 `src/lib/timeline/` + vitest (좌표·줌·팬·clamp·fit·LOD 선택·눈금·playhead 보간·follow 정책·peaks 파일 파싱)
 - 세션 상세의 "Edit takes" 칩이 이 화면으로 진입
-- 의존성 추가: `@shopify/react-native-skia`, `react-native-gesture-handler` (직접 의존성) + 루트 `GestureHandlerRootView`
+- 의존성 추가: `react-native-gesture-handler` (직접 의존성) + 루트 `GestureHandlerRootView`
 
 **제외 (스펙 B 또는 백로그):**
 - Take 시작/종료 핸들 드래그, edge auto pan, PATCH takes, 재컷, take 코멘트 `atSec` 이동 정책 — 스펙 B
@@ -42,7 +42,7 @@ GPT와 쓴 초안 문서("Take N — Original Recording Timeline Editor")의 원
 
 6. **정규화는 세션 전체 최댓값 기준 한 번.** hires 전체의 max로 나눠 0~1 스케일을 만든다. viewport마다 정규화하면 팬할 때 파형이 숨쉬듯 흔들린다. 128버킷 폴백은 이미 세션 기준으로 정규화돼 있다.
 
-7. **렌더링은 Skia, 상태는 Reanimated shared value.** `@shopify/react-native-skia` 2.11.x는 RN 0.86·Reanimated 4.5·worklets 0.10 peer 조건을 만족한다. viewport·playhead가 shared value라 팬·줌·재생 중 React 리렌더가 0이고, Skia `Path`를 `useDerivedValue`로 UI 스레드에서 만든다. SVG/View 바로 시작해 나중에 바꾸는 건 두 번 일이라 하지 않는다. 비용: dev client 재빌드(Windows Android는 `subst` 우회).
+7. **렌더링은 react-native-svg + Reanimated `animatedProps`, 상태는 shared value.** 처음 검토에서는 Skia를 추천했지만 계획 단계에서 바꿨다. 이 프로젝트의 주 개발 루프가 Browser pane의 웹 Mock 프리뷰인데 Skia는 웹에서 canvaskit(wasm) 로딩 설정이 따로 필요하고, `react-native-svg` 15는 이미 의존성이며 웹 구현의 `setNativeProps`가 Reanimated `animatedProps` 전용으로 만들어져 있어 네이티브·웹이 같은 코드로 돈다. viewport·playhead가 shared value라 팬·줌·재생 중 React 리렌더가 0이고, 바 `Path`의 `d`를 `useDerivedValue`로 UI 스레드에서 만들어 `animatedProps`로 흘린다(바 ≤ 130개, 프레임당 문자열 하나). 눈금 라벨만 React state로 받는다(작은 컴포넌트, 제스처 중에만 갱신). 기기에서 팬·줌이 60fps에 못 미치면 그때 `WaveformCanvas` 한 파일만 Skia로 바꾼다 — 좌표·LOD 계산은 전부 순수 함수라 옮길 게 렌더러뿐이다. 비용: gesture-handler 직접 의존성 추가로 dev client 재빌드(Windows Android는 `subst` 우회).
 
 8. **제스처는 react-native-gesture-handler.** Responder 시스템으로는 핀치와 exclusive 관계를 못 만든다. `Gesture.Race(Gesture.Simultaneous(pan, pinch), tap)`. 팬은 `onChange`의 `changeX`를 현재 `viewStart`에 더하는 증분 방식이라 핀치 → 팬 전환에서 origin을 다시 잡을 필요가 없다(초안 22-G). 매 이벤트마다 clamp한다.
 
@@ -104,7 +104,7 @@ update sessions set ..., peaks = ..., peaksKey
 
 ### 의존성·루트
 
-- `npx expo install @shopify/react-native-skia react-native-gesture-handler` — 둘 다 `apps/mobile/package.json` 직접 의존성.
+- `react-native-gesture-handler`를 `apps/mobile/package.json` 직접 의존성으로 (지금 잠긴 3.2.1 그대로). Skia는 넣지 않는다 (결정 7).
 - `app/_layout.tsx`의 `SafeAreaProvider` 바깥을 `GestureHandlerRootView style={{ flex: 1 }}`로 감싼다.
 - dev client 재빌드 필요 (Android: `subst B:` 경로, iOS: `expo run:ios`).
 
@@ -127,8 +127,9 @@ apps/mobile/src/features/timeline/
   usePlayheadClock.ts       expo-audio status → anchor shared value → useFrameCallback 보간, seek pending
   useFollowPlayhead.ts      follow 플래그 + useAnimatedReaction
   useSessionPeaks.ts        peaksUrl → fetch → parse → buildLevels, 실패·404·Mock이면 128버킷 폴백
-  WaveformCanvas.tsx        Skia Canvas: 파형 Path(useDerivedValue) + take 레인 + playhead + 눈금
-  OverviewStrip.tsx         작은 Skia Canvas: 최저 LOD + take 마커 + viewport 창, 탭/드래그로 이동
+  WaveformCanvas.tsx        Svg: 파형 Path 두 개(재생 전/후, animatedProps d) + take 레인 Path + 선택 Rect + playhead(Animated.View)
+  TimeRuler.tsx             눈금 — viewport 스냅샷을 React state로 받아 그린다
+  OverviewStrip.tsx         작은 Svg: 최저 LOD(정적) + take 마커 + viewport 창(animatedProps), 탭/드래그로 이동
   TimelineDebugOverlay.tsx  __DEV__ 전용, 200ms throttle로 shared value를 텍스트로
 
 apps/mobile/app/session/[id]/timeline.tsx   → export { TimelineScreen as default }
@@ -187,9 +188,9 @@ composed = Gesture.Race(Gesture.Simultaneous(pan, pinch), tap)
 
 ### 파형 렌더링 (초안 8·9·29절)
 
-`useDerivedValue`가 매 프레임 `viewStart`·`msPerPx`·현재 레벨로 바 높이 배열을 만들고 Skia `Path`에 `addRect`한다. 바 수 ≤ 130이고 바당 피크 ≤ 3.5개라 프레임당 연산은 수백 회다. 레벨 교체는 React state(`levelIndex`)가 아니라 `useDerivedValue` 안에서 `selectLevel`이 결정해 shared value에 기억한다(hysteresis 상태). 색은 기존 파형과 같은 규칙: playhead 이전 `accent`, 이후 `borderStronger`. 높이 공식은 `barHeight()` 재사용.
+`useDerivedValue`가 매 프레임 `viewStart`·`msPerPx`·현재 레벨로 바 높이 배열을 만들고, 바마다 `M x y h2 v h h-2 z` 조각을 이어 붙인 path 문자열 두 개(playhead 이전 = `accent`, 이후 = `borderStronger`)를 `Animated.createAnimatedComponent(Path)`의 `animatedProps.d`로 흘린다. 바 수 ≤ 130이고 바당 피크 ≤ 3.5개라 프레임당 연산은 수백 회다. 레벨 교체는 React state가 아니라 `useDerivedValue` 안에서 `selectLevel`이 결정해 shared value에 기억한다(hysteresis 상태). 높이 공식은 `barHeight()` 재사용(`"worklet"` 지시자를 붙인다). LOD 피라미드(`Uint8Array[]`)는 worklet 클로저에 잡혀 UI 런타임으로 한 번 복사된다 — react-native-worklets가 typed array를 직렬화한다.
 
-Take 레인: 각 take를 `[timeToX(start), timeToX(end)]` 사각형으로, 선택된 take는 accent, 나머지는 muted. 화면 밖 take는 건너뛴다. Playhead: 1px 선 + 상단 삼각. 눈금: `rulerTicks`가 준 (x, label) 목록을 Skia `Text`로 그린다(폰트는 JetBrains Mono, `matchFont`).
+Take 레인: 화면 안의 take를 `[timeToX(start), timeToX(end)]` 사각형 path 하나로(muted), 선택된 take는 `animatedProps` x/width를 받는 `Rect`(accent) + 파형 위 반투명 `Rect`. 화면 밖 take는 건너뛴다. Playhead: `useAnimatedStyle` translateX의 `Animated.View`(1px 선 + 상단 삼각), 화면 밖이면 좌/우 가장자리 표시. 눈금: `TimeRuler`가 `useAnimatedReaction`으로 viewport 스냅샷을 `scheduleOnRN`으로 받아 React state로 그린다 — 제스처 중에만 바뀌는 작은 컴포넌트라 리렌더 비용이 무시할 만하다.
 
 오버뷰: 최저 LOD를 폭에 맞춰 그리고, take는 3px 마커, 현재 viewport는 반투명 창. 1~2분 take를 3시간 위에서 정확히 표현하려 하지 않는다(초안 21절). 클러스터 처리는 하지 않는다 — 마커가 겹치면 겹친 채로 둔다.
 

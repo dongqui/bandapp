@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, unlink } from "node:fs/promises";
+import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Logger } from "@nestjs/common";
@@ -11,13 +11,14 @@ import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { recordings, sessions, takes } from "../db/schema.js";
-import { takeKey, takesPrefix } from "../sessions/session-mapper.js";
+import { peaksKey, takeKey, takesPrefix } from "../sessions/session-mapper.js";
 import { StorageService } from "../storage/storage.service.js";
 import { ExecFfmpegRunner, type FfmpegRunner } from "./ffmpeg.js";
-import { PEAKS_PER_SEC, slicePeaks } from "./peaks.js";
+import { PEAKS_PER_SEC, encodePeaksFile, slicePeaks } from "./peaks.js";
 
 const CHUNK_ATTEMPTS = 2;
 const TAKE_CONTENT_TYPE = "audio/mp4";
+const PEAKS_CONTENT_TYPE = "application/octet-stream";
 
 /**
  * 중복 전달 경합 방지용 마커 (다른 워커가 이미 이 세션을 처리해 status가 더 이상 analyzing이 아닌 경우).
@@ -82,6 +83,8 @@ export class SessionAnalysisService {
       const merged = mergeCandidates(candidates);
       // Gemini가 끝난 뒤에 디코드한다 — 분석이 실패하면 디코드 비용을 쓰지 않는다 (스펙 결정 7)
       const hires = await this.extractPeaks(sessionId, original);
+      // 사이드카는 take 컷보다 먼저 올린다 — 컷이 실패해도 파형은 남는다. 실패해도 세션은 ready (2026-09-11 스펙 결정 5)
+      const sidecarKey = hires ? await this.uploadPeaks(session.bandId, sessionId, hires, workDir) : null;
 
       const rows: (typeof takes.$inferInsert)[] = [];
       for (const [index, candidate] of merged.entries()) {
@@ -121,13 +124,14 @@ export class SessionAnalysisService {
             analysisError: null,
             analysisModel: model,
             peaks: hires ? slicePeaks(hires, PEAKS_PER_SEC, 0, durationMs, PEAK_BUCKETS) : null,
+            peaksKey: sidecarKey,
             updatedAt: new Date(),
           })
           .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")))
           .returning({ id: sessions.id });
         if (updated.length === 0) throw new StaleSessionError(sessionId);
       });
-      this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}`);
+      this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}, sidecar ${sidecarKey ? "uploaded" : "none"}`);
     } catch (err) {
       if (err instanceof StaleSessionError) {
         this.logger.warn(err.message);
@@ -188,6 +192,25 @@ export class SessionAnalysisService {
     } catch (err) {
       this.logger.warn(`session ${sessionId}: peaks failed, storing null: ${String(err)}`);
       return null;
+    }
+  }
+
+  /**
+   * 고해상도 피크를 peaks.bin으로 R2에 올리고 키를 돌려준다. 쓰기·업로드가 실패하면 warn 로그 + null —
+   * 앱은 128버킷 폴백으로 그린다 (2026-09-11 스펙 결정 5). retry는 같은 키를 덮어쓴다.
+   */
+  private async uploadPeaks(bandId: string, sessionId: string, hires: Uint8Array, workDir: string): Promise<string | null> {
+    const key = peaksKey(bandId, sessionId);
+    const path = join(workDir, "peaks.bin");
+    try {
+      await writeFile(path, encodePeaksFile(hires, PEAKS_PER_SEC));
+      await this.storage.putFile(key, path, PEAKS_CONTENT_TYPE);
+      return key;
+    } catch (err) {
+      this.logger.warn(`session ${sessionId}: peaks sidecar upload failed, storing null key: ${String(err)}`);
+      return null;
+    } finally {
+      await unlink(path).catch(() => undefined);
     }
   }
 

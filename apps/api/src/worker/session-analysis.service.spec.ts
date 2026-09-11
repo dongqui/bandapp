@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TakeCandidate } from "@bandapp/types";
@@ -69,11 +69,24 @@ function fakeDb(
   return { db: db as unknown as Db, state };
 }
 
-function fakeStorage(orphanKeys: string[] = ["bands/b/sessions/s/takes/orphan.m4a"]) {
-  const calls = { downloads: [] as string[], puts: [] as string[], deleted: [] as string[], listedPrefixes: [] as string[] };
+function fakeStorage(orphanKeys: string[] = ["bands/b/sessions/s/takes/orphan.m4a"], opts: { failPutKeys?: string[] } = {}) {
+  const calls = {
+    downloads: [] as string[],
+    puts: [] as string[],
+    putTypes: [] as string[],
+    // 사이드카는 워커가 실제로 파일을 쓰므로 업로드 시점의 본문을 남겨 헤더를 검증한다. take 컷은 가짜 ffmpeg가 파일을 안 만든다.
+    putBodies: new Map<string, Buffer>(),
+    deleted: [] as string[],
+    listedPrefixes: [] as string[],
+  };
   const storage = {
     downloadToFile: async (key: string) => { calls.downloads.push(key); },
-    putFile: async (key: string) => { calls.puts.push(key); },
+    putFile: async (key: string, path: string, contentType: string) => {
+      if (opts.failPutKeys?.includes(key)) throw new Error(`put failed: ${key}`);
+      calls.puts.push(key);
+      calls.putTypes.push(contentType);
+      if (existsSync(path)) calls.putBodies.set(key, readFileSync(path));
+    },
     deleteObjects: async (keys: string[]) => { calls.deleted.push(...keys); },
     listKeys: async (prefix: string) => { calls.listedPrefixes.push(prefix); return orphanKeys; },
   } as unknown as StorageService;
@@ -144,9 +157,16 @@ describe("SessionAnalysisService.run", () => {
       { startMs: 1 * MIN, endMs: 5 * MIN },
       { startMs: 19 * MIN, endMs: 21 * MIN + 30_000 },
     ]);
-    expect(calls.puts).toHaveLength(2);
-    expect(calls.puts[0]).toMatch(/^bands\/b\/sessions\/s\/takes\/.+\.m4a$/);
-    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 2, durationMs: 45 * MIN });
+    // 사이드카가 먼저(컷 루프 앞), 그 뒤 take 2개
+    expect(calls.puts).toHaveLength(3);
+    expect(calls.puts[0]).toBe("bands/b/sessions/s/peaks.bin");
+    expect(calls.putTypes[0]).toBe("application/octet-stream");
+    const sidecar = calls.putBodies.get("bands/b/sessions/s/peaks.bin")!;
+    expect(sidecar.subarray(0, 4).toString("ascii")).toBe("TNPK");
+    expect(sidecar.readUInt16LE(5)).toBe(50);
+    expect(sidecar.length).toBe(8 + Math.ceil((45 * MIN) / 1000) * 50);
+    expect(calls.puts[1]).toMatch(/^bands\/b\/sessions\/s\/takes\/.+\.m4a$/);
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 2, durationMs: 45 * MIN, peaksKey: "bands/b/sessions/s/peaks.bin" });
     // take 행과 세션 update 모두 128버킷 피크를 싣는다 — 원본을 한 번만 디코드한다
     expect(peaksCalls).toEqual([50]);
     for (const t of state.insertedTakes) {
@@ -177,13 +197,25 @@ describe("SessionAnalysisService.run", () => {
 
   it("stores null peaks and still marks the session ready when peak extraction fails", async () => {
     const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
-    const { storage } = fakeStorage();
+    const { storage, calls } = fakeStorage();
     const { ffmpeg } = fakeFfmpeg(5 * MIN, new Error("ffmpeg peaks failed"));
     const analyzeFile = vi.fn().mockResolvedValue([{ startMs: 0, endMs: 30_000, type: "PERFORMANCE", confidence: 0.9 }]);
     await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
     expect(state.insertedTakes).toHaveLength(1);
     expect(state.insertedTakes[0]!.peaks).toBeNull();
-    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 1, peaks: null });
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 1, peaks: null, peaksKey: null });
+    expect(calls.puts.some((k) => k.endsWith("peaks.bin"))).toBe(false);
+  });
+
+  it("keeps 128-bucket peaks and ready but stores a null key when the sidecar upload fails", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const { storage, calls } = fakeStorage(undefined, { failPutKeys: ["bands/b/sessions/s/peaks.bin"] });
+    const { ffmpeg } = fakeFfmpeg(5 * MIN);
+    const analyzeFile = vi.fn().mockResolvedValue([{ startMs: 0, endMs: 2 * MIN, type: "PERFORMANCE", confidence: 0.9 }]);
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, tmp, 0).run("s");
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 1, peaksKey: null });
+    expect(state.updates.at(-1)!.peaks as number[]).toHaveLength(128);
+    expect(calls.puts).toHaveLength(1); // take 컷만
   });
 
   it("does not decode peaks when Gemini fails", async () => {

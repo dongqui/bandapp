@@ -55,6 +55,7 @@ docker compose up --build -d
 - 웹 프리뷰(`pnpm --filter mobile dev`)에서 의미 있는 건 가져오기뿐이다. 녹음은 브라우저에서 webm이 나와 서버가 받는 m4a와 맞지 않으니 네이티브(dev build)에서만 쓴다.
 - 피드백은 take와 원본 녹음 둘 다에 남길 수 있고, 본인 코멘트는 `···`로 수정·삭제한다 (`PATCH/DELETE /comments/:id`, `GET/POST /sessions/:id/comments`). `0006` 마이그레이션이 `comments.session_id`를 더하고 `take_id`를 nullable로 바꾼다 — 기존 체크아웃은 `db:migrate`(컨테이너는 기동 시 자동).
 - take 경계는 타임라인에서 start/end 핸들로 편집한다. 저장하면 `PATCH /takes/:id`(경계 변경 → 재컷 잡)가 돌아 재컷·peaks·durationSec을 재계산하고, take 삭제는 `DELETE /takes/:id`.
+- 배포 순서: 워커를 API보다 먼저(또는 같이) 배포한다. API가 큐에 보내는 `{ type: "recut" }` 메시지를 옛 워커가 못 읽으면 예외로 3회 재전달 후 DLQ로 빠지고, take는 `updating`에 멈춘다.
 
 ### 팀 관리·i18n (모바일)
 

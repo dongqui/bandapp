@@ -14,7 +14,7 @@
 - **검출기 전처리(Python 워커).** POC의 YAMNet/PANNs 등으로 음악 구간 후보를 먼저 뽑아 `planChunks()`를 "후보 구간 목록"으로 교체. Gemini 토큰과 시간을 줄인다. 모델 선정이 선행돼야 한다.
 - **gap-merge 옵션.** 떨어진 후보를 N초 이내면 합치는 규칙. 지금은 Gemini 프롬프트가 담당한다.
 - **take 추가·분할·병합, 이름 변경.** 경계 편집·삭제([2026-09-11 스펙 B](superpowers/specs/2026-09-11-take-editing-design.md)) 다음 단계. 번호/이름 재배치 결정이 따라온다.
-- **재컷 스위퍼.** `takes.audio_status = updating`에 1시간 이상 머문 take를 failed로 돌린다 (워커가 죽고 DLQ까지 소진된 경우).
+- **재컷 스위퍼.** `takes.audio_status = updating`에 1시간 이상 머문 take를 failed로 돌린다 (워커가 죽고 DLQ까지 소진된 경우). 재컷은 단일 컨슈머 분석 큐(`MaxNumberOfMessages: 1`, 순차 루프, heartbeat 최대 3시간)를 분석 잡과 같이 쓰므로, 진행 중인 분석 뒤에 몇 시간씩 밀려 있을 수 있다 — 스위퍼는 세션이 `analyzing` 중인지(또는 워커가 실제로 잡을 집은 시점부터 경과 시간을 잼) 확인해, 대기 중일 뿐인 take를 failed로 오판하면 안 된다. 근본 해결은 재컷 전용 큐 분리.
 - **워커 e2e(실 Postgres)로 `analyzing` 가드 두 곳을 실제로 검증.** 지금 단위 테스트의 가짜 DB는 where 조건을 보지 않는다.
 
 ## 재생·피드백

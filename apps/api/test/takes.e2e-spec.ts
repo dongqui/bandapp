@@ -146,5 +146,14 @@ describe("takes API", () => {
       const t1 = await takeByIndex(0);
       await request(app.getHttpServer()).delete(`/takes/${t1.id}`).set(auth(owner.accessToken)).expect(409);
     });
+
+    it("비멤버는 403, 없는 take는 404", async () => {
+      const other = await createTestApp({ google: providerUser("stranger-1", "S"), storage: new FakeStorage() });
+      const stranger = await loginAs(other);
+      await other.close();
+      const t1 = await takeByIndex(0);
+      await request(app.getHttpServer()).delete(`/takes/${t1.id}`).set(auth(stranger.accessToken)).expect(403);
+      await request(app.getHttpServer()).delete("/takes/00000000-0000-0000-0000-000000000000").set(auth(owner.accessToken)).expect(404);
+    });
   });
 });

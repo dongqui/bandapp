@@ -140,7 +140,9 @@ export class TakesService {
         .where(and(eq(takes.id, takeId), eq(takes.version, nextVersion)));
     }
     const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
-    return toTake(row!);
+    // 트랜잭션과 재조회 사이에 다른 멤버가 지웠을 수 있다 — non-null assertion 대신 명시적으로 404
+    if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
+    return toTake(row);
   }
 
   /** 삭제 (결정 1·6). 코멘트는 FK cascade. 남은 take의 name·index는 그대로. 객체 삭제 실패는 정리 배치(백로그)가 줍는다 */

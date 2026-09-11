@@ -16,6 +16,7 @@ import type {
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
   UploadedPart,
@@ -105,6 +106,10 @@ export interface RehearsalApiClient {
   takes: {
     list(sessionId: string): Promise<Take[]>;
     audioUrl(takeId: string): Promise<AudioUrl>;
+    /** 경계 변경. 409 take_version_conflict / session_not_ready, 400 take_range_invalid / take_overlap. 응답은 audioStatus "updating" */
+    update(takeId: string, input: UpdateTakeInput): Promise<Take>;
+    /** 삭제. 코멘트도 함께 사라진다 */
+    remove(takeId: string): Promise<void>;
   };
   comments: {
     /** target이 { takeId }면 take 코멘트, { sessionId }면 원본 녹음 코멘트 */

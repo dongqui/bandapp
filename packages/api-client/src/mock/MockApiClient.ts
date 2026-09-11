@@ -19,6 +19,7 @@ import type {
   UploadStatus,
   User,
 } from "@bandapp/types";
+import { checkTakeRange, neighborsOf, type UpdateTakeInput } from "@bandapp/types";
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { UploadRecordingError } from "../upload";
@@ -44,6 +45,8 @@ export class MockApiClient implements RehearsalApiClient {
   private nextId = 1;
   // uploadStatus가 partCount를 실제로 만든 세션과 맞게 돌려주도록, create가 계산한 값을 세션별로 기억해 둔다.
   private partCounts = new Map<string, number>();
+  /** take 재컷(오디오 재생성) 시뮬레이션 지연 — 테스트가 0으로 줄인다 */
+  recutDelayMs = 1500;
 
   constructor(opts?: { analysisDelayMs?: number }) {
     this.analysisDelayMs = opts?.analysisDelayMs ?? 4000;
@@ -307,6 +310,46 @@ export class MockApiClient implements RehearsalApiClient {
   takes = {
     list: async (sessionId: string): Promise<Take[]> => (this.state.takes[sessionId] ?? []).map((t) => ({ ...t })),
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
+    update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
+      const take = this.findTake(takeId);
+      if (!take) throw new ApiError(404, "Take를 찾을 수 없어요.");
+      const session = this.mustSession(take.sessionId);
+      if (session.status !== "ready") throw new ApiError(409, "분석 중에는 take를 고칠 수 없어요.", "session_not_ready");
+      if (input.version !== take.version) throw new ApiError(409, "다른 멤버가 먼저 고쳤어요.", "take_version_conflict");
+      const siblings = this.state.takes[take.sessionId] ?? [];
+      const error = checkTakeRange(input.startMs, input.endMs, session.durationSec * 1000, neighborsOf(siblings, take.index));
+      if (error) throw new ApiError(400, error === "take_overlap" ? "옆 take와 겹칠 수 없어요." : "take 구간이 올바르지 않아요.", error);
+      // 코멘트는 절대 시각 보존 (스펙 B 결정 2) — Mock의 atSec은 초 단위라 반올림한다
+      const shiftSec = Math.round((take.startMs - input.startMs) / 1000);
+      for (const c of this.state.comments[commentKey({ takeId })] ?? []) c.atSec += shiftSec;
+      take.startMs = input.startMs;
+      take.endMs = input.endMs;
+      take.durationSec = Math.round((input.endMs - input.startMs) / 1000);
+      take.version += 1;
+      take.audioStatus = "updating";
+      const version = take.version;
+      setTimeout(() => {
+        if (take.version !== version) return; // 다음 편집이 덮어썼다
+        take.audioStatus = "ready";
+        take.peaks = fakePeaks(take.startMs + version);
+        this.emit();
+      }, this.recutDelayMs);
+      this.emit();
+      return { ...take };
+    },
+    remove: async (takeId: string): Promise<void> => {
+      const take = this.findTake(takeId);
+      if (!take) throw new ApiError(404, "Take를 찾을 수 없어요.");
+      const session = this.mustSession(take.sessionId);
+      if (session.status !== "ready") throw new ApiError(409, "분석 중에는 take를 지울 수 없어요.", "session_not_ready");
+      const key = commentKey({ takeId });
+      const topLevel = (this.state.comments[key] ?? []).filter((c) => c.parentId === null).length;
+      delete this.state.comments[key];
+      this.state.takes[take.sessionId] = (this.state.takes[take.sessionId] ?? []).filter((t) => t.id !== takeId);
+      session.takeCount = Math.max(0, session.takeCount - 1);
+      session.commentCount = Math.max(0, session.commentCount - topLevel);
+      this.emit();
+    },
   };
 
   comments = {

@@ -16,6 +16,7 @@ import type {
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
   UploadedPart,
@@ -277,6 +278,15 @@ export class HttpApiClient implements RehearsalApiClient {
   takes = {
     list: (sessionId: string): Promise<Take[]> => this.request<Take[]>("GET", `/sessions/${sessionId}/takes`),
     audioUrl: (takeId: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/takes/${takeId}/audio`),
+    update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
+      const take = await this.request<Take>("PATCH", `/takes/${takeId}`, input);
+      this.emit();
+      return take;
+    },
+    remove: async (takeId: string): Promise<void> => {
+      await this.request<void>("DELETE", `/takes/${takeId}`);
+      this.emit();
+    },
   };
 
   comments = {

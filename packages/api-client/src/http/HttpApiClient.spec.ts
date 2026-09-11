@@ -265,4 +265,21 @@ describe("HttpApiClient", () => {
     expect(res.url).toBe("https://r2/peaks.bin");
     expect(fetchFn).toHaveBeenCalledWith("https://api.test/sessions/s1/peaks", expect.objectContaining({ method: "GET" }));
   });
+
+  it("takes.update는 PATCH /takes/:id, takes.remove는 DELETE — 둘 다 구독자에게 알린다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(json(200, { id: "t1", version: 2, audioStatus: "updating" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    const take = await client.takes.update("t1", { startMs: 1000, endMs: 5000, version: 1 });
+    expect(take.version).toBe(2);
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ startMs: 1000, endMs: 5000, version: 1 }) }));
+    await client.takes.remove("t1");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1", expect.objectContaining({ method: "DELETE" }));
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
 });

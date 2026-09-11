@@ -72,3 +72,38 @@ describe("MockApiClient sessions.peaksUrl", () => {
     expect(typeof res.expiresAt).toBe("string");
   });
 });
+
+describe("MockApiClient takes 편집", () => {
+  it("update는 경계·version을 바꾸고 코멘트 atSec을 옮기며 잠시 뒤 ready가 된다", async () => {
+    const api = new MockApiClient();
+    api.recutDelayMs = 0;
+    const [t] = await api.takes.list("s1");
+    await api.comments.create({ takeId: t!.id }, { atSec: 30, text: "hi" });
+    const updated = await api.takes.update(t!.id, { startMs: t!.startMs + 10_000, endMs: t!.endMs, version: t!.version });
+    expect(updated).toMatchObject({ startMs: t!.startMs + 10_000, version: t!.version + 1, audioStatus: "updating" });
+    // s1-t0에는 시드 코멘트가 이미 있어 목록의 첫 항목이 아닐 수 있다 — 방금 만든 코멘트를 직접 찾는다
+    const c = (await api.comments.list({ takeId: t!.id })).find((x) => x.text === "hi");
+    expect(c!.atSec).toBe(20);
+    await new Promise((r) => setTimeout(r, 5));
+    const [after] = await api.takes.list("s1");
+    expect(after!.audioStatus).toBe("ready");
+  });
+  it("version이 다르면 409 take_version_conflict, 겹치면 400 take_overlap", async () => {
+    const api = new MockApiClient();
+    const [a, b] = await api.takes.list("s1");
+    await expect(api.takes.update(a!.id, { startMs: a!.startMs, endMs: a!.endMs, version: 99 })).rejects.toMatchObject({ status: 409, code: "take_version_conflict" });
+    await expect(api.takes.update(a!.id, { startMs: a!.startMs, endMs: b!.startMs + 1, version: a!.version })).rejects.toMatchObject({ status: 400, code: "take_overlap" });
+  });
+  it("remove는 take와 코멘트를 지우고 takeCount를 줄이며 남은 이름은 그대로", async () => {
+    const api = new MockApiClient();
+    const before = await api.takes.list("s1");
+    await api.comments.create({ takeId: before[0]!.id }, { atSec: 1, text: "x" });
+    await api.takes.remove(before[0]!.id);
+    const after = await api.takes.list("s1");
+    expect(after).toHaveLength(before.length - 1);
+    expect(after[0]!.name).toBe(before[1]!.name);
+    expect(await api.comments.list({ takeId: before[0]!.id })).toEqual([]);
+    const s = await api.sessions.get("s1");
+    expect(s.takeCount).toBe(before.length - 1);
+  });
+});

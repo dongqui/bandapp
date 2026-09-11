@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { TextInput, View } from "react-native";
+import { KeyboardAvoidingView, TextInput, View } from "react-native";
 import { useApi } from "@/api";
 import { useCurrentBandContext } from "@/features/band/CurrentBandProvider";
 import { parseInviteToken } from "@/features/invites/parseInviteToken";
@@ -47,7 +47,12 @@ export function OnboardingScreen() {
 
   return (
     <Screen>
-      <View style={{ flex: 1, justifyContent: "center", gap: 12, paddingHorizontal: 24 }}>
+      {/* edge-to-edge(Expo 57 기본)에서는 Android의 adjustResize가 동작하지 않아 키보드가 입력창을 덮는다 —
+          iOS뿐 아니라 Android도 padding으로 직접 비켜야 한다 (react-native-edge-to-edge README) */}
+      <KeyboardAvoidingView
+        behavior="padding"
+        style={{ flex: 1, justifyContent: "center", gap: 12, paddingHorizontal: 24 }}
+      >
         {mode === "menu" && (
           <>
             <AppText variant="title">함께 연습할{"\n"}팀을 만들어볼까요?</AppText>
@@ -166,7 +171,7 @@ export function OnboardingScreen() {
             </PressableOpacity>
           </>
         )}
-      </View>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }

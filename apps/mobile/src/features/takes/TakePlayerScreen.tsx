@@ -1,7 +1,7 @@
 import type { CommentTarget, TakeComment } from "@bandapp/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, View } from "react-native";
 import { useApi } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
 import { fmtClock, fmtDuration } from "@/lib/time";
@@ -177,7 +177,7 @@ export function TakePlayerScreen() {
   return (
     <Screen>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         style={{ flex: 1 }}
       >
         <View style={{ paddingHorizontal: space.sheetX }}>

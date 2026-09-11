@@ -13,10 +13,12 @@
 ## 분석
 - **검출기 전처리(Python 워커).** POC의 YAMNet/PANNs 등으로 음악 구간 후보를 먼저 뽑아 `planChunks()`를 "후보 구간 목록"으로 교체. Gemini 토큰과 시간을 줄인다. 모델 선정이 선행돼야 한다.
 - **gap-merge 옵션.** 떨어진 후보를 N초 이내면 합치는 규칙. 지금은 Gemini 프롬프트가 담당한다.
-- **Take 경계 편집 (스펙 B).** 타임라인 뷰어([2026-09-11 스펙](superpowers/specs/2026-09-11-timeline-viewer-design.md)) 위에 start/end 핸들 드래그·edge auto pan·playhead 스크럽을 더하고, `PATCH /takes/:id`로 재컷(`-c copy` ±23ms 오차)·peaks·durationSec 재계산. take 코멘트 `atSec`이 take 상대 시각이라 start를 옮기면 함께 밀어야 한다 — 제품 결정 필요. 세션 상세 칩 라벨을 디자인대로 "Edit takes"로 되돌린다.
+- **take 추가·분할·병합, 이름 변경.** 경계 편집·삭제([2026-09-11 스펙 B](superpowers/specs/2026-09-11-take-editing-design.md)) 다음 단계. 번호/이름 재배치 결정이 따라온다.
+- **재컷 스위퍼.** `takes.audio_status = updating`에 1시간 이상 머문 take를 failed로 돌린다 (워커가 죽고 DLQ까지 소진된 경우).
 - **워커 e2e(실 Postgres)로 `analyzing` 가드 두 곳을 실제로 검증.** 지금 단위 테스트의 가짜 DB는 where 조건을 보지 않는다.
 
 ## 재생·피드백
+- **playhead 스크럽.** 핸들을 잡고 끄는 seek. 탭 seek + ±1초로 충분해 미뤘다.
 - **녹음 중 라이브 파형 실제 미터링.** `LiveWaveform`은 아직 시드 애니메이션이다. expo-audio metering 값으로 그리려면 기기 검증이 필요하다 ([2026-09-10 스펙](superpowers/specs/2026-09-10-real-waveform-design.md) 범위 제외).
 - **파형 표시 곡선 튜닝.** 선형 진폭을 그대로 그린다. 조용한 구간이 너무 낮아 보이면 `apps/mobile/src/lib/peaks.ts`의 `barHeight` 한 곳에서 sqrt 등으로 바꾼다.
 - **기존 세션 피크 백필.** 2026-09-10 이전에 분석된 세션은 `peaks`가 null이라 평평한 플레이스홀더로 보인다. 필요해지면 Gemini 없이 R2 원본만 내려받아 `slicePeaks`로 채우는 일회성 스크립트를 만든다. 지금은 retry로 재분석한다.
@@ -43,7 +45,7 @@
 - **oxlint를 mobile·api-client에도.** `pnpm lint`는 `apps/api`만 돈다 — `apps/mobile`, `packages/api-client`에 lint 스크립트가 없다.
 
 ## 운영
-- **세션 삭제 API와 R2 객체 정리.** 세션을 지울 때 원본·take 객체, 피크 사이드카(`peaks.bin`)를 함께 지운다.
+- **세션 삭제 API와 R2 객체 정리.** 세션을 지울 때 원본·take 객체, 피크 사이드카(`peaks.bin`)를 함께 지운다. take 객체 키가 `{takeId}-v{n}.m4a` 패턴도 있다.
 - **만료된 multipart 업로드.** 버킷 수명주기 규칙이 7일 뒤 자동 중단한다. `recordings.upload_status=pending`으로 남은 행을 같이 정리하는 배치가 필요하다.
 - **Gemini 파일 정리 실패 재시도.** 지금은 경고 로그만 남긴다.
 - **`analyzing`에 1시간 이상 머문 세션을 자동으로 failed로 돌리는 스위퍼.** 지금은 사용자의 retry(1시간 뒤 허용)에 의존한다.

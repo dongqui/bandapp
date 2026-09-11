@@ -8,6 +8,7 @@ import {
 import { Stack, useRouter, useSegments } from "expo-router";
 import { useEffect, type ReactNode } from "react";
 import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ApiProvider } from "@/api";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
@@ -61,6 +62,7 @@ export default function RootLayout() {
   }, []);
   if (!fontsLoaded) return null;
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <ThemeProvider>
         <ApiProvider>
@@ -80,5 +82,6 @@ export default function RootLayout() {
         </ApiProvider>
       </ThemeProvider>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

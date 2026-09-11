@@ -33,7 +33,7 @@ export function generateTakes(sessionId: string, count: number): Take[] {
     const durationSec = 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150);
     const startMs = cursorMs;
     cursorMs += durationSec * 1000 + 45_000;
-    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: fakePeaks(seed * 7 + i) };
+    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: fakePeaks(seed * 7 + i), version: 1, audioStatus: "ready" as const };
   });
 }
 

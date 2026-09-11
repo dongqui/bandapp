@@ -97,6 +97,15 @@ export class FakeProducer {
     }
     this.enqueued.push(sessionId);
   }
+
+  recuts: Array<{ takeId: string; version: number }> = [];
+  async enqueueRecut(takeId: string, version: number): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("sqs down");
+    }
+    this.recuts.push({ takeId, version });
+  }
 }
 
 export async function createTestApp(overrides?: {

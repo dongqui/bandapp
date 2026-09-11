@@ -215,4 +215,23 @@ describe("sessions API", () => {
     const list = await request(app.getHttpServer()).get(`/bands/${bandId}/sessions`).set(auth(owner.accessToken)).expect(200);
     expect(list.body[0].peaks).toEqual(peaks);
   });
+
+  it("피크 사이드카 URL은 peaks_key가 있을 때만 주고, 세션 응답에는 키가 새지 않는다", async () => {
+    const { session } = await createSession();
+    const missing = await request(app.getHttpServer()).get(`/sessions/${session.id}/peaks`).set(auth(owner.accessToken)).expect(404);
+    expect(missing.body.code).toBe("peaks_not_found");
+    const key = `bands/${bandId}/sessions/${session.id}/peaks.bin`;
+    await db.update(sessions).set({ peaksKey: key }).where(eq(sessions.id, session.id));
+    const res = await request(app.getHttpServer()).get(`/sessions/${session.id}/peaks`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body).toEqual({ url: `https://fake.r2/${key}?signed`, expiresAt: expect.any(String) });
+    const detail = await request(app.getHttpServer()).get(`/sessions/${session.id}`).set(auth(owner.accessToken)).expect(200);
+    expect(detail.body).not.toHaveProperty("peaksKey");
+  });
+
+  it("비멤버는 피크 URL을 못 받는다", async () => {
+    const { session } = await createSession();
+    await db.update(sessions).set({ peaksKey: "bands/x/sessions/y/peaks.bin" }).where(eq(sessions.id, session.id));
+    const other = await stranger();
+    await request(app.getHttpServer()).get(`/sessions/${session.id}/peaks`).set(auth(other.accessToken)).expect(403);
+  });
 });

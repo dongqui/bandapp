@@ -60,7 +60,7 @@ export function ProcessingScreen() {
         ) : null}
       </View>
       <AppText variant="small" style={{ textAlign: "center", paddingHorizontal: space.screenX + 16, paddingBottom: 64, lineHeight: 18 }}>
-        {phase === "uploading" ? "Keep the app open until the upload finishes." : "You can close the app — your takes will be ready when you're back."}
+        {phase === "idle" || phase === "uploading" ? "Keep the app open until the upload finishes." : "You can close the app — your takes will be ready when you're back."}
       </AppText>
     </Screen>
   );

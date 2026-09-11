@@ -1,3 +1,5 @@
+import { PEAKS_FILE_HEADER_BYTES, PEAKS_FILE_MAGIC, PEAKS_FILE_VERSION } from "@bandapp/types";
+
 /**
  * 파형 피크 계산 — ffmpeg 없이 테스트하는 순수 모듈 (2026-09-10 스펙).
  * 워커는 원본을 한 번 s16le 모노로 디코드해 PeakAccumulator에 흘리고, 세션 전체와 take 구간을
@@ -87,4 +89,30 @@ export function slicePeaks(hires: Uint8Array, peaksPerSec: number, startMs: numb
   }
   if (max === 0) return out;
   return out.map((v) => Math.round((v / max) * 255));
+}
+
+/** 고해상도 피크를 peaks.bin 바이트로. 헤더 형식은 @bandapp/types의 PEAKS_FILE_* 참고 (2026-09-11 스펙 결정 4). */
+export function encodePeaksFile(hires: Uint8Array, peaksPerSec: number): Buffer {
+  if (!Number.isInteger(peaksPerSec) || peaksPerSec <= 0 || peaksPerSec > 0xffff) {
+    throw new Error(`peaksPerSec must be an integer in 1..65535, got ${peaksPerSec}`);
+  }
+  const out = Buffer.alloc(PEAKS_FILE_HEADER_BYTES + hires.length);
+  out.write(PEAKS_FILE_MAGIC, 0, "ascii");
+  out.writeUInt8(PEAKS_FILE_VERSION, 4);
+  out.writeUInt16LE(peaksPerSec, 5);
+  out.writeUInt8(0, 7);
+  out.set(hires, PEAKS_FILE_HEADER_BYTES);
+  return out;
+}
+
+/** peaks.bin → 고해상도 피크. encodePeaksFile의 역. 형식이 다르면 throw (호출자가 peaks null로 내려간다) */
+export function decodePeaksFile(buf: Buffer): { peaksPerSec: number; hires: Uint8Array } {
+  if (buf.length < PEAKS_FILE_HEADER_BYTES) throw new Error("peaks file too short");
+  const magic = buf.subarray(0, 4).toString("ascii");
+  if (magic !== PEAKS_FILE_MAGIC) throw new Error(`bad peaks magic: ${magic}`);
+  const version = buf.readUInt8(4);
+  if (version !== PEAKS_FILE_VERSION) throw new Error(`unsupported peaks version: ${version}`);
+  const peaksPerSec = buf.readUInt16LE(5);
+  if (peaksPerSec === 0) throw new Error("peaksPerSec is 0");
+  return { peaksPerSec, hires: new Uint8Array(buf.subarray(PEAKS_FILE_HEADER_BYTES)) };
 }

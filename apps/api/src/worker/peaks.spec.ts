@@ -1,5 +1,6 @@
+import { PEAKS_FILE_HEADER_BYTES, PEAKS_FILE_MAGIC, PEAKS_FILE_VERSION } from "@bandapp/types";
 import { describe, expect, it } from "vitest";
-import { PeakAccumulator, slicePeaks } from "./peaks.js";
+import { decodePeaksFile, encodePeaksFile, PeakAccumulator, slicePeaks } from "./peaks.js";
 
 /** s16le 버퍼 — ffmpeg stdout과 같은 바이트 순서 */
 function pcm(samples: number[]): Buffer {
@@ -73,5 +74,49 @@ describe("slicePeaks", () => {
     const hires = Uint8Array.from([...Array<number>(50).fill(0), ...Array<number>(50).fill(255)]);
     expect(slicePeaks(hires, 50, 0, 2000, 2)).toEqual([0, 255]);
     expect(slicePeaks(hires, 50, 1000, 2000, 2)).toEqual([255, 255]);
+  });
+});
+
+describe("encodePeaksFile", () => {
+  it("8바이트 헤더(magic, version, peaksPerSec u16 LE, reserved) 뒤에 피크 바이트를 그대로 붙인다", () => {
+    const buf = encodePeaksFile(Uint8Array.from([0, 128, 255]), 50);
+    expect(buf.length).toBe(PEAKS_FILE_HEADER_BYTES + 3);
+    expect(buf.subarray(0, 4).toString("ascii")).toBe(PEAKS_FILE_MAGIC);
+    expect(buf.readUInt8(4)).toBe(PEAKS_FILE_VERSION);
+    expect(buf.readUInt16LE(5)).toBe(50);
+    expect(buf.readUInt8(7)).toBe(0);
+    expect(Array.from(buf.subarray(8))).toEqual([0, 128, 255]);
+  });
+
+  it("빈 피크는 헤더만 있는 파일이 된다", () => {
+    expect(encodePeaksFile(new Uint8Array(0), 50).length).toBe(PEAKS_FILE_HEADER_BYTES);
+  });
+
+  it("peaksPerSec가 1..65535 정수가 아니면 throw", () => {
+    expect(() => encodePeaksFile(new Uint8Array(0), 0)).toThrow();
+    expect(() => encodePeaksFile(new Uint8Array(0), 70_000)).toThrow();
+    expect(() => encodePeaksFile(new Uint8Array(0), 1.5)).toThrow();
+  });
+});
+
+describe("decodePeaksFile", () => {
+  it("encodePeaksFile의 역이다", () => {
+    const hires = Uint8Array.from([0, 7, 255, 128]);
+    const out = decodePeaksFile(encodePeaksFile(hires, 50));
+    expect(out.peaksPerSec).toBe(50);
+    expect(Array.from(out.hires)).toEqual([0, 7, 255, 128]);
+  });
+  it("magic·version·peaksPerSec가 틀리면 throw", () => {
+    const ok = encodePeaksFile(new Uint8Array(0), 50);
+    const badMagic = Buffer.from(ok);
+    badMagic.write("XXXX", 0, "ascii");
+    expect(() => decodePeaksFile(badMagic)).toThrow(/magic/);
+    const badVersion = Buffer.from(ok);
+    badVersion.writeUInt8(9, 4);
+    expect(() => decodePeaksFile(badVersion)).toThrow(/version/);
+    const zero = Buffer.from(ok);
+    zero.writeUInt16LE(0, 5);
+    expect(() => decodePeaksFile(zero)).toThrow(/peaksPerSec/);
+    expect(() => decodePeaksFile(Buffer.alloc(3))).toThrow(/short/);
   });
 });

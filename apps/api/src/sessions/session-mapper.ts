@@ -22,6 +22,8 @@ export interface SessionRow {
   takeCount: number;
   commentCount: number;
   peaks: number[] | null;
+  /** peaks.bin R2 키 — wire Session에는 노출하지 않는다 (엔드포인트가 404로 알린다) */
+  peaksKey: string | null;
   updatedAt: Date;
 }
 
@@ -52,6 +54,7 @@ export const SESSION_WITH_COUNTS = {
   durationMs: sessions.durationMs,
   takeCount: sessions.takeCount,
   peaks: sessions.peaks,
+  peaksKey: sessions.peaksKey,
   // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
   updatedAt: sessions.updatedAt,
   // 상관 서브쿼리이므로 "sessions"."id"를 테이블명까지 명시해 comments.id와의 모호성을 없앤다.
@@ -70,4 +73,9 @@ export function takeKey(bandId: string, sessionId: string, takeId: string): stri
 /** takeKey가 만드는 객체 키들의 공통 접두어. DB 행 없이 R2에만 남은 take 객체를 찾을 때 쓴다. */
 export function takesPrefix(bandId: string, sessionId: string): string {
   return `bands/${bandId}/sessions/${sessionId}/takes/`;
+}
+
+/** 고해상도 피크 사이드카 객체 키 (2026-09-11 스펙 결정 3). retry는 같은 키를 덮어쓴다. */
+export function peaksKey(bandId: string, sessionId: string): string {
+  return `bands/${bandId}/sessions/${sessionId}/peaks.bin`;
 }

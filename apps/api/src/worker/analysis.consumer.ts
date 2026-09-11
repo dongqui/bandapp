@@ -7,9 +7,10 @@ import {
   SQSClient,
   type Message,
 } from "@aws-sdk/client-sqs";
-import type { AnalyzeSessionJob } from "@bandapp/types";
+import type { AnalyzeSessionJob, QueueJob } from "@bandapp/types";
 import { SQS_CLIENT } from "../queue/queue.constants.js";
 import { SessionAnalysisService } from "./session-analysis.service.js";
+import { TakeRecutService } from "./take-recut.service.js";
 
 /** 긴 분석 중 재전달을 막는다 (스펙 결정 8). 큐 기본 visibility(300초)와 같은 값으로 연장한다. */
 const VISIBILITY_TIMEOUT_SEC = 300;
@@ -32,6 +33,7 @@ export class AnalysisConsumer {
   constructor(
     private readonly sqs: SQSClient,
     private readonly analysis: SessionAnalysisService,
+    private readonly recut: TakeRecutService,
     { heartbeatMs = DEFAULT_HEARTBEAT_MS, maxHeartbeats = MAX_HEARTBEATS }: AnalysisConsumerOptions = {},
   ) {
     this.heartbeatMs = heartbeatMs;
@@ -115,15 +117,23 @@ export class AnalysisConsumer {
   }
 
   private async handleMessage(message: Message): Promise<void> {
-    const job = JSON.parse(message.Body ?? "") as AnalyzeSessionJob;
-    if (typeof job.sessionId !== "string") throw new Error("message has no sessionId");
-    this.logger.log(`received analysis job: sessionId=${job.sessionId}`);
-    await this.analysis.run(job.sessionId);
+    const job = JSON.parse(message.Body ?? "") as QueueJob;
+    // type이 있으면 재컷, 없으면 분석 — 같은 큐를 쓴다 (2026-09-11 스펙 B 결정 3)
+    if ("type" in job && job.type === "recut") {
+      if (typeof job.takeId !== "string" || typeof job.version !== "number") throw new Error("recut message has no takeId/version");
+      this.logger.log(`received recut job: takeId=${job.takeId} v${job.version}`);
+      await this.recut.run(job.takeId, job.version);
+      return;
+    }
+    const analysis = job as AnalyzeSessionJob;
+    if (typeof analysis.sessionId !== "string") throw new Error("message has no sessionId");
+    this.logger.log(`received analysis job: sessionId=${analysis.sessionId}`);
+    await this.analysis.run(analysis.sessionId);
   }
 }
 
 export const analysisConsumerProvider: Provider = {
   provide: AnalysisConsumer,
-  useFactory: (sqs: SQSClient, analysis: SessionAnalysisService) => new AnalysisConsumer(sqs, analysis),
-  inject: [SQS_CLIENT, SessionAnalysisService],
+  useFactory: (sqs: SQSClient, analysis: SessionAnalysisService, recut: TakeRecutService) => new AnalysisConsumer(sqs, analysis, recut),
+  inject: [SQS_CLIENT, SessionAnalysisService, TakeRecutService],
 };

@@ -32,4 +32,15 @@ describe("AnalysisProducer", () => {
       "SQS_ANALYSIS_QUEUE_URL",
     );
   });
+
+  it("sends a recut job with type, takeId and version to the same queue", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const producer = new AnalysisProducer({ send } as unknown as SQSClient);
+
+    await producer.enqueueRecut("t-1", 3);
+
+    const command = send.mock.calls[0][0] as SendMessageCommand;
+    expect(command.input.QueueUrl).toBe(queueUrl);
+    expect(JSON.parse(command.input.MessageBody!)).toEqual({ type: "recut", takeId: "t-1", version: 3 });
+  });
 });

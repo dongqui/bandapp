@@ -83,4 +83,10 @@ export class SessionsController {
     requireUuidParam(id, "id");
     return this.sessions.audioUrl(id, userId);
   }
+
+  @Get(":id/peaks")
+  peaks(@CurrentUserId() userId: string, @Param("id") id: string): Promise<AudioUrl> {
+    requireUuidParam(id, "id");
+    return this.sessions.peaksUrl(id, userId);
+  }
 }

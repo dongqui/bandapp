@@ -16,6 +16,7 @@ import type {
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
   UploadedPart,
@@ -266,6 +267,7 @@ export class HttpApiClient implements RehearsalApiClient {
       return session;
     },
     audioUrl: (id: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/sessions/${id}/audio`),
+    peaksUrl: (id: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/sessions/${id}/peaks`),
     upload: (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void, onCreated?: (sessionId: string) => Promise<void>): Promise<Session> =>
       // presigned URL로의 PUT은 API 서버가 아니라 R2로 가므로 Authorization 없이 fetchFn을 그대로 쓴다
       uploadRecording({ client: this, bandId, input, source, fetchFn: this.fetchFn, onProgress, onCreated }),
@@ -276,6 +278,15 @@ export class HttpApiClient implements RehearsalApiClient {
   takes = {
     list: (sessionId: string): Promise<Take[]> => this.request<Take[]>("GET", `/sessions/${sessionId}/takes`),
     audioUrl: (takeId: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/takes/${takeId}/audio`),
+    update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
+      const take = await this.request<Take>("PATCH", `/takes/${takeId}`, input);
+      this.emit();
+      return take;
+    },
+    remove: async (takeId: string): Promise<void> => {
+      await this.request<void>("DELETE", `/takes/${takeId}`);
+      this.emit();
+    },
   };
 
   comments = {

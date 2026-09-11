@@ -165,6 +165,19 @@ export class SessionsService {
     };
   }
 
+  /**
+   * 고해상도 피크 사이드카의 presigned URL. 워커가 못 올렸거나 옛 세션이면 404 peaks_not_found —
+   * 앱은 그때 128버킷(Session.peaks)으로 그린다 (2026-09-11 스펙 결정 5·14).
+   */
+  async peaksUrl(id: string, userId: string): Promise<AudioUrl> {
+    const session = await this.loadForMember(id, userId);
+    if (!session.peaksKey) throw new NotFoundException({ message: "파형 데이터가 아직 없어요.", code: "peaks_not_found" });
+    return {
+      url: await this.storage.presignGet(session.peaksKey, PRESIGN_EXPIRES_SEC),
+      expiresAt: new Date(Date.now() + PRESIGN_EXPIRES_SEC * 1000).toISOString(),
+    };
+  }
+
   /** 큐 발행 실패는 사용자가 retry로 복구한다 — 세션을 failed로 남기고 삼킨다 (스펙 오류 처리 표). */
   private async enqueue(id: string): Promise<void> {
     try {

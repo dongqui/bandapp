@@ -1,5 +1,8 @@
 import type { TakeCandidateType } from "./analysis";
 
+/** 재컷(오디오 재생성) 진행 상태 */
+export type TakeAudioStatus = "ready" | "updating" | "failed";
+
 export interface Take {
   id: string;
   sessionId: string;
@@ -14,6 +17,17 @@ export interface Take {
   commentCount: number;
   /** 원본 타임라인의 startMs~endMs 구간 피크 (길이 PEAK_BUCKETS). 워커가 못 만들었거나 옛 데이터면 null */
   peaks: number[] | null;
+  /** PATCH 낙관적 잠금용. 경계를 바꿀 때마다 +1 (2026-09-11 스펙 B 결정 4) */
+  version: number;
+  /** 재컷 진행 상태. updating이면 플레이어가 재생을 막는다 (결정 3) */
+  audioStatus: TakeAudioStatus;
+}
+
+export interface UpdateTakeInput {
+  startMs: number;
+  endMs: number;
+  /** 목록에서 본 값. 다르면 409 take_version_conflict */
+  version: number;
 }
 
 export interface TakeComment {

@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "peaks_key" text;

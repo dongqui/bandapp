@@ -256,4 +256,13 @@ describe("HttpApiClient", () => {
     expect(fetchFn).toHaveBeenCalledWith("https://api.test/comments/c1", expect.objectContaining({ method: "DELETE" }));
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it("sessions.peaksUrl은 GET /sessions/:id/peaks", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(200, { url: "https://r2/peaks.bin", expiresAt: "2026-09-11T00:00:00.000Z" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const res = await client.sessions.peaksUrl("s1");
+    expect(res.url).toBe("https://r2/peaks.bin");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/sessions/s1/peaks", expect.objectContaining({ method: "GET" }));
+  });
 });

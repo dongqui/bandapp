@@ -281,6 +281,7 @@ export class MockApiClient implements RehearsalApiClient {
       return { ...s };
     },
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
+    peaksUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
     upload: async (bandId: string, input: CreateSessionInput, source: UploadSource, onProgress?: (p: UploadProgress) => void, onCreated?: (sessionId: string) => Promise<void>): Promise<Session> => {
       const { session } = await this.sessions.create(bandId, input);
       // Http의 uploadRecording과 같은 계약: onCreated(또는 그 이후 업로드)가 던지면

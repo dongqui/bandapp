@@ -89,6 +89,8 @@ export interface RehearsalApiClient {
     completeUpload(id: string, parts: UploadedPart[]): Promise<Session>;
     retryAnalysis(id: string): Promise<Session>;
     audioUrl(id: string): Promise<AudioUrl>;
+    /** 고해상도 피크 사이드카(peaks.bin) URL. 없으면 ApiError 404 code "peaks_not_found". Mock은 url ""를 준다 → 앱은 128버킷 폴백 */
+    peaksUrl(id: string): Promise<AudioUrl>;
     /** create → 파트 업로드 → complete를 한 번에. onCreated는 create 직후 sessionId를 준다. Mock은 진행률만 흉내 낸다. */
     upload(
       bandId: string,

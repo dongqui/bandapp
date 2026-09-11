@@ -63,3 +63,12 @@ describe("MockApiClient bands 관리", () => {
     expect(me.part).toBe("Synth");
   });
 });
+
+describe("MockApiClient sessions.peaksUrl", () => {
+  it("Mock에는 사이드카가 없다 — 빈 url (앱은 128버킷 폴백)", async () => {
+    const api = new MockApiClient();
+    const res = await api.sessions.peaksUrl("s1");
+    expect(res.url).toBe("");
+    expect(typeof res.expiresAt).toBe("string");
+  });
+});

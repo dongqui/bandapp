@@ -48,9 +48,11 @@ export class TakeRecutService {
       return;
     }
 
-    const workDir = await mkdtemp(join(this.tmpRoot, `recut-${takeId}-`));
-    const newKey = takeKey(session.bandId, session.id, `${takeId}-v${version}`);
+    // mkdtemp 실패도 try 안에서 잡혀야 failed로 남는다 — try 밖이면 예외가 그대로 나가 재전달 경로를 탄다
+    let workDir: string | null = null;
     try {
+      workDir = await mkdtemp(join(this.tmpRoot, `recut-${takeId}-`));
+      const newKey = takeKey(session.bandId, session.id, `${takeId}-v${version}`);
       const original = join(workDir, "original.m4a");
       await this.storage.downloadToFile(recording.objectKey, original);
       const output = join(workDir, "take.m4a");
@@ -76,7 +78,7 @@ export class TakeRecutService {
       this.logger.error(`take ${takeId}: recut v${version} failed: ${String(err)}`);
       await this.fail(takeId, version, err instanceof Error ? err.message : String(err));
     } finally {
-      await rm(workDir, { recursive: true, force: true });
+      if (workDir) await rm(workDir, { recursive: true, force: true });
     }
   }
 

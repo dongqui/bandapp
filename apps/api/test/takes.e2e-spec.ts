@@ -41,7 +41,7 @@ describe("takes API", () => {
     await db.insert(comments).values({ sessionId, takeId: first!.id, authorId: owner.userId, atMs: 1000, text: "x" });
     const res = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
     expect(res.body).toEqual([
-      { id: first!.id, sessionId, index: 0, name: "Take 1", durationSec: 241, startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", commentCount: 1, peaks: SEED_PEAKS },
+      { id: first!.id, sessionId, index: 0, name: "Take 1", durationSec: 241, startMs: 10_000, endMs: 250_500, type: "PERFORMANCE", commentCount: 1, peaks: SEED_PEAKS, version: 1, audioStatus: "ready" },
       expect.objectContaining({ index: 1, name: "Take 2", durationSec: 120, commentCount: 0, peaks: null }),
     ]);
   });

@@ -22,6 +22,7 @@ export type AuthProviderName = (typeof authProvider.enumValues)[number];
 export const sessionStatus = pgEnum("session_status", ["uploading", "analyzing", "failed", "ready"]);
 export const uploadStatus = pgEnum("upload_status", ["pending", "completed", "aborted"]);
 export const takeType = pgEnum("take_type", ["PERFORMANCE", "PARTIAL_PRACTICE"]);
+export const takeAudioStatus = pgEnum("take_audio_status", ["ready", "updating", "failed"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
 
@@ -171,6 +172,11 @@ export const takes = pgTable(
     objectKey: text("object_key").notNull(),
     // 원본 타임라인의 start_ms~end_ms 구간 피크 — 길이 128, 0~255. 추출 실패면 null (2026-09-10 스펙 결정 3, 5)
     peaks: smallint("peaks").array(),
+    // 경계 편집 낙관적 잠금. PATCH마다 +1 (2026-09-11 스펙 B 결정 4)
+    version: integer("version").notNull().default(1),
+    // 재컷 진행 상태 — updating이면 앱이 재생을 막는다. 실패 사유는 audio_error (결정 3)
+    audioStatus: takeAudioStatus("audio_status").notNull().default("ready"),
+    audioError: text("audio_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("takes_session_index_uq").on(t.sessionId, t.index)],

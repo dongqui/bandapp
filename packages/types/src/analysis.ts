@@ -13,3 +13,7 @@ export interface TakeCandidate {
 export interface AnalyzeSessionJob {
   sessionId: string;
 }
+
+/** take 재컷 잡 — AnalyzeSessionJob과 같은 큐를 쓴다. type이 없으면 분석 잡이다 (스펙 B §타입·API 계약) */
+export type RecutTakeJob = { type: "recut"; takeId: string; version: number };
+export type QueueJob = AnalyzeSessionJob | RecutTakeJob;

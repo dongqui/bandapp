@@ -6,4 +6,5 @@ export * from "./invite";
 export * from "./peaks";
 export * from "./session";
 export * from "./take";
+export * from "./take-rules";
 export * from "./user";

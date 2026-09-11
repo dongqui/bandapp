@@ -1,6 +1,7 @@
 import type { ChangeMessageVisibilityCommand, DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { AnalysisConsumer } from "./analysis.consumer.js";
 import type { SessionAnalysisService } from "./session-analysis.service.js";
+import type { TakeRecutService } from "./take-recut.service.js";
 
 describe("AnalysisConsumer", () => {
   const queueUrl = "http://localstack:4566/000000000000/recording-analysis";
@@ -18,9 +19,11 @@ describe("AnalysisConsumer", () => {
     send: ReturnType<typeof vi.fn>,
     run: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined),
     options: { heartbeatMs?: number; maxHeartbeats?: number } = { heartbeatMs: 10 },
+    recutRun: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValue(undefined),
   ) {
     const analysis = { run } as unknown as SessionAnalysisService;
-    return { consumer: new AnalysisConsumer({ send } as unknown as SQSClient, analysis, options), run };
+    const recut = { run: recutRun } as unknown as TakeRecutService;
+    return { consumer: new AnalysisConsumer({ send } as unknown as SQSClient, analysis, recut, options), run, recutRun };
   }
 
   it("logs and deletes each received message", async () => {
@@ -116,5 +119,33 @@ describe("AnalysisConsumer", () => {
     await consumer.pollOnce();
     const visibility = send.mock.calls.map((c) => c[0]).filter((c) => c.constructor.name === "ChangeMessageVisibilityCommand");
     expect(visibility.length).toBeLessThanOrEqual(2);
+  });
+
+  it("dispatches recut jobs to TakeRecutService and analysis jobs to SessionAnalysisService", async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({
+        Messages: [
+          { Body: JSON.stringify({ type: "recut", takeId: "t-1", version: 4 }), ReceiptHandle: "rh-1" },
+          { Body: JSON.stringify({ sessionId: "s-1" }), ReceiptHandle: "rh-2" },
+        ],
+      })
+      .mockResolvedValue({});
+    const { consumer, run, recutRun } = makeConsumer(send);
+
+    await consumer.pollOnce();
+
+    expect(recutRun).toHaveBeenCalledWith("t-1", 4);
+    expect(run).toHaveBeenCalledWith("s-1");
+  });
+
+  it("does not delete a recut message without a numeric version", async () => {
+    const send = vi.fn().mockResolvedValueOnce({
+      Messages: [{ Body: JSON.stringify({ type: "recut", takeId: "t-1" }), ReceiptHandle: "rh-1" }],
+    });
+    const { consumer, recutRun } = makeConsumer(send);
+    await consumer.pollOnce();
+    expect(recutRun).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });

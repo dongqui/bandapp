@@ -1,4 +1,4 @@
-import { originalKey, takeKey, titleFor, toSession } from "./session-mapper.js";
+import { originalKey, peaksKey, takeKey, titleFor, toSession } from "./session-mapper.js";
 
 describe("titleFor", () => {
   it("uses the client's local date from the offset string", () => {
@@ -21,6 +21,7 @@ describe("toSession", () => {
       takeCount: 3,
       commentCount: 2,
       peaks: null,
+      peaksKey: null,
       updatedAt: new Date("2026-09-04T10:00:00Z"),
     });
     expect(session).toEqual({
@@ -62,5 +63,18 @@ describe("object keys", () => {
   it("nest under band and session", () => {
     expect(originalKey("b", "s")).toBe("bands/b/sessions/s/original.m4a");
     expect(takeKey("b", "s", "t")).toBe("bands/b/sessions/s/takes/t.m4a");
+  });
+});
+
+describe("peaksKey", () => {
+  it("원본·take와 같은 세션 접두어 아래 peaks.bin", () => {
+    expect(peaksKey("b1", "s1")).toBe("bands/b1/sessions/s1/peaks.bin");
+  });
+});
+
+describe("toSession peaksKey", () => {
+  it("peaksKey는 wire Session에 노출되지 않는다", () => {
+    const session = toSession({ id: "s", bandId: "b", title: "t", name: null, status: "ready", startedAt: new Date(), durationMs: 1000, takeCount: 0, commentCount: 0, peaks: null, peaksKey: "bands/b/sessions/s/peaks.bin", updatedAt: new Date() });
+    expect(session).not.toHaveProperty("peaksKey");
   });
 });

@@ -132,6 +132,8 @@ export const sessions = pgTable("sessions", {
   analysisModel: text("analysis_model"),
   // 원본 녹음 전체 피크 — 길이 128, 0~255. 워커가 ready로 바꿀 때 채운다. 옛 데이터·추출 실패면 null (2026-09-10 스펙 결정 1, 5)
   peaks: smallint("peaks").array(),
+  // 고해상도 피크 사이드카(peaks.bin)의 R2 키. 워커 업로드가 성공했을 때만 채운다. 옛 데이터·실패면 null (2026-09-11 스펙 결정 5)
+  peaksKey: text("peaks_key"),
   ...timestamps,
 });
 

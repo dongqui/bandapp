@@ -27,7 +27,7 @@ import { useFollowPlayhead } from "./useFollowPlayhead";
 import { usePlaybackClock } from "./usePlaybackClock";
 import { useSessionPeaks } from "./useSessionPeaks";
 import { useTakeDraft } from "./useTakeDraft";
-import { useTimelineViewport } from "./useTimelineViewport";
+import { useTimelineViewport, type TimelineViewportState } from "./useTimelineViewport";
 
 /** ±버튼이 재생 위치를 옮기는 폭 — Take Feedback 화면과 같다 */
 const NUDGE_MS = 1000;
@@ -132,7 +132,7 @@ export function TimelineScreen() {
   const [draftRange, setDraftRange] = useState<Draft | null>(null);
 
   // 파형 탭 → seek. onTap이 vp를 필요로 하고 vp가 onTap을 받으니 ref로 순환을 끊는다
-  const vpRef = useRef<ReturnType<typeof useTimelineViewport> | null>(null);
+  const vpRef = useRef<TimelineViewportState | null>(null);
   const onTap = useCallback(
     (x: number) => {
       const current = vpRef.current;
@@ -147,7 +147,7 @@ export function TimelineScreen() {
     () => ({ draft: draftState.draft, neighbors: draftState.neighbors, onHandleRelease }),
     [draftState.draft, draftState.neighbors, onHandleRelease],
   );
-  const vp = useTimelineViewport(durationMs, onTap, editing);
+  const { vp, gesture } = useTimelineViewport(durationMs, onTap, editing);
   vpRef.current = vp;
   const follow = useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
 
@@ -309,7 +309,7 @@ export function TimelineScreen() {
         <TimeRuler vp={vp} />
       </View>
       <View style={{ marginTop: 2, marginHorizontal: space.screenX }}>
-        <GestureDetector gesture={vp.gesture}>
+        <GestureDetector gesture={gesture}>
           <View>
             <WaveformCanvas levels={peaks.levels} vp={vp} playheadMs={clock.playheadMs} level={level} />
           </View>

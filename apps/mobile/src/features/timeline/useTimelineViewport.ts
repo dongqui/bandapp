@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import {
   useCompetingGestures,
@@ -31,7 +31,6 @@ export interface TimelineViewportState {
   /** 재생 위치 따라가기 — 제스처가 시작되면 여기서 끈다 (스펙 결정 10) */
   follow: SharedValue<boolean>;
   activeGesture: SharedValue<ActiveGesture>;
-  gesture: ComposedGesture;
   onLayout: (e: LayoutChangeEvent) => void;
   /** JS에서 viewport를 통째로 바꾼다 (take fit 등). clamp된다 */
   setViewport: (v: Viewport) => void;
@@ -44,6 +43,17 @@ export interface TimelineViewportState {
 }
 
 /**
+ * 반환 shape. gesture는 state 객체 밖에 둔다 — 컴포넌트들이 worklet 안에서 `vp.startMs.value`처럼 state 객체를
+ * 통째로 캡처하는데, gesture(클래스 인스턴스, 내부에 Reanimated WorkletEventHandlerNative)는 UI 런타임으로
+ * 복사할 수 없어 네이티브에서 "[Worklets] Cannot copy value of type WorkletEventHandlerNative"로 죽는다.
+ * (웹은 복사 과정이 없어 안 났다 — 2026-09-12 기기 검증에서 발견)
+ */
+export interface TimelineViewportHandle {
+  vp: TimelineViewportState;
+  gesture: ComposedGesture;
+}
+
+/**
  * viewport 두 값(startMs, msPerPx)은 shared value로만 살고 React state가 없다 (2026-09-11 스펙 §상태 구분).
  * 팬은 changeX 증분을 현재 viewport에 더하고, 핀치는 onBegin 시점 viewport 기준 절대 scale로 계산한다.
  * 둘이 동시에 오면 팬이 핀치 origin의 startMs도 같이 밀어 서로 덮어쓰지 않는다 (결정 8, 초안 22-G).
@@ -53,7 +63,7 @@ export function useTimelineViewport(
   durationMs: number,
   onTap: (xPx: number, yPx: number) => void,
   editing?: EditingBindings,
-): TimelineViewportState {
+): TimelineViewportHandle {
   const startMs = useSharedValue(0);
   const msPerPx = useSharedValue(1);
   const widthPx = useSharedValue(0);
@@ -231,5 +241,10 @@ export function useTimelineViewport(
     [startMs, msPerPx, widthPx],
   );
 
-  return { startMs, msPerPx, widthPx, follow, activeGesture, gesture, onLayout, setViewport, zoomBy, snapshot, editMode };
+  // shared value·콜백은 전부 안정적이라 vp 객체 identity도 안정적이다 — 이를 deps로 쓰는 useCallback이 매 렌더 새로 만들어지지 않는다
+  const vp = useMemo<TimelineViewportState>(
+    () => ({ startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, zoomBy, snapshot, editMode }),
+    [startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, zoomBy, snapshot, editMode],
+  );
+  return { vp, gesture };
 }

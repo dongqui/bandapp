@@ -112,7 +112,8 @@ export function OverviewStrip({
             }}
           />
         ))}
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: 0, width: 1, backgroundColor: colors.accent }, headStyle]} />
+        <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: -1, width: 2, backgroundColor: colors.accent }, headStyle]} />
+        <Animated.View pointerEvents="none" style={[{ position: "absolute", top: -1, left: -3.5, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }, headStyle]} />
         <Animated.View
           pointerEvents="none"
           style={[

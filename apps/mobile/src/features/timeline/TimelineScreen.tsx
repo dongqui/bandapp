@@ -13,7 +13,7 @@ import { useTakes } from "@/features/takes/useTakes";
 import { useTakesPolling } from "@/features/takes/useTakesPolling";
 import { fmtClock, fmtDuration } from "@/lib/time";
 import { previewSeekMs, type Draft, type Handle } from "@/lib/timeline/edit";
-import { fitRange, xToTime } from "@/lib/timeline/viewport";
+import { xToTime } from "@/lib/timeline/viewport";
 import { font, space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, PressableOpacity, Screen, useToast } from "@/ui";
 import { OverviewStrip } from "./OverviewStrip";
@@ -33,28 +33,27 @@ import { useTimelineViewport, type TimelineViewportState } from "./useTimelineVi
 const NUDGE_MS = 1000;
 /** take 선택 시 좌우 여백 (2026-09-11 스펙 결정 11, 디자인 dur/0.6) */
 const FIT_PAD = 0.2;
-/** 디자인의 −/+ 버튼 줌 배율 */
-const ZOOM_STEP = 1.5;
 /** 디자인 Timeline 화면의 오버레이 색 — 테마 토큰에 없는 값 */
-const OVERLAY_BG = "rgba(26,29,34,0.85)";
-const PILL_BG = "#1A1D22";
 const BADGE_BG = "rgba(11,12,14,0.7)";
+/** take 내비의 비활성 화살표 색 (디자인 #3A3E45) — 테마 토큰에 없는 값 */
+const NAV_DISABLED = "#3A3E45";
 
-/** 파형 위에 겹치는 30px 원형 버튼 (디자인 −/+) */
-function RoundButton({ label, onPress }: { label: string; onPress: () => void }) {
+/** take 내비의 34px 원형 화살표 (디자인 ‹ ›) */
+function NavButton({ label, enabled, onPress }: { label: string; enabled: boolean; onPress: () => void }) {
   const { colors } = useTheme();
   return (
     <PressableOpacity
       onPress={onPress}
-      hitSlop={4}
-      style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: OVERLAY_BG, borderWidth: 1, borderColor: colors.borderStronger, alignItems: "center", justifyContent: "center" }}
+      disabled={!enabled}
+      hitSlop={6}
+      style={{ width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center", paddingBottom: 2 }}
     >
-      <AppText style={{ fontSize: 15, lineHeight: 18, color: colors.textSecondary }}>{label}</AppText>
+      <AppText style={{ fontSize: 17, lineHeight: 20, color: enabled ? colors.textSecondary : NAV_DISABLED }}>{label}</AppText>
     </PressableOpacity>
   );
 }
 
-/** 선택 카드의 accent 버튼 (Open take / Save / Retry) */
+/** 편집 카드의 accent 버튼 (Save / Retry) */
 function CardButton({ label, onPress, wide = false }: { label: string; onPress?: () => void; wide?: boolean }) {
   const { colors } = useTheme();
   return (
@@ -68,7 +67,7 @@ function CardButton({ label, onPress, wide = false }: { label: string; onPress?:
   );
 }
 
-/** 선택 카드의 아웃라인 버튼 (Cancel) */
+/** 편집 카드의 아웃라인 버튼 (Cancel / Retry) */
 function CardOutlineButton({ label, onPress }: { label: string; onPress: () => void }) {
   const { colors } = useTheme();
   return (
@@ -101,6 +100,10 @@ function NudgeButton({ label, onPress }: { label: string; onPress: () => void })
 /**
  * 타임라인 뷰어 (2026-09-11 스펙 A, Claude Design "Timeline" 화면). 데이터·제스처·재생은 전부 훅에 있고
  * 이 컴포넌트는 디자인대로 조립하고 탭 판정만 한다. 파형 탭은 seek, take 필 탭은 선택 + fit (결정 11).
+ *
+ * 2026-09-20 디자인 개정: 화면은 첫 take를 선택한 채로 열리고, 오버뷰 아래 ‹ TAKE n / N › 내비로 take를 오간다.
+ * 파형 위 −/+ 줌 버튼과 "⟲ PLAYHEAD" 필, 카드의 ··· / Open take가 빠졌다 — 카드는 초안이 dirty이거나 재컷
+ * 상태(updating/failed)일 때만 뜬다. take를 고르면 재생 위치도 그 시작으로 옮긴다(재생을 누르면 그 take가 들린다).
  */
 export function TimelineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -138,6 +141,8 @@ export function TimelineScreen() {
       const current = vpRef.current;
       if (!current) return;
       clock.seekTo(xToTime(current.snapshot(), x));
+      // 탭도 팬 onBegin을 거쳐 follow가 꺼진다 — seek한 위치는 화면 안이니 다시 따라가게 한다
+      current.follow.value = true;
     },
     [clock],
   );
@@ -149,7 +154,7 @@ export function TimelineScreen() {
   );
   const { vp, gesture } = useTimelineViewport(durationMs, onTap, editing);
   vpRef.current = vp;
-  const follow = useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
+  useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
 
   useAnimatedReaction(
     () => {
@@ -165,10 +170,12 @@ export function TimelineScreen() {
   const applySelect = useCallback(
     (t: Take) => {
       setSelectedTakeId(t.id);
-      vp.follow.value = false;
-      vp.setViewport(fitRange(vp.snapshot().widthPx, t.startMs, t.endMs, FIT_PAD, durationMs));
+      clock.seekTo(t.startMs);
+      vp.fitTo(t.startMs, t.endMs, FIT_PAD);
+      // playhead가 take 시작(화면 20% 지점)에 있으니 재생 중이어도 그대로 따라간다
+      vp.follow.value = true;
     },
-    [vp, durationMs],
+    [vp, clock],
   );
   // 초안이 dirty면 먼저 버릴지 묻는다
   const selectTake = useCallback(
@@ -179,6 +186,19 @@ export function TimelineScreen() {
     },
     [selectedTakeId, draftState.dirty, applySelect],
   );
+
+  // 화면은 첫 take에서 시작한다 (2026-09-20 디자인 개정). 한 번만 — 이후 선택 해제(삭제·409)는 그대로 둔다
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectedRef.current || !session || takeList.length === 0) return;
+    autoSelectedRef.current = true;
+    applySelect(takeList[0]!);
+  }, [session, takeList, applySelect]);
+
+  // ‹ › 내비 — 선택이 없으면 ›는 첫 take, ‹는 마지막 take로 간다
+  const navPos = selectedTakeId === null ? -1 : takeList.findIndex((t) => t.id === selectedTakeId);
+  const prevTake = navPos < 0 ? takeList[takeList.length - 1] : takeList[navPos - 1];
+  const nextTake = navPos < 0 ? takeList[0] : takeList[navPos + 1];
 
   const shownErrorRef = useRef<string | null>(null);
   useEffect(() => {
@@ -332,29 +352,26 @@ export function TimelineScreen() {
             </AppText>
           </View>
         ) : null}
-        <View style={{ position: "absolute", right: 8, top: 8, flexDirection: "row", gap: 6 }}>
-          <RoundButton label="−" onPress={() => vp.zoomBy(1 / ZOOM_STEP)} />
-          <RoundButton label="+" onPress={() => vp.zoomBy(ZOOM_STEP)} />
-        </View>
-        {!follow.following ? (
-          <PressableOpacity
-            onPress={follow.returnToPlayhead}
-            style={{ position: "absolute", right: 8, bottom: 10, backgroundColor: PILL_BG, borderWidth: 1, borderColor: colors.borderStronger, borderRadius: 15, paddingVertical: 7, paddingHorizontal: 12 }}
-          >
-            <AppText style={{ fontFamily: font.mono, fontSize: 10, lineHeight: 12, letterSpacing: 1, color: colors.textSecondary }}>⟲ PLAYHEAD</AppText>
-          </PressableOpacity>
-        ) : null}
       </View>
       <View style={{ marginTop: 10, marginHorizontal: space.screenX }}>
-        <TakeLane takes={takeList} vp={vp} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} />
+        <TakeLane takes={takeList} vp={vp} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} onMenu={setActionTake} />
       </View>
       <View style={{ marginTop: 14, marginHorizontal: space.screenX }}>
         <OverviewStrip levels={peaks.levels} vp={vp} takes={takeList} durationMs={durationMs} playheadMs={clock.playheadMs} />
       </View>
+      {takeList.length > 0 ? (
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14, marginHorizontal: space.screenX }}>
+          <NavButton label="‹" enabled={prevTake !== undefined} onPress={() => prevTake && selectTake(prevTake)} />
+          <AppText style={{ minWidth: 104, textAlign: "center", fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
+            {selectedTake ? `TAKE ${selectedTake.index + 1} / ${takeList.length}` : `${takeList.length} TAKES`}
+          </AppText>
+          <NavButton label="›" enabled={nextTake !== undefined} onPress={() => nextTake && selectTake(nextTake)} />
+        </View>
+      ) : null}
 
       <View style={{ flex: 1 }} />
 
-      {selectedTake ? (
+      {selectedTake && (draftState.dirty || selectedTake.audioStatus !== "ready") ? (
         <View style={{ marginHorizontal: space.screenX, marginVertical: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 10 }}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <AppText variant="rowTitle">{selectedTake.name}</AppText>
@@ -370,21 +387,10 @@ export function TimelineScreen() {
             </>
           ) : selectedTake.audioStatus === "failed" ? (
             <CardButton label={saving ? "Saving…" : "Retry"} onPress={saving ? undefined : () => void save()} />
-          ) : selectedTake.audioStatus === "updating" ? (
-            // 재컷 메시지가 유실되면 서버가 failed로 바꿔 주지 않아(재전달 3회 후 DLQ로 빠질 뿐) 사용자가 직접
+          ) : (
+            // updating. 재컷 메시지가 유실되면 서버가 failed로 바꿔 주지 않아(재전달 3회 후 DLQ로 빠질 뿐) 사용자가 직접
             // 재요청할 수 있어야 한다 — 최종 리뷰 결정. save()는 초안이 없으면 저장된 값 그대로 같은-값 PATCH를 보낸다
             <CardOutlineButton label={saving ? "Saving…" : "Retry"} onPress={() => { if (!saving) void save(); }} />
-          ) : (
-            <>
-              <PressableOpacity
-                onPress={() => setActionTake(selectedTake)}
-                hitSlop={6}
-                style={{ width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center" }}
-              >
-                <AppText style={{ fontSize: 14, lineHeight: 16, color: colors.textMuted }}>···</AppText>
-              </PressableOpacity>
-              <CardButton label="Open take" onPress={() => router.push(`/session/${session.id}/take/${selectedTake.id}`)} />
-            </>
           )}
         </View>
       ) : null}

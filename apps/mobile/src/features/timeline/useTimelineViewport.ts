@@ -12,7 +12,7 @@ import { runOnUI, useFrameCallback, useSharedValue, type SharedValue } from "rea
 import { scheduleOnRN } from "react-native-worklets";
 import type { Neighbors } from "@bandapp/types";
 import { autoPanPxPerFrame, hitTestHandle, trimDraft, type Draft, type Handle } from "@/lib/timeline/edit";
-import { clampViewport, keepCenterOnResize, panViewport, widestMsPerPx, xToTime, zoomAtFocal, type Viewport } from "@/lib/timeline/viewport";
+import { clampViewport, fitRange, keepCenterOnResize, panViewport, widestMsPerPx, xToTime, zoomAtFocal, type Viewport } from "@/lib/timeline/viewport";
 
 export type ActiveGesture = "pan" | "pinch" | null;
 export type EditMode = "handle-start" | "handle-end" | null;
@@ -34,8 +34,8 @@ export interface TimelineViewportState {
   onLayout: (e: LayoutChangeEvent) => void;
   /** JS에서 viewport를 통째로 바꾼다 (take fit 등). clamp된다 */
   setViewport: (v: Viewport) => void;
-  /** 화면 중앙 기준 줌 (디자인의 −/+ 버튼). scale > 1 확대. 사용자 이동이라 follow를 끈다 */
-  zoomBy: (scale: number) => void;
+  /** [startMs, endMs]가 좌우 padFrac 여백으로 보이게 맞춘다 (take 선택). 아직 폭을 모르면 첫 레이아웃 때 적용된다 */
+  fitTo: (startMs: number, endMs: number, padFrac: number) => void;
   /** JS에서 현재 viewport를 읽는다 (탭 → 시각 변환) */
   snapshot: () => Viewport;
   /** 핸들 드래그 중이면 어느 핸들인지 (스펙 B 결정 8) */
@@ -67,10 +67,12 @@ export function useTimelineViewport(
   const startMs = useSharedValue(0);
   const msPerPx = useSharedValue(1);
   const widthPx = useSharedValue(0);
-  // 처음에는 ON — 디자인(tlFollow: true)대로 "⟲ PLAYHEAD" 필이 사용자가 움직인 뒤에만 보인다
+  // 처음에는 ON — 제스처가 끄고, 재생 시작·seek·take 선택이 다시 켠다 (2026-09-20 개정에서 "⟲ PLAYHEAD" 필이 빠졌다)
   const follow = useSharedValue(true);
   const activeGesture = useSharedValue<ActiveGesture>(null);
   const pinchOrigin = useSharedValue<Viewport | null>(null);
+  // 폭을 알기 전에 들어온 fitTo 요청
+  const pendingFit = useSharedValue<{ startMs: number; endMs: number; padFrac: number } | null>(null);
   // 핸들 드래그 상태 (스펙 B) — 잡은 핸들과 마지막 손가락 x
   const editMode = useSharedValue<EditMode>(null);
   const fingerX = useSharedValue(0);
@@ -185,6 +187,14 @@ export function useTimelineViewport(
         "worklet";
         if (widthPx.value === 0) {
           widthPx.value = w;
+          const fit = pendingFit.value;
+          pendingFit.value = null;
+          if (fit) {
+            const v = fitRange(w, fit.startMs, fit.endMs, fit.padFrac, duration);
+            startMs.value = v.startMs;
+            msPerPx.value = v.msPerPx;
+            return;
+          }
           msPerPx.value = widestMsPerPx(duration, w);
           startMs.value = 0;
           return;
@@ -196,7 +206,7 @@ export function useTimelineViewport(
         startMs.value = v.startMs;
       })(width, durationMs);
     },
-    [durationMs, widthPx, msPerPx, startMs],
+    [durationMs, widthPx, msPerPx, startMs, pendingFit],
   );
 
   // duration이 늦게 들어오거나 바뀌면 지금 viewport를 다시 clamp한다
@@ -222,18 +232,21 @@ export function useTimelineViewport(
     [durationMs, startMs, msPerPx],
   );
 
-  const zoomBy = useCallback(
-    (scale: number) => {
-      runOnUI((s: number, duration: number) => {
+  const fitTo = useCallback(
+    (fromMs: number, toMs: number, padFrac: number) => {
+      runOnUI((a: number, b: number, pad: number, duration: number) => {
         "worklet";
-        follow.value = false;
-        const v = { startMs: startMs.value, msPerPx: msPerPx.value, widthPx: widthPx.value };
-        const z = zoomAtFocal(v, v.widthPx / 2, s, duration);
-        startMs.value = z.startMs;
-        msPerPx.value = z.msPerPx;
-      })(scale, durationMs);
+        if (widthPx.value === 0) {
+          // 첫 take 자동 선택은 레이아웃보다 먼저 올 수 있다 — onLayout이 이어받는다
+          pendingFit.value = { startMs: a, endMs: b, padFrac: pad };
+          return;
+        }
+        const v = fitRange(widthPx.value, a, b, pad, duration);
+        startMs.value = v.startMs;
+        msPerPx.value = v.msPerPx;
+      })(fromMs, toMs, padFrac, durationMs);
     },
-    [durationMs, follow, startMs, msPerPx, widthPx],
+    [durationMs, pendingFit, startMs, msPerPx, widthPx],
   );
 
   const snapshot = useCallback(
@@ -243,8 +256,8 @@ export function useTimelineViewport(
 
   // shared value·콜백은 전부 안정적이라 vp 객체 identity도 안정적이다 — 이를 deps로 쓰는 useCallback이 매 렌더 새로 만들어지지 않는다
   const vp = useMemo<TimelineViewportState>(
-    () => ({ startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, zoomBy, snapshot, editMode }),
-    [startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, zoomBy, snapshot, editMode],
+    () => ({ startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, fitTo, snapshot, editMode }),
+    [startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, fitTo, snapshot, editMode],
   );
   return { vp, gesture };
 }

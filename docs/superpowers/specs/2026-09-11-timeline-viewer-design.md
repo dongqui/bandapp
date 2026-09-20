@@ -240,3 +240,20 @@ Take 레인: 화면 안의 take를 `[timeToX(start), timeToX(end)]` 사각형 pa
 ## 문서
 
 README 분석 파이프라인 한 줄에 "피크 사이드카 업로드"를 더한다. `docs/backlog.md`: "Take 경계 편집" 항목을 스펙 B 내용(핸들·edge auto pan·PATCH·재컷·코멘트 `atSec` 정책·스크럽)으로 갱신하고, "세션 삭제 API와 R2 객체 정리"에 `peaks.bin`을 추가하고, "타임라인 코멘트 마커"와 "LOD crossfade"를 새로 적는다.
+
+## 2026-09-20 디자인 개정
+
+Claude Design "Timeline" 화면이 바뀌어 코드를 맞췄다. 이 절이 위 본문(결정 10·11, 화면 구성)과 스펙 B의 카드 설명보다 우선한다.
+
+- **첫 take에서 시작.** 화면을 열면 첫 take가 선택되고 viewport가 그 take에 fit된다 (전체 보기로 시작하지 않는다). 레이아웃 전에 선택이 오면 `fitTo`가 첫 레이아웃까지 미룬다.
+- **take 내비.** 오버뷰 아래 `‹ TAKE n / N ›`. 선택이 없으면 `N TAKES`, ›는 첫 take, ‹는 마지막 take. dirty 초안이 있으면 레인 탭과 같이 Discard 확인을 거친다.
+- **레인 라벨.** 필 안은 `T1`처럼 번호만, 가운데 정렬. 이름은 내비가 보여 준다.
+- **빠진 것.** 파형 위 −/+ 줌 버튼(핀치만 남는다, `zoomBy` 삭제), "⟲ PLAYHEAD" 필, 카드의 ··· 와 Open take. 카드는 초안이 dirty이거나 `audioStatus`가 updating/failed일 때만 뜬다.
+- **오버뷰 playhead.** 2px 선 + 위쪽 7px 점.
+
+디자인에 없어 코드에서 정한 것 (디자인이 바뀌면 다시 본다):
+
+- **take 선택 = seek.** 자동 선택·내비·레인 탭 모두 재생 위치를 take 시작으로 옮기고 follow를 켠다. 디자인 프로토타입은 viewport만 옮겨서, 재생을 누르면 화면 밖 00:00부터 들렸다. 오디오 로드 전의 seek는 `usePlaybackClock`이 들고 있다가 로드 후 적용한다.
+- **follow 복귀.** 필이 없어졌으니 재생 시작, 파형 탭 seek, take 선택이 follow를 다시 켠다.
+- **take 삭제 진입점.** ··· 가 빠져서 레인 필 롱프레스가 기존 `TakeActionSheet`를 연다. 보이는 진입점이 필요하면 Claude Design에서 정한다.
+- **Open take.** 타임라인에서 Take Feedback으로 가는 길은 없다 — 세션 상세의 take 목록으로 간다.

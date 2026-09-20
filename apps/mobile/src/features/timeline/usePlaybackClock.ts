@@ -33,6 +33,8 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
   const playheadMs = useSharedValue(0);
   const seqRef = useRef(0);
   const seekPendingRef = useRef(false);
+  /** 오디오가 로드되기 전에 들어온 seek (화면을 열자마자 첫 take로 가는 경우) — 로드되면 적용한다 */
+  const deferredSeekRef = useRef<number | null>(null);
   const [positionMs, setPositionMs] = useState(0);
   const [simPlaying, setSimPlaying] = useState(false);
   const simPosRef = useRef(0);
@@ -48,7 +50,7 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
 
   // 실제 플레이어: status → anchor. seek 대기 중이면 옛 status가 playhead를 되돌리지 못하게 무시한다 (초안 22-D)
   useEffect(() => {
-    if (!url || seekPendingRef.current) return;
+    if (!url || seekPendingRef.current || deferredSeekRef.current !== null) return;
     setAnchor(status.currentTime * 1000, status.playing && !status.isBuffering);
   }, [url, status.currentTime, status.playing, status.isBuffering, setAnchor]);
 
@@ -86,18 +88,31 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
     (ms: number) => {
       const target = Math.max(0, Math.min(totalMs, ms));
       if (!url) {
+        // Mock이거나 URL을 아직 못 받았다 — 뒤의 경우 로드된 뒤 실제 플레이어에 다시 적용한다
+        deferredSeekRef.current = target;
         simPosRef.current = target;
         setAnchor(target, simPlaying);
         return;
       }
+      if (!status.isLoaded) {
+        deferredSeekRef.current = target;
+        setAnchor(target, false);
+        return;
+      }
+      deferredSeekRef.current = null;
       seekPendingRef.current = true;
       setAnchor(target, false);
       void player.seekTo(target / 1000).finally(() => {
         seekPendingRef.current = false;
       });
     },
-    [url, totalMs, simPlaying, player, setAnchor],
+    [url, totalMs, simPlaying, status.isLoaded, player, setAnchor],
   );
+
+  useEffect(() => {
+    if (!url || !status.isLoaded || deferredSeekRef.current === null) return;
+    seekTo(deferredSeekRef.current);
+  }, [url, status.isLoaded, seekTo]);
 
   const toggle = useCallback(() => {
     if (!url) {

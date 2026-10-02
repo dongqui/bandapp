@@ -12,7 +12,7 @@ const MIME_BY_EXT: Record<string, string> = {
   ".ogg": "audio/ogg",
 };
 
-export const DEFAULT_GEMINI_MODEL = "gemini-3.6-flash";
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
 
 export function audioMimeType(filePath: string): string {
   const mime = MIME_BY_EXT[extname(filePath).toLowerCase()];

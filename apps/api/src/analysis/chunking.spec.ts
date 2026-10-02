@@ -1,4 +1,4 @@
-import { DEFAULT_CHUNKING, mergeCandidates, planChunks } from "./chunking.js";
+import { DEFAULT_CHUNKING, DEFAULT_PAD, mergeCandidates, padCandidates, planChunks } from "./chunking.js";
 
 const MIN = 60_000;
 
@@ -55,5 +55,39 @@ describe("mergeCandidates", () => {
 
   it("returns an empty list for no candidates", () => {
     expect(mergeCandidates([])).toEqual([]);
+  });
+});
+
+describe("padCandidates", () => {
+  const take = (startMs: number, endMs: number, type: "PERFORMANCE" | "PARTIAL_PRACTICE" = "PERFORMANCE", confidence = 0.9) => ({ startMs, endMs, type, confidence });
+
+  it("widens every take by padMs on both sides", () => {
+    expect(padCandidates([take(60_000, 120_000)], 10 * MIN)).toEqual([take(55_000, 125_000)]);
+  });
+
+  it("exposes a 5 second default", () => {
+    expect(DEFAULT_PAD).toEqual({ padMs: 5_000 });
+  });
+
+  it("clamps to the start and end of the recording", () => {
+    expect(padCandidates([take(2_000, 30_000), take(60_000, 118_000)], 120_000)).toEqual([take(0, 35_000), take(55_000, 120_000)]);
+  });
+
+  it("never lets neighbouring takes overlap — a short gap is split in the middle", () => {
+    // 4초 간격: 양쪽 5초씩 넓히면 겹치므로 가운데(2초씩)에서 멈춘다
+    expect(padCandidates([take(60_000, 120_000), take(124_000, 180_000)], 10 * MIN)).toEqual([take(55_000, 122_000), take(122_000, 185_000)]);
+    // 10초 간격: 정확히 5초씩 넓혀 맞닿는다
+    expect(padCandidates([take(60_000, 120_000), take(130_000, 180_000)], 10 * MIN)).toEqual([take(55_000, 125_000), take(125_000, 185_000)]);
+  });
+
+  it("keeps type and confidence, sorts by start, and honours custom padMs", () => {
+    expect(padCandidates([take(300_000, 400_000, "PARTIAL_PRACTICE", 0.4), take(0, 100_000)], 10 * MIN, { padMs: 1_000 })).toEqual([
+      take(0, 101_000),
+      take(299_000, 401_000, "PARTIAL_PRACTICE", 0.4),
+    ]);
+  });
+
+  it("returns an empty list for no candidates", () => {
+    expect(padCandidates([], 10 * MIN)).toEqual([]);
   });
 });

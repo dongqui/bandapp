@@ -150,12 +150,13 @@ describe("SessionAnalysisService.run", () => {
     // 청크 1의 [0, 2분]은 오프셋 19:30을 더해 [19:30, 21:30]이 되고 청크 0의 [19:00, 20:30]과 겹쳐 하나로 합쳐진다.
     // 청크 1의 10초짜리 PARTIAL_PRACTICE는 최소 길이 미만이라 버려진다.
     expect(state.insertedTakes.map((t) => [t.index, t.name, t.startMs, t.endMs, t.type])).toEqual([
-      [0, "Take 1", 1 * MIN, 5 * MIN, "PERFORMANCE"],
-      [1, "Take 2", 19 * MIN, 21 * MIN + 30_000, "PERFORMANCE"],
+      [0, "Take 1", 1 * MIN - 5_000, 5 * MIN + 5_000, "PERFORMANCE"],
+      [1, "Take 2", 19 * MIN - 5_000, 21 * MIN + 35_000, "PERFORMANCE"],
     ]);
+    // 합친 뒤 앞뒤 5초씩 넓혀서 자른다
     expect(cuts.slice(3)).toEqual([
-      { startMs: 1 * MIN, endMs: 5 * MIN },
-      { startMs: 19 * MIN, endMs: 21 * MIN + 30_000 },
+      { startMs: 1 * MIN - 5_000, endMs: 5 * MIN + 5_000 },
+      { startMs: 19 * MIN - 5_000, endMs: 21 * MIN + 35_000 },
     ]);
     // 사이드카가 먼저(컷 루프 앞), 그 뒤 take 2개
     expect(calls.puts).toHaveLength(3);

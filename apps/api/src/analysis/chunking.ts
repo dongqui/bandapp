@@ -53,3 +53,29 @@ export function mergeCandidates(candidates: TakeCandidate[], opts: MergeOptions 
   }
   return merged.filter((t) => t.endMs - t.startMs >= opts.minDurationMs);
 }
+
+export interface PadOptions {
+  padMs: number;
+}
+
+export const DEFAULT_PAD: PadOptions = { padMs: 5_000 };
+
+/**
+ * 합쳐진 take를 앞뒤로 padMs만큼 넓힌다 — Gemini 경계가 카운트인이나 마지막 울림을 잘라먹는 일이 잦다.
+ * 녹음 범위 밖으로는 나가지 않고, 이웃 take와는 겹치지 않는다: 간격이 2·padMs보다 좁으면 그 가운데에서 멈춘다.
+ * 입력은 mergeCandidates를 거친(겹침 없는) 목록이어야 한다.
+ */
+export function padCandidates(candidates: TakeCandidate[], durationMs: number, opts: PadOptions = DEFAULT_PAD): TakeCandidate[] {
+  const sorted = [...candidates].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+  return sorted.map((c, i) => {
+    const prev = sorted[i - 1];
+    const next = sorted[i + 1];
+    const startFloor = prev ? (prev.endMs + c.startMs) / 2 : 0;
+    const endCeil = next ? (c.endMs + next.startMs) / 2 : durationMs;
+    return {
+      ...c,
+      startMs: Math.round(Math.max(startFloor, 0, c.startMs - opts.padMs)),
+      endMs: Math.round(Math.min(endCeil, durationMs, c.endMs + opts.padMs)),
+    };
+  });
+}

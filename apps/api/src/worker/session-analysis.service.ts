@@ -6,7 +6,7 @@ import { Logger } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { defaultTakeName, PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
-import { mergeCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
+import { mergeCandidates, padCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
@@ -80,7 +80,8 @@ export class SessionAnalysisService {
       for (const chunk of chunks) {
         candidates.push(...(await this.analyzeChunk(original, chunk, workDir)));
       }
-      const merged = mergeCandidates(candidates);
+      // 경계는 앞뒤 5초 여유를 둔다 — 카운트인과 마지막 울림까지 take에 담기게 (2026-10-02)
+      const merged = padCandidates(mergeCandidates(candidates), durationMs);
       // Gemini가 끝난 뒤에 디코드한다 — 분석이 실패하면 디코드 비용을 쓰지 않는다 (스펙 결정 7)
       const hires = await this.extractPeaks(sessionId, original);
       // 사이드카는 take 컷보다 먼저 올린다 — 컷이 실패해도 파형은 남는다. 실패해도 세션은 ready (2026-09-11 스펙 결정 5)

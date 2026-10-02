@@ -20,25 +20,23 @@ const PILL_MIN_W = 12;
  * 선택된 필은 저장된 경계 대신 초안을 따라간다 — 핸들을 끄는 동안 필도 같이 움직인다 (스펙 B).
  * 라벨은 "T1"처럼 번호만 — 전체 이름은 아래 take 내비("TAKE 1 / 13")가 보여 준다 (2026-09-20 디자인 개정).
  * take 메뉴(이름 변경·삭제)는 내비 줄의 ··· 가 연다 (2026-10-02 디자인) — 필에는 탭만 있다.
- * `key={kick}` — JS가 viewport를 바꿀 때마다 뷰를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
+ * TakeLane이 `key={id}:{kick}`로 JS가 viewport를 바꿀 때마다 이 컴포넌트째 다시 붙인다 (useTimelineViewport의 kick 설명 참고) —
+ * 훅이 같이 새로 만들어져야 마운트 초기값이 지금 클로저(take 경계)로 계산된다 (useRemountKey 설명 참고).
  */
 function TakePill({
   take,
   vp,
-  kick,
   draft,
   selected,
   onPress,
 }: {
   take: Take;
   vp: TimelineViewportState;
-  kick: number;
   draft: SharedValue<Draft | null>;
   selected: boolean;
   onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const remount = useRemountKey(kick);
   const style = useAnimatedStyle(() => {
     const v = { startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value };
     const d = selected ? draft.value : null;
@@ -50,7 +48,7 @@ function TakePill({
     return { left, width: Math.max(PILL_MIN_W, right - left), opacity: visible ? 1 : 0 };
   });
   return (
-    <Animated.View key={remount} style={[{ position: "absolute", top: 4, bottom: 4 }, style]}>
+    <Animated.View style={[{ position: "absolute", top: 4, bottom: 4 }, style]}>
       <Pressable
         onPress={onPress}
         style={{
@@ -90,6 +88,7 @@ export function TakeLane({
   onSelect: (take: Take) => void;
 }) {
   const { colors } = useTheme();
+  const remount = useRemountKey(kick);
   if (takes.length === 0) {
     return (
       <View style={{ height: LANE_H, alignItems: "center", justifyContent: "center", borderWidth: 1, borderStyle: "dashed", borderColor: colors.borderStrong, borderRadius: 8 }}>
@@ -100,7 +99,7 @@ export function TakeLane({
   return (
     <View style={{ height: LANE_H, overflow: "hidden" }}>
       {takes.map((t) => (
-        <TakePill key={t.id} take={t} vp={vp} kick={kick} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} />
+        <TakePill key={`${t.id}:${remount}`} take={t} vp={vp} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} />
       ))}
     </View>
   );

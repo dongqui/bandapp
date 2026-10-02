@@ -281,4 +281,7 @@ reanimated 4.5.1 + Fabric(Expo 57 dev client)에서 `useAnimatedStyle`로만 그
 재적용한다(`ViewDescriptorsSet.add → updater(true)`). 같은 커밋 안에서 바로 다시 붙이면 그것도 유실되고, 바로 다음 프레임에 붙이면 그 프레임의
 다른 mapper 갱신(스크럽을 놓은 뒤 follow 점프에 따른 파형 path·눈금)이 빠져서 120ms 미룬다. 미러(`useUiMirror`)를
 기본 style로 까는 안은 멈춘 animated props가 React style을 덮어써서 효과가 없었고, 눈금·디버그 오버레이처럼 텍스트에만 쓴다.
+key는 `useAnimatedStyle`을 가진 컴포넌트(ProgressHead·OverviewMarkers·TakePill)에 건다 — Reanimated가 다시 붙는 뷰의 마운트 초기값을
+훅이 처음 만들어질 때의 updater 클로저로 계산하므로(PropsFilter → initialUpdaterRun), Animated.View에만 걸면 첫 렌더 클로저(width·pxPerMs 0)로
+계산한 초기값(노브 0, 오버뷰 창 왼쪽 4px)이 한 프레임 보였다가 돌아오며 take 이동마다 깜빡였다 (10-02 사용자 보고로 수정).
 reanimated를 올려 사라지면 kick·seekEpoch·epoch·useRemountKey를 지운다 (backlog).

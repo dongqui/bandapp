@@ -20,10 +20,37 @@ const OVERVIEW_BAR_PX = 2;
 const AMP_FLOOR = 0.1;
 
 /**
+ * viewport 창 + playhead(2px 선 + 7px 점). `useAnimatedStyle`을 여기 두는 이유: 이 컴포넌트가 `key`로 다시 붙을 때 훅도 새로
+ * 만들어져 마운트 초기값이 지금 클로저(pxPerMs)로 계산된다 — 부모에 두면 첫 렌더 클로저(pxPerMs 0)로 계산해 창이 왼쪽 4px로
+ * 갔다가 돌아오며 깜빡였다 (2026-10-02 기기 보고, useRemountKey 설명 참고).
+ */
+function OverviewMarkers({ vp, playheadMs, pxPerMs }: { vp: TimelineViewportState; playheadMs: SharedValue<number>; pxPerMs: number }) {
+  const { colors } = useTheme();
+  const windowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: vp.startMs.value * pxPerMs }],
+    width: Math.max(4, vp.widthPx.value * vp.msPerPx.value * pxPerMs),
+  }));
+  const headStyle = useAnimatedStyle(() => ({ transform: [{ translateX: playheadMs.value * pxPerMs }] }));
+  return (
+    <>
+      <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: -1, width: 2, backgroundColor: colors.accent }, headStyle]} />
+      <Animated.View pointerEvents="none" style={[{ position: "absolute", top: -1, left: -3.5, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }, headStyle]} />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          { position: "absolute", top: 0, bottom: 0, left: 0, borderWidth: 1.5, borderColor: WINDOW_BORDER, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.05)" },
+          windowStyle,
+        ]}
+      />
+    </>
+  );
+}
+
+/**
  * 전체 녹음 개요 (2026-09-11 스펙 §파형 렌더링, 초안 21절). 파형은 최저 LOD를 폭이 정해질 때 한 번만 그리고,
  * viewport 창과 playhead만 shared value로 움직인다. take는 아래쪽 3px 마커다 — 3시간 위에서 1~2분을 정확히
  * 그리려 하지 않는다. 탭·드래그는 그 시각을 viewport 중앙으로 옮긴다 (seek 아님) — 사용자 이동이라 follow를 끈다.
- * `key={kick}-{seekEpoch}` — JS가 viewport를 바꾸거나 seek할 때마다 창·playhead 뷰를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
+ * `key={kick}-{seekEpoch}` — JS가 viewport를 바꾸거나 seek할 때마다 창·playhead(OverviewMarkers)를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
  */
 export function OverviewStrip({
   levels,
@@ -65,11 +92,6 @@ export function OverviewStrip({
   }, [levels, width, durationMs, mid]);
 
   const pxPerMs = durationMs > 0 && width > 0 ? width / durationMs : 0;
-  const windowStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: vp.startMs.value * pxPerMs }],
-    width: Math.max(4, vp.widthPx.value * vp.msPerPx.value * pxPerMs),
-  }));
-  const headStyle = useAnimatedStyle(() => ({ transform: [{ translateX: playheadMs.value * pxPerMs }] }));
 
   const centerOn = (x: number) => {
     "worklet";
@@ -119,16 +141,7 @@ export function OverviewStrip({
             }}
           />
         ))}
-        <Animated.View key={`h${reattach}`} pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: -1, width: 2, backgroundColor: colors.accent }, headStyle]} />
-        <Animated.View key={`d${reattach}`} pointerEvents="none" style={[{ position: "absolute", top: -1, left: -3.5, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }, headStyle]} />
-        <Animated.View
-          key={`w${reattach}`}
-          pointerEvents="none"
-          style={[
-            { position: "absolute", top: 0, bottom: 0, left: 0, borderWidth: 1.5, borderColor: WINDOW_BORDER, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.05)" },
-            windowStyle,
-          ]}
-        />
+        <OverviewMarkers key={reattach} vp={vp} playheadMs={playheadMs} pxPerMs={pxPerMs} />
       </View>
     </GestureDetector>
   );

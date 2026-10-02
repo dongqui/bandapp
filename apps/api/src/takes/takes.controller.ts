@@ -1,8 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, UseGuards } from "@nestjs/common";
-import type { AudioUrl, Take } from "@bandapp/types";
+import { TAKE_NAME_MAX, type AudioUrl, type Take } from "@bandapp/types";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { CurrentUserId } from "../auth/current-user-id.decorator.js";
-import { requireInteger, requireUuidParam } from "../common/validation.js";
+import { optionalTrimmedText, requireInteger, requireUuidParam } from "../common/validation.js";
 import { TakesService } from "./takes.service.js";
 
 @Controller()
@@ -30,6 +30,13 @@ export class TakesController {
       endMs: requireInteger(body, "endMs", { min: 0 }),
       version: requireInteger(body, "version", { min: 1 }),
     });
+  }
+
+  /** 이름 변경. 비우면 기본 이름 "Take n" (2026-10-02) */
+  @Patch("takes/:id/name")
+  rename(@CurrentUserId() userId: string, @Param("id") id: string, @Body() body: unknown): Promise<Take> {
+    requireUuidParam(id, "id");
+    return this.takes.rename(id, userId, optionalTrimmedText(body, "name", TAKE_NAME_MAX));
   }
 
   @Delete("takes/:id")

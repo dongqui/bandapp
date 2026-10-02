@@ -282,4 +282,16 @@ describe("HttpApiClient", () => {
     expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1", expect.objectContaining({ method: "DELETE" }));
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  it("takes.rename은 PATCH /takes/:id/name에 name(null 가능)을 싣고 구독자에게 알린다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async () => json(200, { id: "t1", name: "Take 1" }));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    const take = await client.takes.rename("t1", null);
+    expect(take.name).toBe("Take 1");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/takes/t1/name", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: null }) }));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });

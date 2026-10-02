@@ -232,3 +232,14 @@ shiftCommentAtSec(atSec, oldStartMs, newStartMs): number   // (Mock·플레이�
 ## 문서
 
 README API 목록에 `PATCH/DELETE /takes/:id`. `docs/backlog.md`: "Take 경계 편집 (스펙 B)" 항목 제거, 남기는 것 — take 추가/분할/병합·이름 변경, playhead 스크럽, 편집 이력, 재컷 실패 스위퍼(`updating`에 1시간 이상 머문 take를 failed로), 세션 삭제 정리 배치에 `-v{n}` 키 패턴.
+
+## 2026-10-02 이름 변경
+
+Claude Design에 take ··· 시트(Edit / Rename / Delete)와 "Take name" 시트가 들어와, 이 스펙 밖이던 이름 변경을 넣었다.
+
+- **API.** `PATCH /takes/:id/name { name: string | null }` → `Take`. 공백을 다듬고 최대 40자(`TAKE_NAME_MAX`). 비우거나 null이면 기본 이름 `Take n`(`defaultTakeName(index)`, 워커와 같은 규칙)으로 돌아간다. 오디오를 건드리지 않으니 `version`은 그대로고 세션이 analyzing이어도 된다. 멤버 누구나.
+- **진입점.** Take Feedback 헤더 오른쪽 ···(원본 녹음에는 없다) → Edit take / Rename take / Delete take. 타임라인 내비 오른쪽 ··· → Rename / Delete (이미 편집 화면이라 Edit 없음). 시트 제목은 `이름 · 범위`.
+- **Edit take.** `/session/:id/timeline?take=<id>`로 push — 타임라인이 그 take를 선택한 채 열린다. 플레이어가 스택 아래 남으니 재생은 멈춘다.
+- **Rename.** "Take name" 시트: 현재 이름이 채워진 입력(placeholder `Take n`, 40자), "Leave empty to use Take n.", Save. 토스트 "Take renamed". 타임라인 내비 라벨은 이름이 있으면 `T n · 이름`.
+- **삭제.** 확인 제목이 `Delete {이름}?`, 토스트 `{이름} deleted`. Take Feedback에서 지우면 세션 상세로 돌아간다.
+- **코드.** `features/takes/TakeActionSheet`(타임라인에서 옮김)·`TakeRenameSheet`·`TakeDeleteDialog`·`TakeMoreButton`. e2e: `PATCH /takes/:id/name` trim·기본 이름 복귀·400·403.

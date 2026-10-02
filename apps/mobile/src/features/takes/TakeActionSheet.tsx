@@ -4,8 +4,24 @@ import { fmtClock } from "@/lib/time";
 import { useTheme } from "@/theme";
 import { AppText, BottomSheet, SheetRow } from "@/ui";
 
-/** 선택 카드의 "···" — 지금은 Delete take 하나 (스펙 B). take가 null이면 닫힌 상태 */
-export function TakeActionSheet({ take, onClose, onDelete }: { take: Take | null; onClose: () => void; onDelete: (take: Take) => void }) {
+/**
+ * take의 "···" 시트 (2026-10-02 디자인). 제목 줄은 `이름 · 범위`, 아래로 Edit take / Rename take / Delete take.
+ * Edit take는 Take Feedback 화면에서만 — onEdit을 넘긴 쪽에만 뜬다 (타임라인은 이미 편집 화면이다).
+ * take가 null이면 닫힌 상태.
+ */
+export function TakeActionSheet({
+  take,
+  onClose,
+  onEdit,
+  onRename,
+  onDelete,
+}: {
+  take: Take | null;
+  onClose: () => void;
+  onEdit?: (take: Take) => void;
+  onRename: (take: Take) => void;
+  onDelete: (take: Take) => void;
+}) {
   const { colors } = useTheme();
   return (
     <BottomSheet visible={take !== null} onClose={onClose}>
@@ -16,6 +32,8 @@ export function TakeActionSheet({ take, onClose, onDelete }: { take: Take | null
               {`${take.name} · ${fmtClock(take.startMs / 1000)} – ${fmtClock(take.endMs / 1000)}`}
             </AppText>
           </View>
+          {onEdit ? <SheetRow title="Edit take" onPress={() => onEdit(take)} /> : null}
+          <SheetRow title="Rename take" onPress={() => onRename(take)} />
           <SheetRow title="Delete take" danger onPress={() => onDelete(take)} />
         </>
       ) : null}

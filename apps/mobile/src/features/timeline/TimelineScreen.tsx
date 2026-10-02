@@ -1,5 +1,5 @@
 import { ApiError } from "@bandapp/api-client";
-import type { Take } from "@bandapp/types";
+import { defaultTakeName, type Take } from "@bandapp/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
@@ -8,6 +8,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useApi } from "@/api";
+import { TakeActionSheet } from "@/features/takes/TakeActionSheet";
+import { TakeDeleteDialog } from "@/features/takes/TakeDeleteDialog";
+import { TakeMoreButton } from "@/features/takes/TakeMoreButton";
+import { TakeRenameSheet } from "@/features/takes/TakeRenameSheet";
 import { useAudioUrl } from "@/features/takes/useAudioUrl";
 import { useSession } from "@/features/takes/useSession";
 import { useTakes } from "@/features/takes/useTakes";
@@ -20,7 +24,6 @@ import { AppText, ConfirmDialog, PressableOpacity, Screen, useToast } from "@/ui
 import { OverviewStrip } from "./OverviewStrip";
 import { Playhead } from "./Playhead";
 import { ProgressBar } from "./ProgressBar";
-import { TakeActionSheet } from "./TakeActionSheet";
 import { TakeHandles } from "./TakeHandles";
 import { TakeLane } from "./TakeLane";
 import { TimeRuler } from "./TimeRuler";
@@ -108,10 +111,11 @@ function NudgeButton({ label, onPress }: { label: string; onPress: () => void })
  * 2026-09-20 디자인 개정: 화면은 첫 take를 선택한 채로 열리고, 오버뷰 아래 ‹ TAKE n / N › 내비로 take를 오간다.
  * 파형 위 −/+ 줌 버튼과 카드의 ··· / Open take가 빠졌다 — 카드는 초안이 dirty이거나 재컷 상태(updating/failed)일
  * 때만 뜬다. take를 고르면 재생 위치도 그 시작으로 옮긴다(재생을 누르면 그 take가 들린다).
- * 2026-10-02: 재생 컨트롤 위에 전체 녹음 기준 프로그레스바가 생겼고 "⟲ PLAYHEAD" 필이 돌아왔다.
+ * 2026-10-02: 재생 컨트롤 위에 전체 녹음 기준 프로그레스바가 생겼고 "⟲ PLAYHEAD" 필이 돌아왔다. 내비 오른쪽 ··· 가 선택
+ * take의 이름 변경·삭제 시트를 연다(레인 롱프레스 진입점은 뺐다). Take Feedback의 "Edit take"는 `?take=`로 그 take를 열어 준다.
  */
 export function TimelineScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, take: initialTakeId } = useLocalSearchParams<{ id: string; take?: string }>();
   const router = useRouter();
   const navigation = useNavigation();
   const api = useApi();
@@ -134,6 +138,7 @@ export function TimelineScreen() {
   const [saving, setSaving] = useState(false);
   const [actionTake, setActionTake] = useState<Take | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Take | null>(null);
+  const [renameTake, setRenameTake] = useState<Take | null>(null);
   const [deleting, setDeleting] = useState(false);
   /** 초안을 버릴지 묻는 중 — 확인하면 실행할 동작 */
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -193,13 +198,14 @@ export function TimelineScreen() {
     [selectedTakeId, draftState.dirty, applySelect],
   );
 
-  // 화면은 첫 take에서 시작한다 (2026-09-20 디자인 개정). 한 번만 — 이후 선택 해제(삭제·409)는 그대로 둔다
+  // 화면은 첫 take에서 시작한다 (2026-09-20 디자인 개정). Take Feedback의 "Edit take"로 왔으면(?take=) 그 take에서.
+  // 한 번만 — 이후 선택 해제(삭제·409)는 그대로 둔다
   const autoSelectedRef = useRef(false);
   useEffect(() => {
     if (autoSelectedRef.current || !session || takeList.length === 0) return;
     autoSelectedRef.current = true;
-    applySelect(takeList[0]!);
-  }, [session, takeList, applySelect]);
+    applySelect(takeList.find((t) => t.id === initialTakeId) ?? takeList[0]!);
+  }, [session, takeList, applySelect, initialTakeId]);
 
   // ‹ › 내비 — 선택이 없으면 ›는 첫 take, ‹는 마지막 take로 간다
   const navPos = selectedTakeId === null ? -1 : takeList.findIndex((t) => t.id === selectedTakeId);
@@ -284,7 +290,7 @@ export function TimelineScreen() {
     void api.takes
       .remove(t.id)
       .then(() => {
-        toast.show(`Take ${t.index + 1} deleted`);
+        toast.show(`${t.name} deleted`);
         if (selectedTakeId === t.id) {
           setSelectedTakeId(null);
           draftState.clear();
@@ -312,6 +318,12 @@ export function TimelineScreen() {
     : edited
       ? `${fmtClock(edited.startMs / 1000)} – ${fmtClock(edited.endMs / 1000)} · ${fmtClock((edited.endMs - edited.startMs) / 1000)}`
       : `${fmtClock(selectedTake.startMs / 1000)} – ${fmtClock(selectedTake.endMs / 1000)} · ${fmtClock(selectedTake.durationSec)}`;
+  // 내비 라벨 — 기본 이름이면 `TAKE n / N`, 이름을 붙였으면 `T n · 이름` (2026-10-02 디자인)
+  const navLabel = !selectedTake
+    ? `${takeList.length} TAKES`
+    : selectedTake.name === defaultTakeName(selectedTake.index)
+      ? `TAKE ${selectedTake.index + 1} / ${takeList.length}`
+      : `T${selectedTake.index + 1} · ${selectedTake.name.toUpperCase()}`;
 
   return (
     <Screen>
@@ -375,17 +387,19 @@ export function TimelineScreen() {
         ) : null}
       </View>
       <View style={{ marginTop: 10, marginHorizontal: space.screenX }}>
-        <TakeLane takes={takeList} vp={vp} kick={kick} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} onMenu={setActionTake} />
+        <TakeLane takes={takeList} vp={vp} kick={kick} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} />
       </View>
       <View style={{ marginTop: 14, marginHorizontal: space.screenX }}>
         <OverviewStrip levels={peaks.levels} vp={vp} takes={takeList} durationMs={durationMs} playheadMs={clock.playheadMs} kick={kick} seekEpoch={clock.seekEpoch} />
       </View>
       {takeList.length > 0 ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14, marginHorizontal: space.screenX }}>
+          {/* 선택 take의 메뉴(이름 변경·삭제) — 내비 줄 오른쪽 끝 (2026-10-02 디자인) */}
+          {selectedTake ? <TakeMoreButton onPress={() => setActionTake(selectedTake)} style={{ position: "absolute", right: 0 }} /> : null}
           <NavButton label="‹" enabled={prevTake !== undefined} onPress={() => prevTake && selectTake(prevTake)} />
           <View style={{ minWidth: 132, alignItems: "center", gap: 4 }}>
-            <AppText style={{ fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
-              {selectedTake ? `TAKE ${selectedTake.index + 1} / ${takeList.length}` : `${takeList.length} TAKES`}
+            <AppText numberOfLines={1} style={{ maxWidth: 170, fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
+              {navLabel}
             </AppText>
             {/* 선택 take의 범위 — 초안이 dirty면 초안 값을 accent로 (2026-10-02 디자인 추가) */}
             {navRange ? (
@@ -470,26 +484,17 @@ export function TimelineScreen() {
       <TakeActionSheet
         take={actionTake}
         onClose={() => setActionTake(null)}
+        onRename={(t) => {
+          setActionTake(null);
+          setRenameTake(t);
+        }}
         onDelete={(t) => {
           setActionTake(null);
           setConfirmDelete(t);
         }}
       />
-      {confirmDelete ? (
-        <ConfirmDialog
-          visible
-          title={`Delete Take ${confirmDelete.index + 1}?`}
-          body={
-            (confirmDelete.commentCount > 0
-              ? `Its ${confirmDelete.commentCount} ${confirmDelete.commentCount === 1 ? "comment" : "comments"} will be deleted too. `
-              : "") + "Other takes keep their numbers. This can’t be undone."
-          }
-          primary={{ label: "Delete take", danger: true, onPress: doDelete }}
-          cancelLabel="Cancel"
-          onCancel={() => (deleting ? undefined : setConfirmDelete(null))}
-          busy={deleting}
-        />
-      ) : null}
+      <TakeRenameSheet take={renameTake} onClose={() => setRenameTake(null)} onSaved={reloadTakes} />
+      <TakeDeleteDialog take={confirmDelete} busy={deleting} onConfirm={doDelete} onCancel={() => setConfirmDelete(null)} />
       {pendingDiscard ? (
         <ConfirmDialog
           visible

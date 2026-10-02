@@ -287,6 +287,11 @@ export class HttpApiClient implements RehearsalApiClient {
       await this.request<void>("DELETE", `/takes/${takeId}`);
       this.emit();
     },
+    rename: async (takeId: string, name: string | null): Promise<Take> => {
+      const take = await this.request<Take>("PATCH", `/takes/${takeId}/name`, { name });
+      this.emit();
+      return take;
+    },
   };
 
   comments = {

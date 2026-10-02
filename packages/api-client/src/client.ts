@@ -110,6 +110,8 @@ export interface RehearsalApiClient {
     update(takeId: string, input: UpdateTakeInput): Promise<Take>;
     /** 삭제. 코멘트도 함께 사라진다 */
     remove(takeId: string): Promise<void>;
+    /** 이름 변경. null이나 빈 문자열이면 기본 이름 "Take n"으로 돌아간다. 1~40자, 서버가 trim */
+    rename(takeId: string, name: string | null): Promise<Take>;
   };
   comments: {
     /** target이 { takeId }면 take 코멘트, { sessionId }면 원본 녹음 코멘트 */

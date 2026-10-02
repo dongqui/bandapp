@@ -106,4 +106,13 @@ describe("MockApiClient takes 편집", () => {
     const s = await api.sessions.get("s1");
     expect(s.takeCount).toBe(before.length - 1);
   });
+  it("rename은 trim해서 저장하고, 비우면 기본 이름으로 돌아가며 41자는 400", async () => {
+    const api = new MockApiClient();
+    const [t] = await api.takes.list("s1");
+    expect((await api.takes.rename(t!.id, "  Intro jam ")).name).toBe("Intro jam");
+    expect((await api.takes.list("s1"))[0]!.name).toBe("Intro jam");
+    expect((await api.takes.rename(t!.id, "   ")).name).toBe(`Take ${t!.index + 1}`);
+    expect((await api.takes.rename(t!.id, null)).name).toBe(`Take ${t!.index + 1}`);
+    await expect(api.takes.rename(t!.id, "x".repeat(41))).rejects.toMatchObject({ status: 400 });
+  });
 });

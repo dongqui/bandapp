@@ -19,7 +19,7 @@ import type {
   UploadStatus,
   User,
 } from "@bandapp/types";
-import { checkTakeRange, neighborsOf, type UpdateTakeInput } from "@bandapp/types";
+import { checkTakeRange, defaultTakeName, neighborsOf, TAKE_NAME_MAX, type UpdateTakeInput } from "@bandapp/types";
 import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { UploadRecordingError } from "../upload";
@@ -334,6 +334,15 @@ export class MockApiClient implements RehearsalApiClient {
         take.peaks = fakePeaks(take.startMs + version);
         this.emit();
       }, this.recutDelayMs);
+      this.emit();
+      return { ...take };
+    },
+    rename: async (takeId: string, name: string | null): Promise<Take> => {
+      const take = this.findTake(takeId);
+      if (!take) throw new ApiError(404, "Take를 찾을 수 없어요.");
+      const trimmed = name?.trim() ?? "";
+      if (trimmed.length > TAKE_NAME_MAX) throw new ApiError(400, `name must be at most ${TAKE_NAME_MAX} characters`);
+      take.name = trimmed.length === 0 ? defaultTakeName(take.index) : trimmed;
       this.emit();
       return { ...take };
     },

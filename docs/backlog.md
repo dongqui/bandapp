@@ -13,7 +13,7 @@
 ## 분석
 - **검출기 전처리(Python 워커).** POC의 YAMNet/PANNs 등으로 음악 구간 후보를 먼저 뽑아 `planChunks()`를 "후보 구간 목록"으로 교체. Gemini 토큰과 시간을 줄인다. 모델 선정이 선행돼야 한다.
 - **gap-merge 옵션.** 떨어진 후보를 N초 이내면 합치는 규칙. 지금은 Gemini 프롬프트가 담당한다.
-- **take 추가·분할·병합, 이름 변경.** 경계 편집·삭제([2026-09-11 스펙 B](superpowers/specs/2026-09-11-take-editing-design.md)) 다음 단계. 번호/이름 재배치 결정이 따라온다.
+- **take 추가·분할·병합.** 경계 편집·삭제·이름 변경([2026-09-11 스펙 B](superpowers/specs/2026-09-11-take-editing-design.md)) 다음 단계. 번호/이름 재배치 결정이 따라온다.
 - **재컷 스위퍼.** `takes.audio_status = updating`에 1시간 이상 머문 take를 failed로 돌린다 (워커가 죽고 DLQ까지 소진된 경우). 재컷은 단일 컨슈머 분석 큐(`MaxNumberOfMessages: 1`, 순차 루프, heartbeat 최대 3시간)를 분석 잡과 같이 쓰므로, 진행 중인 분석 뒤에 몇 시간씩 밀려 있을 수 있다 — 스위퍼는 세션이 `analyzing` 중인지(또는 워커가 실제로 잡을 집은 시점부터 경과 시간을 잼) 확인해, 대기 중일 뿐인 take를 failed로 오판하면 안 된다. 근본 해결은 재컷 전용 큐 분리.
 - **워커 e2e(실 Postgres)로 `analyzing` 가드 두 곳을 실제로 검증.** 지금 단위 테스트의 가짜 DB는 where 조건을 보지 않는다.
 
@@ -25,7 +25,6 @@
 - **타임라인 코멘트 마커.** 원본 코멘트(절대 시각)를 타임라인 위에 마커로. 2026-09-11 스펙 범위 제외.
 - **타임라인 LOD crossfade.** 지금은 hysteresis만 있다. 레벨 교체가 눈에 띄면 두 레벨을 짧게 섞는다.
 - **타임라인 파형을 Skia로.** SVG `animatedProps`가 기기에서 60fps에 못 미치면 `WaveformCanvas` 한 파일만 Skia로 바꾼다 (2026-09-11 스펙 결정 7). 웹 프리뷰는 canvaskit 설정이 필요하다.
-- **타임라인 take 삭제 진입점.** 2026-09-20 디자인 개정에서 카드의 ··· 가 빠져 레인 필 롱프레스로 옮겼다 — 발견하기 어렵다. Claude Design에서 보이는 진입점을 정하면 교체.
 - **타임라인 Reanimated 워크어라운드 걷어내기.** 2026-10-02 기기 검증에서 reanimated 4.5.1+Fabric이 JS발 값 변경을 `useAnimatedStyle` 뷰에 가끔 안 붙여서 `kick`/`seekEpoch`/`epoch` + `useRemountKey`로 뷰를 다시 붙이고 있다 (스펙 A 문서 "Reanimated 워크어라운드" 절). reanimated 4.5.5+/4.7로 올리고 dev client를 재빌드한 뒤 첫 화면·take 이동·seek·초안 begin에서 멈춤이 없으면 전부 지운다.
 - **타임라인 기기 검증.** 핀치 focal 고정, 핀치→팬 전환, 백그라운드 복귀·블루투스 전환 후 playhead 재동기화, 3시간 세션 60fps, Android 제스처 취소 후 상태 — 계획 Task 16 목록. gesture-handler가 직접 의존성이 돼 dev client 재빌드가 필요하다.
 - **코멘트 owner 중재.** 지금은 작성자만 수정·삭제한다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 결정 1). 밴드 owner가 남의 코멘트를 지울 수 있게 하려면 서비스의 작성자 검사에 role 분기를 더한다.

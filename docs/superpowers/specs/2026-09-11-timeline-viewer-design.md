@@ -255,7 +255,7 @@ Claude Design "Timeline" 화면이 바뀌어 코드를 맞췄다. 이 절이 위
 
 - **take 선택 = seek.** 자동 선택·내비·레인 탭 모두 재생 위치를 take 시작으로 옮기고 follow를 켠다. 디자인 프로토타입은 viewport만 옮겨서, 재생을 누르면 화면 밖 00:00부터 들렸다. 오디오 로드 전의 seek는 `usePlaybackClock`이 들고 있다가 로드 후 적용한다.
 - **follow 복귀.** 필 외에도 재생 시작, 파형 탭 seek, take 선택, 프로그레스바 seek가 follow를 다시 켠다.
-- **take 삭제 진입점.** ··· 가 빠져서 레인 필 롱프레스가 기존 `TakeActionSheet`를 연다. 보이는 진입점이 필요하면 Claude Design에서 정한다.
+- **take 삭제 진입점.** ··· 가 빠져서 레인 필 롱프레스로 옮겼었다 → 10-02 디자인이 내비 오른쪽 ··· 를 정해 교체했다 (아래 "2026-10-02 추가").
 - **Open take.** 타임라인에서 Take Feedback으로 가는 길은 없다 — 세션 상세의 take 목록으로 간다.
 
 ### 2026-10-02 추가
@@ -264,6 +264,9 @@ Claude Design "Timeline" 화면이 바뀌어 코드를 맞췄다. 이 절이 위
 - **"⟲ PLAYHEAD" 필** 복귀 — 9-11 스펙 결정 10 그대로.
 - **take 내비 범위 줄.** `‹ TAKE n / N ›` 아래에 `04:55 – 06:06`. 초안이 dirty면 초안 값을 accent로.
 - **안드로이드 하단.** 디자인의 컨트롤 아래 42px는 iOS 홈 인디케이터 기준 — 안드로이드 내비 바(edge-to-edge)에 재생 버튼이 잘려서 `max(42, inset.bottom + 8)`.
+- **take ··· 버튼.** 내비 줄 오른쪽 끝 34px 원형. 선택 take의 시트 — Rename take / Delete take ([스펙 B "2026-10-02 이름 변경"](2026-09-11-take-editing-design.md#2026-10-02-이름-변경)). 레인 필 롱프레스 진입점은 뺐다.
+- **내비 라벨.** 기본 이름(`Take n`)이면 `TAKE n / N`, 이름을 붙였으면 `T n · 이름`(대문자, 170px에서 말줄임).
+- **`?take=` 파라미터.** Take Feedback의 "Edit take"가 `/session/:id/timeline?take=<id>`로 와서 첫 take 대신 그 take가 선택된 채로 열린다.
 
 ### Reanimated 워크어라운드 (2026-10-02 기기 검증)
 

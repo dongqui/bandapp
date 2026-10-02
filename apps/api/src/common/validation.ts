@@ -110,3 +110,17 @@ export function requireIsoDate(body: unknown, name: string): string {
   }
   return value;
 }
+
+/**
+ * 비우면(필드 없음·null·공백만) null — 호출자가 기본값을 쓴다. 있으면 공백을 다듬고 길이를 제한한다.
+ * take 이름처럼 "지우면 기본으로 돌아가는" 선택 텍스트용.
+ */
+export function optionalTrimmedText(body: unknown, name: string, maxLength: number): string | null {
+  const value = field(body, name);
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw new BadRequestException(`${name} must be a string or null`);
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > maxLength) throw new BadRequestException(`${name} must be at most ${maxLength} characters`);
+  return trimmed;
+}

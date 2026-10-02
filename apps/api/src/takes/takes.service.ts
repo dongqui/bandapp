@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Logger, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { checkTakeRange, neighborsOf, type AudioUrl, type Take, type TakeAudioStatus, type TakeCandidateType, type TakeRangeError, type UpdateTakeInput } from "@bandapp/types";
+import { checkTakeRange, defaultTakeName, neighborsOf, type AudioUrl, type Take, type TakeAudioStatus, type TakeCandidateType, type TakeRangeError, type UpdateTakeInput } from "@bandapp/types";
 import { AnalysisProducer } from "../analysis/analysis.producer.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
@@ -141,6 +141,19 @@ export class TakesService {
     }
     const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
     // 트랜잭션과 재조회 사이에 다른 멤버가 지웠을 수 있다 — non-null assertion 대신 명시적으로 404
+    if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
+    return toTake(row);
+  }
+
+  /**
+   * 이름 변경 (2026-10-02). null이면 기본 이름 "Take n"으로 돌아간다. 오디오를 건드리지 않으니 version은 그대로고
+   * 세션 상태(analyzing)와도 무관하다. 멤버 누구나.
+   */
+  async rename(takeId: string, userId: string, name: string | null): Promise<Take> {
+    const take = await this.loadForMember(takeId, userId);
+    await this.db.update(takes).set({ name: name ?? defaultTakeName(take.index) }).where(eq(takes.id, takeId));
+    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    // 갱신과 재조회 사이에 다른 멤버가 지웠을 수 있다
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
     return toTake(row);
   }

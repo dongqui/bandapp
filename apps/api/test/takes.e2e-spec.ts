@@ -125,6 +125,31 @@ describe("takes API", () => {
     });
   });
 
+  describe("PATCH /takes/:id/name", () => {
+    it("이름을 다듬어 저장하고, 비우거나 null이면 기본 이름으로 돌아간다 — version·audioStatus는 그대로", async () => {
+      const t1 = await takeByIndex(0);
+      const renamed = await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: "  Intro jam  " }).expect(200);
+      expect(renamed.body).toMatchObject({ id: t1.id, name: "Intro jam", version: 1, audioStatus: "ready", commentCount: 0 });
+      const reset = await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: "   " }).expect(200);
+      expect(reset.body.name).toBe("Take 1");
+      await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: "Chorus" }).expect(200);
+      const nulled = await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: null }).expect(200);
+      expect(nulled.body.name).toBe("Take 1");
+      expect(producer.recuts).toEqual([]);
+    });
+
+    it("40자를 넘거나 문자열이 아니면 400, 비멤버는 403, 없는 take는 404", async () => {
+      const t1 = await takeByIndex(0);
+      await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: "x".repeat(41) }).expect(400);
+      await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(owner.accessToken)).send({ name: 3 }).expect(400);
+      const other = await createTestApp({ google: providerUser("stranger-3", "S"), storage: new FakeStorage() });
+      const stranger = await loginAs(other);
+      await other.close();
+      await request(app.getHttpServer()).patch(`/takes/${t1.id}/name`).set(auth(stranger.accessToken)).send({ name: "x" }).expect(403);
+      await request(app.getHttpServer()).patch("/takes/00000000-0000-4000-8000-000000000000/name").set(auth(owner.accessToken)).send({ name: "x" }).expect(404);
+    });
+  });
+
   describe("DELETE /takes/:id", () => {
     it("행·코멘트가 사라지고 takeCount가 줄고 객체가 지워진다", async () => {
       const t1 = await takeByIndex(0);

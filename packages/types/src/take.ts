@@ -62,3 +62,11 @@ export interface UpdateCommentInput {
   /** 본문만 고친다. 시점은 지우고 다시 남긴다 */
   text: string;
 }
+
+/** 이름 최대 길이 — 디자인 "Take name" 입력의 maxLength (2026-10-02 이름 변경) */
+export const TAKE_NAME_MAX = 40;
+
+/** 워커가 붙이는 기본 이름. 이름을 비우면 여기로 돌아간다 */
+export function defaultTakeName(index: number): string {
+  return `Take ${index + 1}`;
+}

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Logger } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
-import { PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
+import { defaultTakeName, PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
 import { mergeCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { DB } from "../db/db.constants.js";
@@ -100,7 +100,7 @@ export class SessionAnalysisService {
           id: takeId,
           sessionId,
           index,
-          name: `Take ${index + 1}`,
+          name: defaultTakeName(index),
           startMs: candidate.startMs,
           endMs: candidate.endMs,
           type: candidate.type,

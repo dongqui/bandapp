@@ -1,4 +1,4 @@
-import type { CommentTarget, TakeComment } from "@bandapp/types";
+import type { CommentTarget, Take, TakeComment } from "@bandapp/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, KeyboardAvoidingView, View } from "react-native";
@@ -10,6 +10,10 @@ import { AppText, ConfirmDialog, MonoLabel, PlayerWaveform, PressableOpacity, Sc
 import { CommentActionSheet } from "./CommentActionSheet";
 import { CommentInput, type EditTarget, type ReplyTarget } from "./CommentInput";
 import { CommentThread } from "./CommentThread";
+import { TakeActionSheet } from "./TakeActionSheet";
+import { TakeDeleteDialog } from "./TakeDeleteDialog";
+import { TakeMoreButton } from "./TakeMoreButton";
+import { TakeRenameSheet } from "./TakeRenameSheet";
 import { groupThreads, type CommentThread as Thread } from "./threads";
 import { useAudioUrl } from "./useAudioUrl";
 import { useComments } from "./useComments";
@@ -35,7 +39,7 @@ function quote(text: string): string {
 export function TakePlayerScreen() {
   const { id, takeId } = useLocalSearchParams<{ id: string; takeId: string }>();
   const { data: session } = useSession(id);
-  const { data: takes } = useTakes(id);
+  const { data: takes, reload: reloadTakes } = useTakes(id);
   const router = useRouter();
   const api = useApi();
   const toast = useToast();
@@ -52,6 +56,8 @@ export function TakePlayerScreen() {
     const t = (takes ?? []).find((x) => x.id === takeId);
     return t ? { id: t.id, name: t.name, durationSec: t.durationSec, peaks: t.peaks, audioStatus: t.audioStatus } : undefined;
   }, [session, takes, takeId, isOriginal]);
+  /** "···" 메뉴용 원본 Take — 원본 녹음에는 메뉴가 없다 (2026-10-02 디자인 takeCanEdit) */
+  const fullTake = useMemo(() => (isOriginal ? null : ((takes ?? []).find((x) => x.id === takeId) ?? null)), [takes, takeId, isOriginal]);
 
   // 원본 녹음도 같은 목록·입력을 쓴다 — 대상만 다르다 (2026-09-09 스펙 결정 4, 8)
   const target: CommentTarget | undefined = !session || !take ? undefined : isOriginal ? { sessionId: session.id } : { takeId: take.id };
@@ -71,6 +77,11 @@ export function TakePlayerScreen() {
   const [editTarget, setEditTarget] = useState<TakeComment | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<TakeComment | null>(null);
   const [deleting, setDeleting] = useState(false);
+  /** take "···" 시트 / 이름 변경 시트 / 삭제 확인 (2026-10-02 디자인) */
+  const [takeAction, setTakeAction] = useState<Take | null>(null);
+  const [renameTake, setRenameTake] = useState<Take | null>(null);
+  const [confirmDeleteTake, setConfirmDeleteTake] = useState<Take | null>(null);
+  const [deletingTake, setDeletingTake] = useState(false);
 
   const cancelEdit = useCallback(() => {
     setEditTarget(null);
@@ -108,6 +119,29 @@ export function TakePlayerScreen() {
       .finally(() => {
         setDeleting(false);
         setConfirmDelete(null);
+      });
+  };
+  // Edit take → 타임라인을 그 take가 선택된 채로 연다. 이 플레이어는 스택 아래에 남으니 소리는 멈춘다
+  const editTake = (t: Take) => {
+    setTakeAction(null);
+    if (playback.playing) playback.toggle();
+    router.push(`/session/${id}/timeline?take=${t.id}`);
+  };
+  const doDeleteTake = () => {
+    const t = confirmDeleteTake;
+    if (!t || deletingTake) return;
+    setDeletingTake(true);
+    void api.takes
+      .remove(t.id)
+      .then(() => {
+        toast.show(`${t.name} deleted`);
+        // 이 화면의 take가 사라졌다 — 세션 상세로 (디자인 doDeleteTake)
+        router.back();
+      })
+      .catch(() => toast.show("Something went wrong"))
+      .finally(() => {
+        setDeletingTake(false);
+        setConfirmDeleteTake(null);
       });
   };
   // 재생 중에는 200ms마다 재렌더되므로, 매번 새 객체를 만들면 입력창 포커스 effect가 계속 다시 돈다 —
@@ -182,7 +216,7 @@ export function TakePlayerScreen() {
         behavior="padding"
         style={{ flex: 1 }}
       >
-        <View style={{ paddingHorizontal: space.sheetX }}>
+        <View style={{ paddingHorizontal: space.sheetX, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <PressableOpacity
             onPress={() => router.back()}
             style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", padding: 8 }}
@@ -192,6 +226,8 @@ export function TakePlayerScreen() {
               Session
             </AppText>
           </PressableOpacity>
+          {/* take 메뉴 (Edit / Rename / Delete) — 원본 녹음에는 없다 (2026-10-02 디자인) */}
+          {fullTake ? <TakeMoreButton size={36} onPress={() => setTakeAction(fullTake)} style={{ marginRight: 8 }} /> : null}
         </View>
         <View style={{ paddingHorizontal: space.screenX, paddingTop: 4, paddingBottom: 10 }}>
           <AppText variant="heading">{take.name}</AppText>
@@ -320,6 +356,21 @@ export function TakePlayerScreen() {
         />
       </KeyboardAvoidingView>
       <CommentActionSheet comment={actionTarget} onClose={() => setActionTarget(null)} onEdit={startEdit} onDelete={askDelete} />
+      <TakeActionSheet
+        take={takeAction}
+        onClose={() => setTakeAction(null)}
+        onEdit={editTake}
+        onRename={(t) => {
+          setTakeAction(null);
+          setRenameTake(t);
+        }}
+        onDelete={(t) => {
+          setTakeAction(null);
+          setConfirmDeleteTake(t);
+        }}
+      />
+      <TakeRenameSheet take={renameTake} onClose={() => setRenameTake(null)} onSaved={reloadTakes} />
+      <TakeDeleteDialog take={confirmDeleteTake} busy={deletingTake} onConfirm={doDeleteTake} onCancel={() => setConfirmDeleteTake(null)} />
       {confirmDelete ? (
         <ConfirmDialog
           visible

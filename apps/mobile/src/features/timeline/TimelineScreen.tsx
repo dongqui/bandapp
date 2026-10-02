@@ -422,12 +422,18 @@ export function TimelineScreen() {
         </View>
       ) : null}
 
-      {/* 디자인: 바가 컨트롤 블록 위로 10px 겹친다. seek한 자리가 화면 밖이면 follow가 viewport를 옮긴다 */}
+      {/* 디자인: 바가 컨트롤 블록 위로 10px 겹친다. 끄는 동안 playhead·파형이 손가락을 따라가고 소리는 150ms마다 */}
       <View style={{ marginHorizontal: space.screenX, marginBottom: -10 }}>
         <ProgressBar
           playheadMs={clock.playheadMs}
+          scrubMs={clock.scrubMs}
           seekEpoch={clock.seekEpoch}
           durationMs={durationMs}
+          onScrub={(ms) => {
+            // 스크럽 중에도 파형이 playhead를 따라가게 — follow 규칙(30% 지점)으로 viewport가 옮겨진다
+            vp.follow.value = true;
+            clock.scrubTo(ms);
+          }}
           onSeek={(ms) => {
             clock.seekTo(ms);
             vp.follow.value = true;

@@ -260,7 +260,7 @@ Claude Design "Timeline" 화면이 바뀌어 코드를 맞췄다. 이 절이 위
 
 ### 2026-10-02 추가
 
-- **프로그레스바.** 재생 컨트롤 위, 전체 녹음 기준 (3px 트랙 + 13px 흰 노브, 컨트롤 블록 위로 10px 겹침, 컨트롤의 윗선 제거). 탭·드래그로 seek. 디자인은 드래그 중 매 이동마다 seek하지만 코드는 노브만 손가락을 따라가고 놓을 때 한 번 seek한다 (`player.seekTo`를 매 프레임 부르지 않는다). 디자인은 seek 자리가 화면 밖이면 viewport를 그 자리 중앙으로 옮기는데, 코드는 follow를 켜서 기존 follow 규칙(30% 지점)으로 옮긴다.
+- **프로그레스바.** 재생 컨트롤 위, 전체 녹음 기준 (3px 트랙 + 13px 흰 노브, 컨트롤 블록 위로 10px 겹침, 컨트롤의 윗선 제거). 탭·드래그로 seek. 끄는 동안 playhead(파형·오버뷰·노브)가 UI 스레드에서 손가락을 따라가고(`usePlaybackClock.scrubMs`), 실제 `player.seekTo`는 150ms마다 한 번(소리로 위치 확인), 놓을 때 마지막으로 한 번. 디자인은 seek 자리가 화면 밖이면 viewport를 그 자리 중앙으로 옮기는데, 코드는 follow를 켜서 기존 follow 규칙(30% 지점)으로 옮긴다.
 - **"⟲ PLAYHEAD" 필** 복귀 — 9-11 스펙 결정 10 그대로.
 - **take 내비 범위 줄.** `‹ TAKE n / N ›` 아래에 `04:55 – 06:06`. 초안이 dirty면 초안 값을 accent로.
 - **안드로이드 하단.** 디자인의 컨트롤 아래 42px는 iOS 홈 인디케이터 기준 — 안드로이드 내비 바(edge-to-edge)에 재생 버튼이 잘려서 `max(42, inset.bottom + 8)`.
@@ -274,7 +274,8 @@ reanimated 4.5.1 + Fabric(Expo 57 dev client)에서 `useAnimatedStyle`로만 그
 마운트 직후 updateProps 유실 둘 다 아니었다).
 
 적용한 것: JS가 값을 바꾼 횟수를 `kick`(viewport, `useTimelineViewport`)·`seekEpoch`(`usePlaybackClock`)·`epoch`(`useTakeDraft`)로 세고,
-해당 뷰들이 `useRemountKey`로 **한 프레임 뒤** `key`를 바꿔 다시 붙는다 — 다시 붙을 때 Reanimated가 그 시점 shared value로 style을 강제
-재적용한다(`ViewDescriptorsSet.add → updater(true)`). 같은 커밋 안에서 바로 다시 붙이면 그것도 유실돼 한 프레임 미룬다. 미러(`useUiMirror`)를
+해당 뷰들이 `useRemountKey`로 **120ms 뒤** `key`를 바꿔 다시 붙는다 — 다시 붙을 때 Reanimated가 그 시점 shared value로 style을 강제
+재적용한다(`ViewDescriptorsSet.add → updater(true)`). 같은 커밋 안에서 바로 다시 붙이면 그것도 유실되고, 바로 다음 프레임에 붙이면 그 프레임의
+다른 mapper 갱신(스크럽을 놓은 뒤 follow 점프에 따른 파형 path·눈금)이 빠져서 120ms 미룬다. 미러(`useUiMirror`)를
 기본 style로 까는 안은 멈춘 animated props가 React style을 덮어써서 효과가 없었고, 눈금·디버그 오버레이처럼 텍스트에만 쓴다.
 reanimated를 올려 사라지면 kick·seekEpoch·epoch·useRemountKey를 지운다 (backlog).

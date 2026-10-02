@@ -5,6 +5,7 @@ import { timeToX } from "@/lib/timeline/viewport";
 import { useTheme } from "@/theme";
 import { WAVE_H } from "./WaveformCanvas";
 import type { TimelineViewportState } from "./useTimelineViewport";
+import { useRemountKey } from "./useRemountKey";
 
 /** 핸들 컬럼 폭 — 중심이 핸들 x (디자인 노트) */
 const COL_W = 24;
@@ -61,9 +62,24 @@ function Handle({ vp, draft, which }: { vp: TimelineViewportState; draft: Shared
 /**
  * 선택 take의 초안 구간 + start/end 핸들. 시각만 그린다 — 터치는 useTimelineViewport의 hit-test가 맡는다 (스펙 B 결정 8).
  * `enabled`가 false면(ready가 아니거나 피크 로딩 중) 아무것도 안 그린다 (디자인 노트 editOn).
+ * `key={kick}-{draftEpoch}` — JS가 viewport나 초안을 바꿀 때마다 뷰를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
  */
-export function TakeHandles({ vp, draft, enabled }: { vp: TimelineViewportState; draft: SharedValue<Draft | null>; enabled: boolean }) {
+export function TakeHandles({
+  vp,
+  kick,
+  draft,
+  draftEpoch,
+  enabled,
+}: {
+  vp: TimelineViewportState;
+  kick: number;
+  draft: SharedValue<Draft | null>;
+  /** JS가 초안을 바꾼 횟수 (begin/reset/clear) */
+  draftEpoch: number;
+  enabled: boolean;
+}) {
   const { colors } = useTheme();
+  const remount = useRemountKey(`${kick}-${draftEpoch}`);
   const region = useAnimatedStyle(() => {
     const d = draft.value;
     if (!d) return { opacity: 0, transform: [{ translateX: 0 }], width: 0 };
@@ -74,7 +90,7 @@ export function TakeHandles({ vp, draft, enabled }: { vp: TimelineViewportState;
   });
   if (!enabled) return null;
   return (
-    <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: 0, height: WAVE_H }}>
+    <View key={remount} pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: 0, height: WAVE_H }}>
       <Animated.View style={[{ position: "absolute", top: 0, height: WAVE_H, backgroundColor: colors.accent }, region]} />
       <Handle vp={vp} draft={draft} which="start" />
       <Handle vp={vp} draft={draft} which="end" />

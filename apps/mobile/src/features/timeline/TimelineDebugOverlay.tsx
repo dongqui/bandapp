@@ -1,23 +1,13 @@
-import { useState } from "react";
+import { useCallback } from "react";
 import { View } from "react-native";
-import { useAnimatedReaction, type SharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
+import type { SharedValue } from "react-native-reanimated";
 import { viewportEndMs } from "@/lib/timeline/viewport";
 import { AppText } from "@/ui";
 import type { PeaksSource } from "./useSessionPeaks";
 import type { TimelineViewportState } from "./useTimelineViewport";
+import { useUiMirror } from "./useUiMirror";
 
-interface Snapshot {
-  startMs: number;
-  endMs: number;
-  msPerPx: number;
-  level: number;
-  playheadMs: number;
-  follow: boolean;
-  gesture: string;
-}
-
-/** __DEV__ 전용. 스크린샷만 보고도 상태를 알 수 있게 (초안 30절). 200ms에 한 번만 React로 넘긴다 */
+/** __DEV__ 전용. 스크린샷만 보고도 상태를 알 수 있게 (초안 30절). useUiMirror가 80ms로 묶어 React에 넘긴다 */
 export function TimelineDebugOverlay({
   vp,
   playheadMs,
@@ -31,27 +21,24 @@ export function TimelineDebugOverlay({
   source: PeaksSource;
   selectedTakeId: string | null;
 }) {
-  const [snap, setSnap] = useState<Snapshot | null>(null);
-  useAnimatedReaction(
-    () => Math.floor(Date.now() / 200),
-    (tick, prev) => {
-      if (tick === prev) return;
-      const v = { startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value };
-      scheduleOnRN(setSnap, {
-        startMs: v.startMs,
-        endMs: viewportEndMs(v),
-        msPerPx: v.msPerPx,
-        level: level.value,
-        playheadMs: playheadMs.value,
-        follow: vp.follow.value,
-        gesture: vp.activeGesture.value ?? "-",
-      });
-    },
-  );
+  const read = useCallback(() => {
+    "worklet";
+    const v = { startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value };
+    return {
+      startMs: v.startMs,
+      endMs: viewportEndMs(v),
+      msPerPx: v.msPerPx,
+      level: level.value,
+      playheadMs: Math.round(playheadMs.value),
+      follow: vp.follow.value,
+      gesture: vp.activeGesture.value ?? "-",
+    };
+  }, [vp, level, playheadMs]);
+  const snap = useUiMirror([vp.startMs, vp.msPerPx, vp.widthPx, vp.follow, vp.activeGesture, level, playheadMs], read);
   if (!snap) return null;
   const lines = [
     `view ${Math.round(snap.startMs)}..${Math.round(snap.endMs)} ms  ${snap.msPerPx.toFixed(2)} ms/px  LOD ${snap.level}`,
-    `playhead ${Math.round(snap.playheadMs)} ms  follow ${snap.follow}  gesture ${snap.gesture}`,
+    `playhead ${snap.playheadMs} ms  follow ${snap.follow}  gesture ${snap.gesture}`,
     `peaks ${source}  take ${selectedTakeId ?? "-"}`,
   ];
   return (

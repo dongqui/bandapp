@@ -1,11 +1,8 @@
 import { View } from "react-native";
-import Animated, { useAnimatedProps, useAnimatedStyle, useDerivedValue, type SharedValue } from "react-native-reanimated";
+import Animated, { useAnimatedProps, type SharedValue } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
-import { playheadEdge } from "@/lib/timeline/follow";
 import { BAR_PX, barsForViewport, selectLevel, type PeakLevels } from "@/lib/timeline/levels";
-import { timeToX } from "@/lib/timeline/viewport";
 import { useTheme } from "@/theme";
-import { AppText } from "@/ui";
 import type { TimelineViewportState } from "./useTimelineViewport";
 
 /** 디자인 Timeline 화면의 파형 상자 높이 */
@@ -18,19 +15,17 @@ const AMP_FLOOR = 0.1;
 const APath = Animated.createAnimatedComponent(Path);
 
 /**
- * 좌우 대칭 폴리곤 파형 + playhead. 모든 기하는 shared value에서 매 프레임 UI 스레드가 계산해 animatedProps로 흘린다 —
+ * 좌우 대칭 폴리곤 파형. 모든 기하는 shared value에서 매 프레임 UI 스레드가 계산해 animatedProps로 흘린다 —
  * 팬·줌·재생 중 이 컴포넌트는 리렌더되지 않는다 (2026-09-11 스펙 결정 7, §파형 렌더링).
- * 로딩·저해상도 배지·줌 버튼·돌아가기 필은 화면이 이 위에 겹친다.
+ * playhead(Playhead.tsx)·핸들·로딩·저해상도 배지·돌아가기 필은 화면이 이 위에 겹친다.
  */
 export function WaveformCanvas({
   levels,
   vp,
-  playheadMs,
   level,
 }: {
   levels: PeakLevels | null;
   vp: TimelineViewportState;
-  playheadMs: SharedValue<number>;
   /** 현재 LOD — 디버그 오버레이용 출력 */
   level: SharedValue<number>;
 }) {
@@ -59,21 +54,6 @@ export function WaveformCanvas({
     return { d: `${top}L${lastX} ${(mid - lastY).toFixed(1)}L${lastX} ${(mid + lastY).toFixed(1)}${bottom}Z` };
   }, [levels]);
 
-  const playheadX = useDerivedValue(() =>
-    timeToX({ startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value }, playheadMs.value),
-  );
-  const playheadStyle = useAnimatedStyle(() => {
-    const x = playheadX.value;
-    const on = x >= 0 && x <= vp.widthPx.value;
-    return { transform: [{ translateX: on ? x : 0 }], opacity: on ? 1 : 0 };
-  });
-  const leftEdge = useAnimatedStyle(() => ({
-    opacity: playheadEdge({ startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value }, playheadMs.value) === "left" ? 1 : 0,
-  }));
-  const rightEdge = useAnimatedStyle(() => ({
-    opacity: playheadEdge({ startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value }, playheadMs.value) === "right" ? 1 : 0,
-  }));
-
   return (
     <View
       onLayout={vp.onLayout}
@@ -82,17 +62,6 @@ export function WaveformCanvas({
       <Svg width="100%" height={WAVE_H} pointerEvents="none">
         <APath animatedProps={pathProps} fill={WAVE_FILL} />
       </Svg>
-      {/* playhead — 1.5px 선 + 위쪽 9px 점 (디자인) */}
-      <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 0, left: 0, height: WAVE_H, width: 1.5, backgroundColor: colors.accent }, playheadStyle]}>
-        <View style={{ position: "absolute", top: 0, left: -3.75, width: 9, height: 9, borderRadius: 5, backgroundColor: colors.accent }} />
-      </Animated.View>
-      {/* 화면 밖 playhead 표시 */}
-      <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 6, top: mid - 8 }, leftEdge]}>
-        <AppText style={{ fontSize: 11, lineHeight: 16, color: colors.accent }}>◀</AppText>
-      </Animated.View>
-      <Animated.View pointerEvents="none" style={[{ position: "absolute", right: 6, top: mid - 8 }, rightEdge]}>
-        <AppText style={{ fontSize: 11, lineHeight: 16, color: colors.accent }}>▶</AppText>
-      </Animated.View>
     </View>
   );
 }

@@ -4,6 +4,7 @@ import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useTheme } from "@/theme";
+import { useRemountKey } from "./useRemountKey";
 
 /** 디자인 Timeline 화면의 프로그레스바 높이 — 트랙 3px를 가운데 두고 위아래가 터치 영역이다 */
 export const PROGRESS_H = 20;
@@ -18,8 +19,20 @@ const KNOB = 13;
  * 끄는 동안은 손가락 x를 따라가다 놓을 때 한 번 seek한다 — 매 프레임 player.seekTo를 부르지 않는다.
  * 팬 제스처의 onBegin/onFinalize는 탭에서도 불리므로 탭 = 그 자리로 seek가 된다.
  */
-export function ProgressBar({ playheadMs, durationMs, onSeek }: { playheadMs: SharedValue<number>; durationMs: number; onSeek: (ms: number) => void }) {
+export function ProgressBar({
+  playheadMs,
+  seekEpoch,
+  durationMs,
+  onSeek,
+}: {
+  playheadMs: SharedValue<number>;
+  /** JS가 seek한 횟수 — 노브·채움 뷰를 다시 붙이는 key (useTimelineViewport의 kick 설명 참고) */
+  seekEpoch: number;
+  durationMs: number;
+  onSeek: (ms: number) => void;
+}) {
   const { colors } = useTheme();
+  const remount = useRemountKey(seekEpoch);
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
   const pxPerMs = width > 0 && durationMs > 0 ? width / durationMs : 0;
@@ -57,8 +70,9 @@ export function ProgressBar({ playheadMs, durationMs, onSeek }: { playheadMs: Sh
     <GestureDetector gesture={pan}>
       <View onLayout={onLayout} style={{ height: PROGRESS_H }}>
         <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: TRACK_TOP, height: TRACK_H, borderRadius: 2, backgroundColor: TRACK_BG }} />
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, top: TRACK_TOP, height: TRACK_H, borderRadius: 2, backgroundColor: colors.accent }, fillStyle]} />
+        <Animated.View key={`f${remount}`} pointerEvents="none" style={[{ position: "absolute", left: 0, top: TRACK_TOP, height: TRACK_H, borderRadius: 2, backgroundColor: colors.accent }, fillStyle]} />
         <Animated.View
+          key={`k${remount}`}
           pointerEvents="none"
           style={[
             {

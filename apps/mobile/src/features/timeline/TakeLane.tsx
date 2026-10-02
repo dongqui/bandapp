@@ -6,6 +6,7 @@ import { timeToX } from "@/lib/timeline/viewport";
 import { font, useTheme } from "@/theme";
 import { AppText } from "@/ui";
 import type { TimelineViewportState } from "./useTimelineViewport";
+import { useRemountKey } from "./useRemountKey";
 
 /** 디자인 Timeline 화면의 take 레인 높이 */
 export const LANE_H = 40;
@@ -19,10 +20,12 @@ const PILL_MIN_W = 12;
  * 선택된 필은 저장된 경계 대신 초안을 따라간다 — 핸들을 끄는 동안 필도 같이 움직인다 (스펙 B).
  * 라벨은 "T1"처럼 번호만 — 전체 이름은 아래 take 내비("TAKE 1 / 13")가 보여 준다 (2026-09-20 디자인 개정).
  * 길게 누르면 take 메뉴(삭제) — 개정 디자인에서 카드의 ··· 버튼이 빠져 진입점을 여기로 옮겼다.
+ * `key={kick}` — JS가 viewport를 바꿀 때마다 뷰를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
  */
 function TakePill({
   take,
   vp,
+  kick,
   draft,
   selected,
   onPress,
@@ -30,12 +33,14 @@ function TakePill({
 }: {
   take: Take;
   vp: TimelineViewportState;
+  kick: number;
   draft: SharedValue<Draft | null>;
   selected: boolean;
   onPress: () => void;
   onLongPress: () => void;
 }) {
   const { colors } = useTheme();
+  const remount = useRemountKey(kick);
   const style = useAnimatedStyle(() => {
     const v = { startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value };
     const d = selected ? draft.value : null;
@@ -47,7 +52,7 @@ function TakePill({
     return { left, width: Math.max(PILL_MIN_W, right - left), opacity: visible ? 1 : 0 };
   });
   return (
-    <Animated.View style={[{ position: "absolute", top: 4, bottom: 4 }, style]}>
+    <Animated.View key={remount} style={[{ position: "absolute", top: 4, bottom: 4 }, style]}>
       <Pressable
         onPress={onPress}
         onLongPress={onLongPress}
@@ -74,6 +79,7 @@ function TakePill({
 export function TakeLane({
   takes,
   vp,
+  kick,
   draft,
   selectedTakeId,
   onSelect,
@@ -81,6 +87,8 @@ export function TakeLane({
 }: {
   takes: Take[];
   vp: TimelineViewportState;
+  /** JS발 viewport 변경 횟수 — 필을 다시 붙이는 key */
+  kick: number;
   draft: SharedValue<Draft | null>;
   selectedTakeId: string | null;
   onSelect: (take: Take) => void;
@@ -98,7 +106,7 @@ export function TakeLane({
   return (
     <View style={{ height: LANE_H, overflow: "hidden" }}>
       {takes.map((t) => (
-        <TakePill key={t.id} take={t} vp={vp} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} onLongPress={() => onMenu(t)} />
+        <TakePill key={t.id} take={t} vp={vp} kick={kick} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} onLongPress={() => onMenu(t)} />
       ))}
     </View>
   );

@@ -4,6 +4,7 @@ import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useApi } from "@/api";
@@ -17,6 +18,7 @@ import { xToTime } from "@/lib/timeline/viewport";
 import { font, space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, PressableOpacity, Screen, useToast } from "@/ui";
 import { OverviewStrip } from "./OverviewStrip";
+import { Playhead } from "./Playhead";
 import { ProgressBar } from "./ProgressBar";
 import { TakeActionSheet } from "./TakeActionSheet";
 import { TakeHandles } from "./TakeHandles";
@@ -115,6 +117,7 @@ export function TimelineScreen() {
   const api = useApi();
   const toast = useToast();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const { data: session } = useSession(id);
   const { data: takes, reload: reloadTakes } = useTakes(id);
   useTakesPolling(takes, reloadTakes);
@@ -155,7 +158,7 @@ export function TimelineScreen() {
     () => ({ draft: draftState.draft, neighbors: draftState.neighbors, onHandleRelease }),
     [draftState.draft, draftState.neighbors, onHandleRelease],
   );
-  const { vp, gesture } = useTimelineViewport(durationMs, onTap, editing);
+  const { vp, gesture, kick } = useTimelineViewport(durationMs, onTap, editing);
   vpRef.current = vp;
   const follow = useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
 
@@ -299,6 +302,11 @@ export function TimelineScreen() {
   const durLabel = `${fmtDuration(session.durationSec)} · ${takeList.length === 0 ? "No takes" : `${takeList.length} Takes`}`;
   // 카드의 범위 텍스트 — 초안이 dirty면 초안 값, 아니면 저장된 값 (디자인 노트)
   const edited = draftState.dirty ? draftRange : null;
+  const navRange = !selectedTake
+    ? ""
+    : edited
+      ? `${fmtClock(edited.startMs / 1000)} – ${fmtClock(edited.endMs / 1000)}`
+      : `${fmtClock(selectedTake.startMs / 1000)} – ${fmtClock(selectedTake.endMs / 1000)}`;
   const rangeLabel = !selectedTake
     ? ""
     : edited
@@ -335,10 +343,11 @@ export function TimelineScreen() {
       <View style={{ marginTop: 2, marginHorizontal: space.screenX }}>
         <GestureDetector gesture={gesture}>
           <View>
-            <WaveformCanvas levels={peaks.levels} vp={vp} playheadMs={clock.playheadMs} level={level} />
+            <WaveformCanvas levels={peaks.levels} vp={vp} level={level} />
           </View>
         </GestureDetector>
-        <TakeHandles vp={vp} draft={draftState.draft} enabled={editOn} />
+        <Playhead vp={vp} kick={kick} playheadMs={clock.playheadMs} seekEpoch={clock.seekEpoch} />
+        <TakeHandles vp={vp} kick={kick} draft={draftState.draft} draftEpoch={draftState.epoch} enabled={editOn} />
         {peaks.loading ? (
           <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: 0, height: WAVE_H, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: colors.bg }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 4, height: 32 }}>
@@ -366,17 +375,23 @@ export function TimelineScreen() {
         ) : null}
       </View>
       <View style={{ marginTop: 10, marginHorizontal: space.screenX }}>
-        <TakeLane takes={takeList} vp={vp} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} onMenu={setActionTake} />
+        <TakeLane takes={takeList} vp={vp} kick={kick} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} onMenu={setActionTake} />
       </View>
       <View style={{ marginTop: 14, marginHorizontal: space.screenX }}>
-        <OverviewStrip levels={peaks.levels} vp={vp} takes={takeList} durationMs={durationMs} playheadMs={clock.playheadMs} />
+        <OverviewStrip levels={peaks.levels} vp={vp} takes={takeList} durationMs={durationMs} playheadMs={clock.playheadMs} kick={kick} seekEpoch={clock.seekEpoch} />
       </View>
       {takeList.length > 0 ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14, marginHorizontal: space.screenX }}>
           <NavButton label="‹" enabled={prevTake !== undefined} onPress={() => prevTake && selectTake(prevTake)} />
-          <AppText style={{ minWidth: 104, textAlign: "center", fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
-            {selectedTake ? `TAKE ${selectedTake.index + 1} / ${takeList.length}` : `${takeList.length} TAKES`}
-          </AppText>
+          <View style={{ minWidth: 132, alignItems: "center", gap: 4 }}>
+            <AppText style={{ fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
+              {selectedTake ? `TAKE ${selectedTake.index + 1} / ${takeList.length}` : `${takeList.length} TAKES`}
+            </AppText>
+            {/* 선택 take의 범위 — 초안이 dirty면 초안 값을 accent로 (2026-10-02 디자인 추가) */}
+            {navRange ? (
+              <AppText style={{ fontFamily: font.mono, fontSize: 11, color: draftState.dirty ? colors.accent : colors.textMuted }}>{navRange}</AppText>
+            ) : null}
+          </View>
           <NavButton label="›" enabled={nextTake !== undefined} onPress={() => nextTake && selectTake(nextTake)} />
         </View>
       ) : null}
@@ -411,6 +426,7 @@ export function TimelineScreen() {
       <View style={{ marginHorizontal: space.screenX, marginBottom: -10 }}>
         <ProgressBar
           playheadMs={clock.playheadMs}
+          seekEpoch={clock.seekEpoch}
           durationMs={durationMs}
           onSeek={(ms) => {
             clock.seekTo(ms);
@@ -418,7 +434,8 @@ export function TimelineScreen() {
           }}
         />
       </View>
-      <View style={{ paddingTop: 14, paddingBottom: 42, paddingHorizontal: space.screenX, alignItems: "center", gap: 12 }}>
+      {/* 디자인의 42px는 iOS 홈 인디케이터 포함 — 안드로이드 내비 바(edge-to-edge)가 더 높으면 그만큼 올린다 */}
+      <View style={{ paddingTop: 14, paddingBottom: Math.max(42, insets.bottom + 8), paddingHorizontal: space.screenX, alignItems: "center", gap: 12 }}>
         <AppText variant="monoMeta">
           <AppText variant="monoMeta" color={colors.text}>
             {fmtClock(clock.positionMs / 1000)}

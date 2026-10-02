@@ -19,6 +19,8 @@ export interface TakeDraftState {
   clear: () => void;
   /** JS에서 초안 읽기 (Save) */
   current: () => Draft | null;
+  /** JS가 초안을 바꾼 횟수 (begin/reset/clear) — 핸들 뷰를 다시 붙이는 key (useTimelineViewport의 kick 설명 참고) */
+  epoch: number;
 }
 
 /** 초안은 shared value로만 살고(스펙 B 결정 7) React는 dirty 여부만 안다 */
@@ -27,6 +29,7 @@ export function useTakeDraft(): TakeDraftState {
   const neighbors = useSharedValue<Neighbors>({ prevEndMs: null, nextStartMs: null });
   const [original, setOriginal] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [epoch, setEpoch] = useState(0);
   // original의 shared value 미러 — begin()이 draft.value를 바로 바꾸는데 React state(original)는
   // 나중에 커밋되므로, reaction worklet이 React 값을 보면 take 전환 때 이전 take 기준으로 dirty를 오판한다
   const originalSV = useSharedValue<Draft | null>(null);
@@ -56,6 +59,7 @@ export function useTakeDraft(): TakeDraftState {
       originalSV.value = o;
       lastDirty.value = false;
       draft.value = o;
+      setEpoch((e) => e + 1);
     },
     [draft, neighbors, originalSV, lastDirty],
   );
@@ -63,6 +67,7 @@ export function useTakeDraft(): TakeDraftState {
     if (original) draft.value = { ...original };
     lastDirty.value = false;
     setDirty(false);
+    setEpoch((e) => e + 1);
   }, [draft, original, lastDirty]);
   const clear = useCallback(() => {
     draft.value = null;
@@ -70,8 +75,9 @@ export function useTakeDraft(): TakeDraftState {
     lastDirty.value = false;
     setOriginal(null);
     setDirty(false);
+    setEpoch((e) => e + 1);
   }, [draft, originalSV, lastDirty]);
   const current = useCallback(() => draft.value, [draft]);
 
-  return { draft, neighbors, original, dirty, begin, reset, clear, current };
+  return { draft, neighbors, original, dirty, begin, reset, clear, current, epoch };
 }

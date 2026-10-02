@@ -14,6 +14,8 @@ export interface PlaybackClock {
   error: string | null;
   toggle: () => void;
   seekTo: (ms: number) => void;
+  /** JS가 seek한 횟수 — playhead 뷰를 다시 붙이는 key (useTimelineViewport의 kick 설명 참고) */
+  seekEpoch: number;
 }
 
 /**
@@ -37,6 +39,7 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
   const deferredSeekRef = useRef<number | null>(null);
   const [positionMs, setPositionMs] = useState(0);
   const [simPlaying, setSimPlaying] = useState(false);
+  const [seekEpoch, setSeekEpoch] = useState(0);
   const simPosRef = useRef(0);
 
   const setAnchor = useCallback(
@@ -102,6 +105,7 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
       deferredSeekRef.current = null;
       seekPendingRef.current = true;
       setAnchor(target, false);
+      setSeekEpoch((e) => e + 1);
       void player.seekTo(target / 1000).finally(() => {
         seekPendingRef.current = false;
       });
@@ -134,5 +138,5 @@ export function usePlaybackClock(url: string | null, durationMs: number): Playba
     player.play();
   }, [url, simPlaying, durationMs, status.playing, status.didJustFinish, status.currentTime, totalMs, player, setAnchor]);
 
-  return { playheadMs, playing, positionMs, error: url ? (status.error ?? null) : null, toggle, seekTo };
+  return { playheadMs, playing, positionMs, error: url ? (status.error ?? null) : null, toggle, seekTo, seekEpoch };
 }

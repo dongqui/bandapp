@@ -8,6 +8,7 @@ import { barsForViewport, type PeakLevels } from "@/lib/timeline/levels";
 import { clampViewport } from "@/lib/timeline/viewport";
 import { useTheme } from "@/theme";
 import type { TimelineViewportState } from "./useTimelineViewport";
+import { useRemountKey } from "./useRemountKey";
 
 /** 디자인 Timeline 화면의 오버뷰 높이 */
 export const OVERVIEW_H = 44;
@@ -22,6 +23,7 @@ const AMP_FLOOR = 0.1;
  * 전체 녹음 개요 (2026-09-11 스펙 §파형 렌더링, 초안 21절). 파형은 최저 LOD를 폭이 정해질 때 한 번만 그리고,
  * viewport 창과 playhead만 shared value로 움직인다. take는 아래쪽 3px 마커다 — 3시간 위에서 1~2분을 정확히
  * 그리려 하지 않는다. 탭·드래그는 그 시각을 viewport 중앙으로 옮긴다 (seek 아님) — 사용자 이동이라 follow를 끈다.
+ * `key={kick}-{seekEpoch}` — JS가 viewport를 바꾸거나 seek할 때마다 창·playhead 뷰를 다시 붙인다 (useTimelineViewport의 kick 설명 참고).
  */
 export function OverviewStrip({
   levels,
@@ -29,15 +31,20 @@ export function OverviewStrip({
   takes,
   durationMs,
   playheadMs,
+  kick,
+  seekEpoch,
 }: {
   levels: PeakLevels | null;
   vp: TimelineViewportState;
   takes: Take[];
   durationMs: number;
   playheadMs: SharedValue<number>;
+  kick: number;
+  seekEpoch: number;
 }) {
   const { colors } = useTheme();
   const [width, setWidth] = useState(0);
+  const reattach = useRemountKey(`${kick}-${seekEpoch}`);
   const onLayout = (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width);
   const mid = OVERVIEW_H / 2;
 
@@ -112,9 +119,10 @@ export function OverviewStrip({
             }}
           />
         ))}
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: -1, width: 2, backgroundColor: colors.accent }, headStyle]} />
-        <Animated.View pointerEvents="none" style={[{ position: "absolute", top: -1, left: -3.5, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }, headStyle]} />
+        <Animated.View key={`h${reattach}`} pointerEvents="none" style={[{ position: "absolute", top: 0, bottom: 0, left: -1, width: 2, backgroundColor: colors.accent }, headStyle]} />
+        <Animated.View key={`d${reattach}`} pointerEvents="none" style={[{ position: "absolute", top: -1, left: -3.5, width: 7, height: 7, borderRadius: 4, backgroundColor: colors.accent }, headStyle]} />
         <Animated.View
+          key={`w${reattach}`}
           pointerEvents="none"
           style={[
             { position: "absolute", top: 0, bottom: 0, left: 0, borderWidth: 1.5, borderColor: WINDOW_BORDER, borderRadius: 5, backgroundColor: "rgba(255,255,255,0.05)" },

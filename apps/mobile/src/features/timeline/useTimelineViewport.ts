@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LayoutChangeEvent } from "react-native";
 import {
   useCompetingGestures,
@@ -51,6 +51,14 @@ export interface TimelineViewportState {
 export interface TimelineViewportHandle {
   vp: TimelineViewportState;
   gesture: ComposedGesture;
+  /**
+   * JS가 viewport를 바꾼 횟수 (첫 레이아웃, fitTo, setViewport). 필·핸들·playhead·오버뷰 창이 `key`로 써서 그때마다
+   * 뷰를 다시 붙인다. 2026-10-02 기기 검증(reanimated 4.5.1, Fabric): 제스처(UI 스레드)로 바꾼 값은 `useAnimatedStyle`이
+   * 잘 따라가는데, JS에서 runOnUI로 바꾼 값은 어떤 뷰에선 네이티브에 안 붙고(필 레인이 비고 playhead가 x=0에 멈춤)
+   * 그 뒤 React 기본 style을 덮어쓴 채 남는다. 뷰를 다시 붙이면 Reanimated가 그 시점 값으로 style을 강제 재적용한다
+   * (ViewDescriptorsSet.add → updater(true)). 웹은 무증상. reanimated를 올려 사라지면 kick·seekEpoch·draftEpoch를 지운다.
+   */
+  kick: number;
 }
 
 /**
@@ -71,6 +79,7 @@ export function useTimelineViewport(
   const follow = useSharedValue(true);
   const activeGesture = useSharedValue<ActiveGesture>(null);
   const pinchOrigin = useSharedValue<Viewport | null>(null);
+  const [kick, setKick] = useState(0);
   // 폭을 알기 전에 들어온 fitTo 요청
   const pendingFit = useSharedValue<{ startMs: number; endMs: number; padFrac: number } | null>(null);
   // 핸들 드래그 상태 (스펙 B) — 잡은 핸들과 마지막 손가락 x
@@ -205,6 +214,7 @@ export function useTimelineViewport(
         msPerPx.value = v.msPerPx;
         startMs.value = v.startMs;
       })(width, durationMs);
+      setKick((k) => k + 1);
     },
     [durationMs, widthPx, msPerPx, startMs, pendingFit],
   );
@@ -228,6 +238,7 @@ export function useTimelineViewport(
         startMs.value = c.startMs;
         msPerPx.value = c.msPerPx;
       })(next, durationMs);
+      setKick((k) => k + 1);
     },
     [durationMs, startMs, msPerPx],
   );
@@ -245,6 +256,7 @@ export function useTimelineViewport(
         startMs.value = v.startMs;
         msPerPx.value = v.msPerPx;
       })(fromMs, toMs, padFrac, durationMs);
+      setKick((k) => k + 1);
     },
     [durationMs, pendingFit, startMs, msPerPx, widthPx],
   );
@@ -259,5 +271,5 @@ export function useTimelineViewport(
     () => ({ startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, fitTo, snapshot, editMode }),
     [startMs, msPerPx, widthPx, follow, activeGesture, onLayout, setViewport, fitTo, snapshot, editMode],
   );
-  return { vp, gesture };
+  return { vp, gesture, kick };
 }

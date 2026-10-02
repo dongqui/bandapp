@@ -26,6 +26,7 @@
 - **타임라인 LOD crossfade.** 지금은 hysteresis만 있다. 레벨 교체가 눈에 띄면 두 레벨을 짧게 섞는다.
 - **타임라인 파형을 Skia로.** SVG `animatedProps`가 기기에서 60fps에 못 미치면 `WaveformCanvas` 한 파일만 Skia로 바꾼다 (2026-09-11 스펙 결정 7). 웹 프리뷰는 canvaskit 설정이 필요하다.
 - **타임라인 take 삭제 진입점.** 2026-09-20 디자인 개정에서 카드의 ··· 가 빠져 레인 필 롱프레스로 옮겼다 — 발견하기 어렵다. Claude Design에서 보이는 진입점을 정하면 교체.
+- **타임라인: 기기에서 useAnimatedStyle 뷰가 JS발 viewport 변경을 못 따라간다 (reanimated 4.5.1, Fabric).** 2026-10-02 기기(Galaxy, dev client 09-11 빌드)에서 확인. 화면을 열면 take 필 레인이 비어 있고 파형 playhead가 x=0, 오버뷰 창이 4px로 멈춰 있다 — 전부 `fitTo`/`onLayout`/seek처럼 **JS에서 runOnUI로 바꾼** 값에 대한 `useAnimatedStyle` 결과가 네이티브 뷰에 안 붙은 상태. 핀치/팬(UI 스레드 제스처)으로 한 번 움직이면 전부 정상. 재렌더(DEBUG 토글)를 시키면 필이 **초기(widest) 위치**로 돌아간다 → 뷰가 React 기본 style로 리셋되고 settled props 동기화(`PropsRegistryGarbageCollector`)가 안 먹는 것으로 보인다. 반면 `useAnimatedReaction`(TimeRuler), svg `animatedProps`(파형 path), 나중에 마운트되는 TakeHandles, ProgressBar(폭 state가 바뀌어 mapper가 재시작됨)는 정상. 웹은 무증상. 다음 실험: (1) 팬 → 1초 대기 → DEBUG 토글 재렌더 → 필이 되돌아가는지(= 재렌더 리셋) (2) reanimated 4.5.5로 올려 dev client 재빌드 (3) 안 되면 각 컴포넌트에 viewport 미러(React state, TimeRuler 방식)를 기본 style로 깔기. 재현 세션 091aea1a… take 1.
 - **타임라인 기기 검증.** 핀치 focal 고정, 핀치→팬 전환, 백그라운드 복귀·블루투스 전환 후 playhead 재동기화, 3시간 세션 60fps, Android 제스처 취소 후 상태 — 계획 Task 16 목록. gesture-handler가 직접 의존성이 돼 dev client 재빌드가 필요하다.
 - **코멘트 owner 중재.** 지금은 작성자만 수정·삭제한다 ([2026-09-09 스펙](superpowers/specs/2026-09-09-comment-edit-delete-original-design.md) 결정 1). 밴드 owner가 남의 코멘트를 지울 수 있게 하려면 서비스의 작성자 검사에 role 분기를 더한다.
 - **코멘트 시점 수정.** 본문만 고칠 수 있다. 시점을 바꾸려면 답글의 `at_ms`도 같이 옮겨야 한다.

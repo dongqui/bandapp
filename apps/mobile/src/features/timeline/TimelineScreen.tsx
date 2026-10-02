@@ -17,6 +17,7 @@ import { xToTime } from "@/lib/timeline/viewport";
 import { font, space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, PressableOpacity, Screen, useToast } from "@/ui";
 import { OverviewStrip } from "./OverviewStrip";
+import { ProgressBar } from "./ProgressBar";
 import { TakeActionSheet } from "./TakeActionSheet";
 import { TakeHandles } from "./TakeHandles";
 import { TakeLane } from "./TakeLane";
@@ -35,6 +36,7 @@ const NUDGE_MS = 1000;
 const FIT_PAD = 0.2;
 /** 디자인 Timeline 화면의 오버레이 색 — 테마 토큰에 없는 값 */
 const BADGE_BG = "rgba(11,12,14,0.7)";
+const PILL_BG = "#1A1D22";
 /** take 내비의 비활성 화살표 색 (디자인 #3A3E45) — 테마 토큰에 없는 값 */
 const NAV_DISABLED = "#3A3E45";
 
@@ -102,8 +104,9 @@ function NudgeButton({ label, onPress }: { label: string; onPress: () => void })
  * 이 컴포넌트는 디자인대로 조립하고 탭 판정만 한다. 파형 탭은 seek, take 필 탭은 선택 + fit (결정 11).
  *
  * 2026-09-20 디자인 개정: 화면은 첫 take를 선택한 채로 열리고, 오버뷰 아래 ‹ TAKE n / N › 내비로 take를 오간다.
- * 파형 위 −/+ 줌 버튼과 "⟲ PLAYHEAD" 필, 카드의 ··· / Open take가 빠졌다 — 카드는 초안이 dirty이거나 재컷
- * 상태(updating/failed)일 때만 뜬다. take를 고르면 재생 위치도 그 시작으로 옮긴다(재생을 누르면 그 take가 들린다).
+ * 파형 위 −/+ 줌 버튼과 카드의 ··· / Open take가 빠졌다 — 카드는 초안이 dirty이거나 재컷 상태(updating/failed)일
+ * 때만 뜬다. take를 고르면 재생 위치도 그 시작으로 옮긴다(재생을 누르면 그 take가 들린다).
+ * 2026-10-02: 재생 컨트롤 위에 전체 녹음 기준 프로그레스바가 생겼고 "⟲ PLAYHEAD" 필이 돌아왔다.
  */
 export function TimelineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -154,7 +157,7 @@ export function TimelineScreen() {
   );
   const { vp, gesture } = useTimelineViewport(durationMs, onTap, editing);
   vpRef.current = vp;
-  useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
+  const follow = useFollowPlayhead(vp, clock.playheadMs, durationMs, clock.playing);
 
   useAnimatedReaction(
     () => {
@@ -313,7 +316,8 @@ export function TimelineScreen() {
         </PressableOpacity>
       </View>
       <View style={{ paddingHorizontal: space.screenX, paddingTop: 2, paddingBottom: 4, gap: 5 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        {/* DEBUG는 왼쪽에 — 오른쪽 위는 Expo dev client의 톱니 버튼이 덮는다 */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
           <AppText style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 1.8, color: colors.textFaint }}>TIMELINE</AppText>
           {__DEV__ ? (
             <PressableOpacity onPress={() => setDebug((d) => !d)} hitSlop={8}>
@@ -351,6 +355,14 @@ export function TimelineScreen() {
               {peaks.source === "buckets" ? "ROUGH WAVEFORM" : "NO WAVEFORM"}
             </AppText>
           </View>
+        ) : null}
+        {!follow.following ? (
+          <PressableOpacity
+            onPress={follow.returnToPlayhead}
+            style={{ position: "absolute", right: 8, bottom: 10, backgroundColor: PILL_BG, borderWidth: 1, borderColor: colors.borderStronger, borderRadius: 15, paddingVertical: 7, paddingHorizontal: 12 }}
+          >
+            <AppText style={{ fontFamily: font.mono, fontSize: 10, lineHeight: 12, letterSpacing: 1, color: colors.textSecondary }}>⟲ PLAYHEAD</AppText>
+          </PressableOpacity>
         ) : null}
       </View>
       <View style={{ marginTop: 10, marginHorizontal: space.screenX }}>
@@ -395,7 +407,18 @@ export function TimelineScreen() {
         </View>
       ) : null}
 
-      <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14, paddingBottom: 42, paddingHorizontal: space.screenX, alignItems: "center", gap: 12 }}>
+      {/* 디자인: 바가 컨트롤 블록 위로 10px 겹친다. seek한 자리가 화면 밖이면 follow가 viewport를 옮긴다 */}
+      <View style={{ marginHorizontal: space.screenX, marginBottom: -10 }}>
+        <ProgressBar
+          playheadMs={clock.playheadMs}
+          durationMs={durationMs}
+          onSeek={(ms) => {
+            clock.seekTo(ms);
+            vp.follow.value = true;
+          }}
+        />
+      </View>
+      <View style={{ paddingTop: 14, paddingBottom: 42, paddingHorizontal: space.screenX, alignItems: "center", gap: 12 }}>
         <AppText variant="monoMeta">
           <AppText variant="monoMeta" color={colors.text}>
             {fmtClock(clock.positionMs / 1000)}

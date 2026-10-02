@@ -67,7 +67,7 @@ export function useTimelineViewport(
   const startMs = useSharedValue(0);
   const msPerPx = useSharedValue(1);
   const widthPx = useSharedValue(0);
-  // 처음에는 ON — 제스처가 끄고, 재생 시작·seek·take 선택이 다시 켠다 (2026-09-20 개정에서 "⟲ PLAYHEAD" 필이 빠졌다)
+  // 처음에는 ON — 디자인(tlFollow: true)대로 "⟲ PLAYHEAD" 필이 사용자가 움직인 뒤에만 보인다
   const follow = useSharedValue(true);
   const activeGesture = useSharedValue<ActiveGesture>(null);
   const pinchOrigin = useSharedValue<Viewport | null>(null);

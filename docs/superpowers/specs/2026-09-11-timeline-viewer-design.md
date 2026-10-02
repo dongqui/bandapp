@@ -248,12 +248,17 @@ Claude Design "Timeline" 화면이 바뀌어 코드를 맞췄다. 이 절이 위
 - **첫 take에서 시작.** 화면을 열면 첫 take가 선택되고 viewport가 그 take에 fit된다 (전체 보기로 시작하지 않는다). 레이아웃 전에 선택이 오면 `fitTo`가 첫 레이아웃까지 미룬다.
 - **take 내비.** 오버뷰 아래 `‹ TAKE n / N ›`. 선택이 없으면 `N TAKES`, ›는 첫 take, ‹는 마지막 take. dirty 초안이 있으면 레인 탭과 같이 Discard 확인을 거친다.
 - **레인 라벨.** 필 안은 `T1`처럼 번호만, 가운데 정렬. 이름은 내비가 보여 준다.
-- **빠진 것.** 파형 위 −/+ 줌 버튼(핀치만 남는다, `zoomBy` 삭제), "⟲ PLAYHEAD" 필, 카드의 ··· 와 Open take. 카드는 초안이 dirty이거나 `audioStatus`가 updating/failed일 때만 뜬다.
+- **빠진 것.** 파형 위 −/+ 줌 버튼(핀치만 남는다, `zoomBy` 삭제), 카드의 ··· 와 Open take. ("⟲ PLAYHEAD" 필도 빠졌다가 10-02에 돌아왔다.) 카드는 초안이 dirty이거나 `audioStatus`가 updating/failed일 때만 뜬다.
 - **오버뷰 playhead.** 2px 선 + 위쪽 7px 점.
 
 디자인에 없어 코드에서 정한 것 (디자인이 바뀌면 다시 본다):
 
 - **take 선택 = seek.** 자동 선택·내비·레인 탭 모두 재생 위치를 take 시작으로 옮기고 follow를 켠다. 디자인 프로토타입은 viewport만 옮겨서, 재생을 누르면 화면 밖 00:00부터 들렸다. 오디오 로드 전의 seek는 `usePlaybackClock`이 들고 있다가 로드 후 적용한다.
-- **follow 복귀.** 필이 없어졌으니 재생 시작, 파형 탭 seek, take 선택이 follow를 다시 켠다.
+- **follow 복귀.** 필 외에도 재생 시작, 파형 탭 seek, take 선택, 프로그레스바 seek가 follow를 다시 켠다.
 - **take 삭제 진입점.** ··· 가 빠져서 레인 필 롱프레스가 기존 `TakeActionSheet`를 연다. 보이는 진입점이 필요하면 Claude Design에서 정한다.
 - **Open take.** 타임라인에서 Take Feedback으로 가는 길은 없다 — 세션 상세의 take 목록으로 간다.
+
+### 2026-10-02 추가
+
+- **프로그레스바.** 재생 컨트롤 위, 전체 녹음 기준 (3px 트랙 + 13px 흰 노브, 컨트롤 블록 위로 10px 겹침, 컨트롤의 윗선 제거). 탭·드래그로 seek. 디자인은 드래그 중 매 이동마다 seek하지만 코드는 노브만 손가락을 따라가고 놓을 때 한 번 seek한다 (`player.seekTo`를 매 프레임 부르지 않는다). 디자인은 seek 자리가 화면 밖이면 viewport를 그 자리 중앙으로 옮기는데, 코드는 follow를 켜서 기존 follow 규칙(30% 지점)으로 옮긴다.
+- **"⟲ PLAYHEAD" 필** 복귀 — 9-11 스펙 결정 10 그대로.

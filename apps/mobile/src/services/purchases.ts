@@ -30,13 +30,22 @@ export const PRODUCT_IDS: Record<ProductKey, string> = {
   extra: "rehearsal.extra.3h",
 };
 
+/**
+ * Android(Billing 5+) 구독은 RevenueCat product.identifier가 "<구독ID>:<basePlanId>" 형태다.
+ * 맨 ID와 base plan 접미사 둘 다 같은 상품으로 취급한다.
+ */
+function matchesProduct(identifier: string, key: ProductKey): boolean {
+  return identifier === PRODUCT_IDS[key] || identifier.startsWith(PRODUCT_IDS[key] + ":");
+}
+
 function keyOf(productId: string): ProductKey | null {
-  return (Object.keys(PRODUCT_IDS) as ProductKey[]).find((k) => PRODUCT_IDS[k] === productId) ?? null;
+  return (Object.keys(PRODUCT_IDS) as ProductKey[]).find((k) => matchesProduct(productId, k)) ?? null;
 }
 
 /** Android는 기존 구독을 교체해야 업·다운그레이드가 된다. iOS는 같은 구독 그룹이라 스토어가 처리 */
 function upgradeInfo(key: ProductKey, currentPlan: "band" | "plus" | null): GoogleProductChangeInfo | null {
   if (Platform.OS !== "android" || key === "extra" || !currentPlan || currentPlan === key) return null;
+  // 맨 구독 ID를 넘긴다 (RevenueCat이 구독 ID를 받아준다) — 실기기 검증은 Task 17
   return { oldProductIdentifier: PRODUCT_IDS[currentPlan] };
 }
 
@@ -65,12 +74,12 @@ const real: PurchasesApi = {
       .filter((x): x is StorePrice => x.key !== null);
   },
   async purchase(key, { bandId, currentPlan }) {
-    const offerings = await Purchases.getOfferings();
-    const pkg = offerings.current?.availablePackages.find((p) => p.product.identifier === PRODUCT_IDS[key]);
-    if (!pkg) return "failed";
-    // 소모성은 어느 밴드 것인지 웹훅이 알 수 있게 속성으로 남긴다 (앱이 sync를 못 부르고 죽는 경우 대비)
-    await Purchases.setAttributes({ band_id: bandId });
     try {
+      const offerings = await Purchases.getOfferings();
+      const pkg = offerings.current?.availablePackages.find((p) => matchesProduct(p.product.identifier, key));
+      if (!pkg) return "failed";
+      // 소모성은 어느 밴드 것인지 웹훅이 알 수 있게 속성으로 남긴다 (앱이 sync를 못 부르고 죽는 경우 대비)
+      await Purchases.setAttributes({ band_id: bandId });
       // 2번째 인자는 deprecated UpgradeInfo — 3번째 productChangeInfo를 쓴다
       await Purchases.purchasePackage(pkg, null, upgradeInfo(key, currentPlan));
       return "success";

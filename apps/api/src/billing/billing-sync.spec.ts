@@ -44,6 +44,10 @@ describe("toPoolSnapshot", () => {
     expect(s).toMatchObject({ plan: "plus", store: "play_store" });
   });
 
+  it("Android base plan이 붙은 상품 ID도 인식한다", () => {
+    expect(toPoolSnapshot(sub({ subscriptions: { "rehearsal.band.monthly:monthly-base": active } }), now).plan).toBe("band");
+  });
+
   it("모르는 상품 ID는 무시한다", () => {
     expect(toPoolSnapshot(sub({ subscriptions: { "other.app.thing": active } }), now).plan).toBeNull();
   });
@@ -56,5 +60,10 @@ describe("extraTransactions", () => {
       "other": [{ id: "x", purchase_date: "2026-10-04T00:00:00Z", store: "app_store" }],
     } });
     expect(extraTransactions(s)).toEqual([{ id: "t1", store: "play_store" }, { id: "t2", store: "play_store" }]);
+  });
+
+  it("base plan 접미사가 붙은 키의 거래도 포함한다", () => {
+    const s = sub({ non_subscriptions: { "rehearsal.extra.3h:p1": [{ id: "t3", purchase_date: "2026-10-04T00:00:00Z", store: "play_store" }] } });
+    expect(extraTransactions(s)).toEqual([{ id: "t3", store: "play_store" }]);
   });
 });

@@ -111,6 +111,14 @@ describe("billing API", () => {
     expect(res.body).toMatchObject({ state: "expired", plan: "band", availableSec: H, freeLeftSec: 0, extraSec: H, canBuyExtra: false });
   });
 
+  it("active인데 기간 끝이 한참 지난 풀(만료 웹훅 누락): state expired, canBuyExtra false", async () => {
+    const poolId = await activePool(owner.userId);
+    await db.update(billingPools).set({ periodEnd: new Date(Date.now() - 10 * 24 * H * 1000) }).where(eq(billingPools.id, poolId));
+    await db.update(bands).set({ poolId }).where(eq(bands.id, bandId));
+    const res = await request(app.getHttpServer()).get(`/bands/${bandId}/billing`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body).toMatchObject({ state: "expired", availableSec: 3 * H, canBuyExtra: false });
+  });
+
   it("unlink: 밴드는 무료로 돌아가고 추가 시간은 남는다", async () => {
     const poolId = await activePool(owner.userId);
     await db.update(bands).set({ poolId, extraSec: H }).where(eq(bands.id, bandId));

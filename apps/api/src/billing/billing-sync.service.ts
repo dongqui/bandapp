@@ -20,6 +20,9 @@ export interface PoolSnapshot {
   willRenew: boolean;
 }
 
+/** Android는 상품 id 뒤에 base plan을 붙여 준다("rehearsal.band.monthly:monthly-base") — 비교 전에 떼어 낸다 */
+const bareProductId = (id: string) => id.split(":")[0]!;
+
 function storeOf(s: string): PoolSnapshot["store"] {
   return s === "app_store" ? "app_store" : s === "play_store" ? "play_store" : null;
 }
@@ -28,7 +31,7 @@ function storeOf(s: string): PoolSnapshot["store"] {
 export function toPoolSnapshot(sub: RcSubscriber, now: Date): PoolSnapshot {
   let best: PoolSnapshot | null = null;
   for (const [productId, s] of Object.entries(sub.subscriptions)) {
-    const plan = SUBSCRIPTION_PRODUCTS[productId];
+    const plan = SUBSCRIPTION_PRODUCTS[bareProductId(productId)];
     if (!plan) continue;
     const periodEnd = s.expires_date ? new Date(s.expires_date) : null;
     const expired = periodEnd !== null && periodEnd.getTime() <= now.getTime();
@@ -54,7 +57,9 @@ export function toPoolSnapshot(sub: RcSubscriber, now: Date): PoolSnapshot {
 }
 
 export function extraTransactions(sub: RcSubscriber): Array<{ id: string; store: string }> {
-  return EXTRA_PRODUCT_IDS.flatMap((pid) => (sub.non_subscriptions[pid] ?? []).map((t) => ({ id: t.id, store: t.store })));
+  return Object.entries(sub.non_subscriptions)
+    .filter(([key]) => EXTRA_PRODUCT_IDS.includes(bareProductId(key)))
+    .flatMap(([, txs]) => txs.map((t) => ({ id: t.id, store: t.store })));
 }
 
 /**
@@ -90,8 +95,14 @@ export class BillingSyncService {
       await tx.insert(billingPools).values({ ownerUserId: userId }).onConflictDoNothing();
       const [existing] = await tx.select().from(billingPools).where(eq(billingPools.ownerUserId, userId)).for("update");
       if (!existing) throw new Error("billing pool row missing after upsert");
-      // 갱신 판단: 기간 시작이 바뀌면(또는 아직 기간이 없던 행이면) 월 사용량을 0으로 (스펙 "웹훅")
-      const renewed = existing.periodStart === null || existing.periodStart.getTime() !== snap.periodStart?.getTime();
+      // 갱신 판단: 플랜 변경(같은 기간 안의 purchase_date 변화)은 갱신이 아니다 — 새 기간이 시작할 때만
+      // used_sec을 0으로 (스펙 "사용 가능 시간 규칙"). 새 기간 시작 = 이전 기간 끝 무렵(1시간 여유) 이후.
+      // 기간이 없던 행이나 만료됐던 풀은 새 구독이라 0부터.
+      const renewed =
+        !existing.periodStart ||
+        !existing.periodEnd ||
+        existing.status === "expired" ||
+        (snap.periodStart !== null && snap.periodStart.getTime() >= existing.periodEnd.getTime() - 3600_000);
       await tx
         .update(billingPools)
         .set({ ...snap, usedSec: renewed ? 0 : existing.usedSec, updatedAt: new Date() })

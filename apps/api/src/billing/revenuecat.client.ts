@@ -27,6 +27,8 @@ export class RevenueCatClient {
     if (!key) throw new Error("REVENUECAT_API_KEY is not set");
     const res = await this.fetchFn(`https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`, {
       headers: { authorization: `Bearer ${key}`, accept: "application/json" },
+      // 웹훅·sync 요청이 RevenueCat 지연에 무한정 묶이지 않게
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) throw new Error(`revenuecat ${res.status}`);
     const body = (await res.json()) as { subscriber: RcSubscriber };

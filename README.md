@@ -104,6 +104,8 @@ pnpm --filter @bandapp/api db:migrate   # localhost:5432 대상
 **웹훅**
 
 - `POST /webhooks/revenuecat`, Authorization 값은 `Bearer <REVENUECAT_WEBHOOK_SECRET>`
+  - RevenueCat 대시보드의 웹훅 "Authorization header value" 칸에는 정확히 `Bearer <REVENUECAT_WEBHOOK_SECRET>`을 넣는다 (`Bearer ` 접두사 포함, 앞뒤 공백 없이). 시크릿만 넣으면 모든 웹훅이 401로 거절된다.
+- TRANSFER 이벤트는 `transferred_from`/`transferred_to`의 사용자도 모두 다시 동기화한다.
 - 이벤트 id로 중복을 제거하고, 어떤 이벤트든 받으면 REST(`GET /v1/subscribers/{id}`)로 전체 상태를 다시 읽는다.
 - 로컬에서는 웹훅이 도달하지 못하므로, 앱의 "Check status"(= `POST /billing/sync`)로 상태를 직접 당겨온다.
 

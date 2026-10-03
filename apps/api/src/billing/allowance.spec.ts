@@ -28,6 +28,19 @@ describe("allowance", () => {
     expect(a).toEqual({ source: "free", monthlyLeftSec: 0, freeLeftSec: 0, extraSec: H, availableSec: H });
   });
 
+  it("active인데 기간 끝을 한참 넘겼으면(만료 웹훅 누락) 무료로 돌아간다", () => {
+    const now = new Date("2026-10-20T00:00:00Z");
+    const a = allowance({ pool: { plan: "band", status: "active", usedSec: 0, reservedSec: 0, periodEnd: new Date("2026-10-10T00:00:00Z") }, band: { freeUsedSec: 0, extraSec: 0 } }, now);
+    expect(a.source).toBe("free");
+    expect(a.availableSec).toBe(3 * H);
+  });
+
+  it("기간 끝이 어제인 active는 아직 풀을 쓴다 (갱신 지연 여유)", () => {
+    const now = new Date("2026-10-20T00:00:00Z");
+    const a = allowance({ pool: { plan: "band", status: "active", usedSec: 0, reservedSec: 0, periodEnd: new Date("2026-10-19T00:00:00Z") }, band: { freeUsedSec: 0, extraSec: 0 } }, now);
+    expect(a.source).toBe("pool");
+  });
+
   it("월 시간은 음수가 되지 않는다", () => {
     const a = allowance({ pool: { plan: "band", status: "active", usedSec: 19 * H, reservedSec: 2 * H }, band: { freeUsedSec: 0, extraSec: 0 } });
     expect(a.monthlyLeftSec).toBe(0);

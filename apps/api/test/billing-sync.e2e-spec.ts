@@ -83,6 +83,22 @@ describe("billing sync + webhook", () => {
     expect(pool!.usedSec).toBe(0);
   });
 
+  it("플랜 변경(같은 기간 안에서 purchase_date만 바뀜)은 plan만 바꾸고 used_sec을 유지한다", async () => {
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand("2026-11-03T00:00:00Z", "2026-10-03T00:00:00Z"), non_subscriptions: {} });
+    await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
+    await db.update(billingPools).set({ usedSec: 7 * H }).where(eq(billingPools.ownerUserId, owner.userId));
+    rc.subscribers.set(owner.userId, {
+      subscriptions: {
+        ...activeBand("2026-11-03T00:00:00Z", "2026-10-03T00:00:00Z"),
+        "rehearsal.plus.monthly": { purchase_date: "2026-10-10T00:00:00Z", expires_date: "2026-11-10T00:00:00Z", store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" },
+      },
+      non_subscriptions: {},
+    });
+    await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
+    const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
+    expect(pool).toMatchObject({ plan: "plus", usedSec: 7 * H });
+  });
+
   it("같은 기간의 재동기화는 used_sec을 유지한다", async () => {
     rc.subscribers.set(owner.userId, { subscriptions: activeBand(), non_subscriptions: {} });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
@@ -140,6 +156,16 @@ describe("billing sync + webhook", () => {
     await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({ bandId }).expect(201);
     [band] = await db.select().from(bands).where(eq(bands.id, bandId));
     expect(band!.extraSec).toBe(6 * H);
+  });
+
+  it("웹훅 TRANSFER: transferred_from 사용자도 동기화해 구독이 넘어간 풀을 만료시킨다", async () => {
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(), non_subscriptions: {} });
+    await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({ bandId }).expect(201);
+    rc.subscribers.set(owner.userId, { subscriptions: {}, non_subscriptions: {} });
+    await webhook({ id: "ev-t", type: "TRANSFER", transferred_from: [owner.userId], transferred_to: ["$RCAnonymousID:new"] }).expect(200);
+    const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
+    expect(pool!.status).toBe("expired");
+    expect(await db.select().from(billingEvents)).toHaveLength(1);
   });
 
   it("웹훅: 모르는 사용자 id는 200으로 무시한다", async () => {

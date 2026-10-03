@@ -93,7 +93,7 @@ export class BillingChargeService {
     const pool = band.poolId ? (await tx.select().from(billingPools).where(eq(billingPools.id, band.poolId)))[0] : undefined;
     const reservedSec = pool ? await this.reservedSum(tx, pool.id) : 0;
     return allowance({
-      pool: pool ? { plan: pool.plan, status: pool.status, usedSec: pool.usedSec, reservedSec } : null,
+      pool: pool ? { plan: pool.plan, status: pool.status, usedSec: pool.usedSec, reservedSec, periodEnd: pool.periodEnd } : null,
       band: { freeUsedSec: band.freeUsedSec, extraSec: band.extraSec },
     });
   }
@@ -104,7 +104,7 @@ export class BillingChargeService {
     const pool = band.poolId ? (await tx.select().from(billingPools).where(eq(billingPools.id, band.poolId)).for("update"))[0] : undefined;
     const reservedSec = pool ? await this.reservedSum(tx, pool.id) : 0;
     const a = allowance({
-      pool: pool ? { plan: pool.plan, status: pool.status, usedSec: pool.usedSec, reservedSec } : null,
+      pool: pool ? { plan: pool.plan, status: pool.status, usedSec: pool.usedSec, reservedSec, periodEnd: pool.periodEnd } : null,
       band: { freeUsedSec: band.freeUsedSec, extraSec: band.extraSec },
     });
     return { band, pool, a };

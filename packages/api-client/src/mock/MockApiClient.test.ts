@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MockApiClient } from "./MockApiClient";
 import { UploadRecordingError } from "../upload";
+import type { MockState } from "./seed";
 
 const BAND = "b1";
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -292,12 +293,50 @@ describe("MockApiClient", () => {
       { startedAt: "2026-10-03T19:00:00+09:00", durationMs: 4 * 3600 * 1000, sizeBytes: 1, contentType: "audio/mp4", source: "recording" },
       { sizeBytes: 1, readPart: async () => new Uint8Array(1) },
     );
-    await wait(50);
-    expect((await api.sessions.get(s.id)).status).toBe("waiting_for_time");
+    await vi.waitFor(async () => expect((await api.sessions.get(s.id)).status).toBe("waiting_for_time"));
     api.mockPurchase("band", "b1");
     await api.sessions.retryAnalysis(s.id);
-    await wait(50);
-    expect((await api.sessions.get(s.id)).status).toBe("ready");
+    await vi.waitFor(async () => expect((await api.sessions.get(s.id)).status).toBe("ready"));
     expect((await api.bands.billing("b1")).monthlyUsedSec).toBe(4 * 3600);
+  });
+
+  /** 길이(시간)만큼의 녹음을 올리고 ready가 될 때까지 기다린다 */
+  async function uploadAndSettle(api: MockApiClient, hours: number): Promise<void> {
+    const s = await api.sessions.upload(
+      "b1",
+      { startedAt: "2026-10-03T19:00:00+09:00", durationMs: hours * 3600 * 1000, sizeBytes: 1, contentType: "audio/mp4", source: "recording" },
+      { sizeBytes: 1, readPart: async () => new Uint8Array(1) },
+    );
+    await vi.waitFor(async () => expect((await api.sessions.get(s.id)).status).toBe("ready"));
+  }
+
+  it("무료 밴드는 무료 시간부터 차감한다", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    await uploadAndSettle(api, 1);
+    expect(await api.bands.billing("b1")).toMatchObject({ freeLeftSec: 1.5 * 3600, monthlyUsedSec: 0, extraSec: 0 });
+  });
+
+  it("추가 시간은 무료 시간을 다 쓴 뒤에 차감한다", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    api.mockPurchase("extra", "b1");
+    await uploadAndSettle(api, 3);
+    expect(await api.bands.billing("b1")).toMatchObject({ freeLeftSec: 0, extraSec: 2.5 * 3600 });
+  });
+
+  it("linked인데 풀이 만료되면 expired이고 무료 → 추가 순으로 차감한다", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    api.mockPurchase("band", "b1");
+    (api as unknown as { state: MockState }).state.billing.pool.status = "expired";
+    api.mockPurchase("extra", "b1"); // 추가 3h
+    await uploadAndSettle(api, 2);
+    const b = await api.bands.billing("b1");
+    expect(b).toMatchObject({ state: "expired", freeLeftSec: 0.5 * 3600, extraSec: 3 * 3600 });
+  });
+
+  it("transferOwnership은 풀 연결을 해제한다", async () => {
+    const api = new MockApiClient();
+    api.mockPurchase("band", "b1");
+    await api.bands.transferOwnership("b1", "m2");
+    expect((await api.bands.billing("b1")).state).toBe("free");
   });
 });

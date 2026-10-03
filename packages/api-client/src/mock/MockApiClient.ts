@@ -28,6 +28,13 @@ import { seededUnit } from "./rand";
 import { commentKey, createSeedState, fakePeaks, generateTakes, type MockState } from "./seed";
 
 const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
+/** 서버 billing/plans.ts와 같은 값 */
+const HOUR_SEC = 3600;
+const BAND_MONTHLY_SEC = 20 * HOUR_SEC;
+const PLUS_MONTHLY_SEC = 40 * HOUR_SEC;
+const FREE_SEC = 3 * HOUR_SEC;
+const monthlySecOf = (plan: "band" | "plus" | null): number =>
+  plan === "plus" ? PLUS_MONTHLY_SEC : plan === "band" ? BAND_MONTHLY_SEC : 0;
 const week = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
 /** 서버의 text 길이 검증(1~500자)과 짝을 맞춘다 — Mock에서만 통과해서는 안 된다. */
@@ -87,7 +94,7 @@ export class MockApiClient implements RehearsalApiClient {
     setTimeout(() => {
       const s = this.state.sessions.find((x) => x.id === sessionId);
       if (!s || s.status !== "analyzing") return;
-      // 가져오기(durationSec 0)는 필요 시간 0 — 항상 분석된다
+      // 가져오기도 completeUpload가 길이를 채운 뒤(가짜 ffprobe) 그 길이만큼 차감한다 — 서버 워커와 같다
       const need = s.durationSec;
       if (this.bandBilling(s.bandId).availableSec < need) {
         s.status = "waiting_for_time";
@@ -118,11 +125,11 @@ export class MockApiClient implements RehearsalApiClient {
     const pool = this.state.billing.pool;
     let left = sec;
     if (state === "linked") {
-      const take = Math.min(left, Math.max(0, (pool.plan === "plus" ? 40 : 20) * 3600 - pool.usedSec));
+      const take = Math.min(left, Math.max(0, monthlySecOf(pool.plan) - pool.usedSec));
       pool.usedSec += take;
       left -= take;
     } else {
-      const take = Math.min(left, Math.max(0, 3 * 3600 - bb.freeUsedSec));
+      const take = Math.min(left, Math.max(0, FREE_SEC - bb.freeUsedSec));
       bb.freeUsedSec += take;
       left -= take;
     }
@@ -258,12 +265,11 @@ export class MockApiClient implements RehearsalApiClient {
     if (!me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
     const pool = this.state.billing.pool;
     const bb = this.billingOf(bandId);
-    const H = 3600;
     const poolActive = pool.plan !== null && pool.status !== "expired";
-    const monthlyTotalSec = poolActive ? (pool.plan === "plus" ? 40 : 20) * H : 0;
+    const monthlyTotalSec = poolActive ? monthlySecOf(pool.plan) : 0;
     const state: BandBilling["state"] = !bb.linked ? "free" : poolActive ? "linked" : "expired";
     const monthlyLeftSec = state === "linked" ? Math.max(0, monthlyTotalSec - pool.usedSec) : 0;
-    const freeLeftSec = Math.max(0, 3 * H - bb.freeUsedSec);
+    const freeLeftSec = Math.max(0, FREE_SEC - bb.freeUsedSec);
     const owner = members.find((m) => m.role === "owner") ?? me;
     const isOwner = me.role === "owner";
     const linkedBandCount = Object.values(this.state.billing.bands).filter((b) => b.linked).length;
@@ -299,7 +305,7 @@ export class MockApiClient implements RehearsalApiClient {
   /** 테스트·프리뷰용: 스토어 구매를 흉내 낸다. 인터페이스 밖 */
   mockPurchase(product: "band" | "plus" | "extra", bandId: string): void {
     const bb = this.billingOf(bandId);
-    if (product === "extra") bb.extraSec += 3 * 3600;
+    if (product === "extra") bb.extraSec += FREE_SEC;
     else {
       const pool = this.state.billing.pool;
       const fresh = pool.plan === null || pool.status === "expired";

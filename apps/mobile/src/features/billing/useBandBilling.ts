@@ -18,6 +18,9 @@ export function useBandBilling(bandId: string | undefined) {
       .catch(() => { if (reqRef.current === id) setFailed(true); });
   }, [api, bandId]);
   useEffect(() => {
+    // 밴드가 바뀌면 이전 밴드 데이터를 비운다
+    setData(undefined);
+    setFailed(false);
     reload();
     const off = api.subscribe(reload);
     return () => { reqRef.current++; off(); };

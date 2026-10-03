@@ -1,7 +1,7 @@
 import { MockApiClient } from "@bandapp/api-client";
 import type { BandBilling } from "@bandapp/types";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useApi } from "@/api";
 import { purchases, type ProductKey } from "@/services/purchases";
 import { ctxToParams, type BillingCtx } from "./billingContext";
@@ -15,6 +15,8 @@ export function usePurchaseFlow(bandId: string) {
   const api = useApi();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // 연타 방지는 렌더 클로저가 아니라 ref로 동기 검사한다
+  const busyRef = useRef(false);
 
   const toStatus = (phase: PurchasePhase, product: ProductKey, ctx: BillingCtx, ret: string) =>
     router.replace({ pathname: "/billing/status", params: { bandId, phase, product, ret, ...ctxToParams(ctx) } });
@@ -22,7 +24,8 @@ export function usePurchaseFlow(bandId: string) {
   return {
     busy,
     async buy(product: ProductKey, before: BandBilling, ctx: BillingCtx, ret: "/billing/plans" | "/billing/extra") {
-      if (busy) return;
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
         const outcome = await purchases.purchase(product, { bandId, currentPlan: before.state === "linked" ? before.plan : null });
@@ -32,20 +35,24 @@ export function usePurchaseFlow(bandId: string) {
         const after = outcome === "success" ? await api.billing.sync(bandId).catch(() => null) : null;
         toStatus(phaseAfterSync(outcome, before, after, product), product, ctx, ret);
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },
     async manage(kind: "cancel" | "resume", before: BandBilling, ctx: BillingCtx) {
-      if (busy) return;
+      if (busyRef.current) return;
+      busyRef.current = true;
       setBusy(true);
       try {
-        await purchases.manageSubscriptions();
+        // 스토어 화면을 못 열어도 sync는 이어간다 — willRenew가 안 바뀌면 delayed로 간다
+        await purchases.manageSubscriptions().catch(() => undefined);
         // 스토어 화면에서 돌아온 뒤 — 실제로 바꿨는지는 sync 결과의 willRenew로 안다
         const after = await api.billing.sync(bandId).catch(() => null);
         const product = (before.plan ?? "band") as ProductKey;
         const changed = after ? after.willRenew !== before.willRenew : false;
         toStatus(changed ? (kind === "cancel" ? "canceled" : "resumed") : "delayed", product, ctx, "/billing/plans");
       } finally {
+        busyRef.current = false;
         setBusy(false);
       }
     },

@@ -156,7 +156,7 @@ export const ko: Resource = {
       ctaAnalyze: "3시간 사서 분석하기", cta: "3시간 사기 · {{price}}", ctaSubAnalyze: "{{price}} 일회성 · {{session}}을(를) 분석하려면 {{time}} 써요", ctaSub: "일회성 구매 · 자동 갱신 아님",
     },
     b06: {
-      checkingSub: "구독 상태를 확인 중…", checking: "구매를 확인 중…", checkingBody: "{{band}}용 {{product}}. 보통 몇 초 걸려요.",
+      checking: "구매를 확인 중…", checkingBody: "{{band}}용 {{product}}. 보통 몇 초 걸려요.",
       productExtra: "분석 시간 3시간", productPlan: "{{plan}} 플랜",
       successExtra: "3시간 추가됨", successPlan: "{{plan}} 활성화됨", successExtraBody: "{{band}} 멤버 모두가 추가 시간을 쓸 수 있어요.", successPlanBody: "{{band}} 멤버 모두가 플랜을 쓸 수 있어요.",
       rowPurchase: "구매", vOneTime: "일회성 · {{price}}", rowAvailable: "지금 사용 가능", rowTime: "분석 시간", rowRenews: "갱신", vRenews: "{{date}} · {{price}}",

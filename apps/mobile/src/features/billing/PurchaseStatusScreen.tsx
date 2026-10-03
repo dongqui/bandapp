@@ -45,6 +45,7 @@ export function PurchaseStatusScreen() {
   const [prices, setPrices] = useState<StorePrice[]>([]);
   useEffect(() => { purchases.prices().then(setPrices).catch(() => setPrices([])); }, []);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   const price = (k: ProductKey) => prices.find((p) => p.key === k)?.priceString ?? "";
   const planName = t(`billing.planName.${product === "plus" ? "plus" : "band"}`);
@@ -56,18 +57,32 @@ export function PurchaseStatusScreen() {
   const done = () => (ctx.from === "analysis" ? router.replace("/") : goPlan());
   const tryAgain = () => router.replace({ pathname: ret, params: { bandId, ...ctxToParams(ctx) } });
   const continueAnalysis = async () => {
-    if (ctx.from !== "analysis" || busy) return;
+    // 연타 방지는 렌더 클로저가 아니라 ref로 동기 검사한다
+    if (ctx.from !== "analysis" || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await api.sessions.retryAnalysis(ctx.sessionId);
       router.replace("/");
     } catch (err) {
       toast.show(apiErrorMessage(err, t));
+      busyRef.current = false;
       setBusy(false);
     }
   };
   const checkStatus = async () => {
-    const before = beforeRef.current ?? b;
+    // 비교 기준은 구매 전 값이어야 한다. 이 화면이 처음 받은 서버 상태엔 이미 구매가 반영됐을 수 있어
+    // (웹훅/일시적 sync 실패) 그걸 기준으로 삼으면 delayed에서 영영 못 벗어난다 — route param이 있으면 덮어쓴다
+    const base = beforeRef.current ?? b;
+    const num = Number(params.beforeExtraSec);
+    const plan = params.beforePlan === "band" || params.beforePlan === "plus" ? params.beforePlan : params.beforePlan === "" ? null : undefined;
+    const st = params.beforeState;
+    const before: BandBilling | undefined = base && {
+      ...base,
+      extraSec: params.beforeExtraSec !== undefined && Number.isFinite(num) ? num : base.extraSec,
+      plan: plan === undefined ? base.plan : plan,
+      state: st === "free" || st === "linked" || st === "expired" ? st : base.state,
+    };
     setPhase("checking");
     const after = await api.billing.sync(bandId).catch(() => null);
     // before를 못 구했으면 비교할 수 없다 — delayed 유지

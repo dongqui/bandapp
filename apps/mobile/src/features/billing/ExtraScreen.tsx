@@ -30,7 +30,11 @@ export function ExtraScreen() {
 
   // 딥링크로 들어왔지만 살 수 없는 상태면 돌아간다
   const blocked = !!b && !b.canBuyExtra;
-  useEffect(() => { if (blocked) router.back(); }, [blocked, router]);
+  useEffect(() => {
+    if (!blocked) return;
+    if (router.canGoBack()) router.back();
+    else router.replace({ pathname: "/billing/plan", params: { bandId, from: "band" } });
+  }, [blocked, router, bandId]);
 
   return (
     <Screen>

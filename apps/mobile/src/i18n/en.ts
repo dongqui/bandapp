@@ -153,7 +153,7 @@ export const en = {
       ctaAnalyze: "Buy 3h and analyze", cta: "Buy 3h · {{price}}", ctaSubAnalyze: "{{price}} one-time · then uses {{time}} to analyze {{session}}", ctaSub: "One-time purchase · doesn’t renew",
     },
     b06: {
-      checkingSub: "Checking subscription status…", checking: "Checking your purchase…", checkingBody: "{{product}} for {{band}}. This usually takes a few seconds.",
+      checking: "Checking your purchase…", checkingBody: "{{product}} for {{band}}. This usually takes a few seconds.",
       productExtra: "3 hours of analysis", productPlan: "{{plan}} plan",
       successExtra: "3h added", successPlan: "{{plan}} activated", successExtraBody: "Extra time is ready for everyone in {{band}}.", successPlanBody: "Everyone in {{band}} can use the plan now.",
       rowPurchase: "Purchase", vOneTime: "One-time · {{price}}", rowAvailable: "Available now", rowTime: "Analysis time", rowRenews: "Renews", vRenews: "{{date}} · {{price}}",

@@ -18,8 +18,15 @@ export function usePurchaseFlow(bandId: string) {
   // 연타 방지는 렌더 클로저가 아니라 ref로 동기 검사한다
   const busyRef = useRef(false);
 
-  const toStatus = (phase: PurchasePhase, product: ProductKey, ctx: BillingCtx, ret: string) =>
-    router.replace({ pathname: "/billing/status", params: { bandId, phase, product, ret, ...ctxToParams(ctx) } });
+  // 구매 전 기준값을 함께 넘긴다 — 상태 화면이 뒤늦게 받은 서버 상태엔 이미 구매가 반영됐을 수 있다
+  const toStatus = (phase: PurchasePhase, product: ProductKey, ctx: BillingCtx, ret: string, before: BandBilling) =>
+    router.replace({
+      pathname: "/billing/status",
+      params: {
+        bandId, phase, product, ret, ...ctxToParams(ctx),
+        beforeExtraSec: String(before.extraSec), beforePlan: before.plan ?? "", beforeState: before.state,
+      },
+    });
 
   return {
     busy,
@@ -33,7 +40,7 @@ export function usePurchaseFlow(bandId: string) {
         if (api instanceof MockApiClient && outcome === "success") api.mockPurchase(product, bandId);
         // 스토어가 끝났으니 서버에 알린다. sync가 죽어도 구매는 유효 — delayed로 보내 "Check status"가 다시 부른다
         const after = outcome === "success" ? await api.billing.sync(bandId).catch(() => null) : null;
-        toStatus(phaseAfterSync(outcome, before, after, product), product, ctx, ret);
+        toStatus(phaseAfterSync(outcome, before, after, product), product, ctx, ret, before);
       } finally {
         busyRef.current = false;
         setBusy(false);
@@ -50,7 +57,7 @@ export function usePurchaseFlow(bandId: string) {
         const after = await api.billing.sync(bandId).catch(() => null);
         const product = (before.plan ?? "band") as ProductKey;
         const changed = after ? after.willRenew !== before.willRenew : false;
-        toStatus(changed ? (kind === "cancel" ? "canceled" : "resumed") : "delayed", product, ctx, "/billing/plans");
+        toStatus(changed ? (kind === "cancel" ? "canceled" : "resumed") : "delayed", product, ctx, "/billing/plans", before);
       } finally {
         busyRef.current = false;
         setBusy(false);

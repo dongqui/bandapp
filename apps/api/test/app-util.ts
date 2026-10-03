@@ -8,7 +8,16 @@ import { AppleAuthService } from "../src/auth/apple-auth.service.js";
 import { AppleTokenService } from "../src/auth/apple-token.service.js";
 import { GoogleAuthService } from "../src/auth/google-auth.service.js";
 import type { VerifiedProviderToken } from "../src/auth/provider-token.js";
+import { RevenueCatClient, type RcSubscriber } from "../src/billing/revenuecat.client.js";
 import { StorageService } from "../src/storage/storage.service.js";
+
+/** RevenueCat REST를 흉내 낸다 — 사용자별 구독자 상태를 테스트가 직접 넣는다. */
+export class FakeRevenueCat extends RevenueCatClient {
+  subscribers = new Map<string, RcSubscriber>();
+  async getSubscriber(appUserId: string): Promise<RcSubscriber> {
+    return this.subscribers.get(appUserId) ?? { subscriptions: {}, non_subscriptions: {} };
+  }
+}
 
 export interface ProviderStub {
   verifyIdToken(idToken: string): Promise<VerifiedProviderToken>;
@@ -114,7 +123,8 @@ export async function createTestApp(overrides?: {
   appleTokens?: Pick<AppleTokenService, "exchangeAuthorizationCode" | "revokeAll">;
   storage?: StorageService;
   producer?: FakeProducer;
-}): Promise<INestApplication> {
+  revenueCat?: FakeRevenueCat;
+}):Promise<INestApplication> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GoogleAuthService)
     .useValue(overrides?.google ?? rejecting)
@@ -127,7 +137,10 @@ export async function createTestApp(overrides?: {
     .overrideProvider(StorageService)
     .useValue(overrides?.storage ?? new FakeStorage())
     .overrideProvider(AnalysisProducer)
-    .useValue(overrides?.producer ?? new FakeProducer());
+    .useValue(overrides?.producer ?? new FakeProducer())
+    // 항상 오버라이드 — 테스트가 실제 RevenueCat API를 치지 않도록
+    .overrideProvider(RevenueCatClient)
+    .useValue(overrides?.revenueCat ?? new FakeRevenueCat());
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();

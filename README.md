@@ -73,3 +73,38 @@ pnpm --filter @bandapp/api db:migrate   # localhost:5432 대상
 ```
 
 `0005` 마이그레이션이 `band_part` enum을 text로 바꾸고 `bands.deleted_at`을 더한다. 기존 `part = 'other'` 행은 NULL이 된다.
+
+## 결제 (RevenueCat)
+
+인앱 구독/소모성 결제는 RevenueCat으로 처리한다.
+
+**규칙 요약**: 오너만 구독할 수 있고, 구독은 오너 개인 풀(월 시간)로 쌓인다. 오너가 자기 밴드를 풀에 연결해서 쓴다. 무료는 밴드당 3h, 평생 1회. 추가 시간(소모성)은 구매한 밴드의 소유다. 오너를 양도하면 해당 밴드의 풀 연결이 해제된다.
+
+**환경변수**
+
+- 서버: `REVENUECAT_API_KEY`(시크릿 REST 키), `REVENUECAT_WEBHOOK_SECRET`(RevenueCat이 `Authorization` 헤더에 `Bearer <secret>` 형태로 보내는 값)
+- 모바일: `EXPO_PUBLIC_RC_IOS_KEY`, `EXPO_PUBLIC_RC_ANDROID_KEY`
+- 모바일(선택): `EXPO_PUBLIC_TERMS_URL`, `EXPO_PUBLIC_PRIVACY_URL`, `EXPO_PUBLIC_BILLING_HELP_URL`
+
+**스토어 상품**
+
+- `rehearsal.band.monthly` — 월 20h, 자동 갱신 구독
+- `rehearsal.plus.monthly` — 월 40h, 자동 갱신 구독
+- 위 두 구독은 같은 구독 그룹 `analysis`에 둔다.
+- `rehearsal.extra.3h` — 소모성, 구매한 밴드에 +3h
+- Android는 base plan 때문에 상품 ID가 `<productId>:<basePlanId>`로 올 수 있고, 앱은 이를 허용한다.
+
+**RevenueCat 설정**
+
+- entitlement: `band`, `plus`
+- offering `default`에 위 3개 패키지를 등록
+- app user id는 우리 `users.id` (앱이 `Purchases.logIn`으로 설정)
+- 추가 시간 구매 전에 subscriber attribute `band_id`를 설정해서, 웹훅이 어느 밴드에 시간을 넣을지 알 수 있게 한다.
+
+**웹훅**
+
+- `POST /webhooks/revenuecat`, Authorization 값은 `Bearer <REVENUECAT_WEBHOOK_SECRET>`
+- 이벤트 id로 중복을 제거하고, 어떤 이벤트든 받으면 REST(`GET /v1/subscribers/{id}`)로 전체 상태를 다시 읽는다.
+- 로컬에서는 웹훅이 도달하지 못하므로, 앱의 "Check status"(= `POST /billing/sync`)로 상태를 직접 당겨온다.
+
+**주의**: `react-native-purchases`가 추가됐으므로 dev client를 다시 빌드해야 한다 (`pnpm --filter mobile android` / `ios`).

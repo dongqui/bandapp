@@ -4,6 +4,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   primaryKey,
@@ -19,12 +20,17 @@ export const authProvider = pgEnum("auth_provider", ["GOOGLE", "APPLE", "DEV"]);
 export type AuthProviderName = (typeof authProvider.enumValues)[number];
 
 // @bandapp/types의 SessionStatus / TakeCandidateType과 값을 일치시킨다
-export const sessionStatus = pgEnum("session_status", ["uploading", "analyzing", "failed", "ready"]);
+export const sessionStatus = pgEnum("session_status", ["uploading", "analyzing", "waiting_for_time", "failed", "ready"]);
 export const uploadStatus = pgEnum("upload_status", ["pending", "completed", "aborted"]);
 export const takeType = pgEnum("take_type", ["PERFORMANCE", "PARTIAL_PRACTICE"]);
 export const takeAudioStatus = pgEnum("take_audio_status", ["ready", "updating", "failed"]);
 // @bandapp/types의 MemberRole("owner" | "member")과 값을 일치시킨다 (스펙 결정 5)
 export const bandRole = pgEnum("band_role", ["owner", "member"]);
+// 결제 (2026-10-03 스펙)
+export const poolPlan = pgEnum("pool_plan", ["band", "plus"]);
+export const poolStatus = pgEnum("pool_status", ["active", "grace", "expired"]);
+export const chargeState = pgEnum("charge_state", ["reserved", "charged", "refunded"]);
+export const billingStore = pgEnum("billing_store", ["app_store", "play_store"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -72,9 +78,33 @@ export const authSessions = pgTable("auth_sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// 구독자(오너) 1명당 1행. 월 시간은 used_sec + 예약 합계로 계산하므로 남은 시간 컬럼은 없다.
+export const billingPools = pgTable("billing_pools", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ownerUserId: uuid("owner_user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  plan: poolPlan("plan"),
+  status: poolStatus("status").notNull().default("expired"),
+  store: billingStore("store"),
+  periodStart: timestamp("period_start", { withTimezone: true }),
+  periodEnd: timestamp("period_end", { withTimezone: true }),
+  willRenew: boolean("will_renew").notNull().default(false),
+  // 이번 기간에 확정(charged)된 월 시간 사용량. 갱신(period_start 변경)마다 0
+  usedSec: integer("used_sec").notNull().default(0),
+  ...timestamps,
+});
+
 export const bands = pgTable("bands", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  // 연결된 풀. 오너 양도·연결 해제 시 null. 풀이 지워지면 null
+  poolId: uuid("pool_id").references(() => billingPools.id, { onDelete: "set null" }),
+  // 밴드당 무료 3h는 평생 1회 — 초기화하지 않는다
+  freeUsedSec: integer("free_used_sec").notNull().default(0),
+  // 밴드가 산 추가 시간 잔여. 연결 해제·만료·양도 뒤에도 밴드에 남는다
+  extraSec: integer("extra_sec").notNull().default(0),
   ...timestamps,
   // soft delete — 행·R2 객체는 남긴다. 영구 삭제는 배치가 맡는다 (2026-09-08 스펙 결정 3)
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -136,6 +166,43 @@ export const sessions = pgTable("sessions", {
   // 고해상도 피크 사이드카(peaks.bin)의 R2 키. 워커 업로드가 성공했을 때만 채운다. 옛 데이터·실패면 null (2026-09-11 스펙 결정 5)
   peaksKey: text("peaks_key"),
   ...timestamps,
+});
+
+// 분석 차감 원장. 세션당 1행이라 재시도·중복 전달이 이중 차감되지 않는다
+export const analysisCharges = pgTable("analysis_charges", {
+  sessionId: uuid("session_id")
+    .primaryKey()
+    .references(() => sessions.id, { onDelete: "cascade" }),
+  bandId: uuid("band_id")
+    .notNull()
+    .references(() => bands.id, { onDelete: "cascade" }),
+  poolId: uuid("pool_id").references(() => billingPools.id, { onDelete: "set null" }),
+  freeSec: integer("free_sec").notNull().default(0),
+  monthlySec: integer("monthly_sec").notNull().default(0),
+  extraSec: integer("extra_sec").notNull().default(0),
+  state: chargeState("state").notNull(),
+  ...timestamps,
+});
+
+// RevenueCat 웹훅 원본. id 충돌 = 중복 전달
+export const billingEvents = pgTable("billing_events", {
+  id: text("id").primaryKey(),
+  type: text("type").notNull(),
+  appUserId: text("app_user_id").notNull(),
+  payload: jsonb("payload").notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 소모성(추가 시간) 거래 원장. 같은 거래가 웹훅·sync 양쪽에서 와도 applied_at으로 한 번만 반영
+export const extraPurchases = pgTable("extra_purchases", {
+  transactionId: text("transaction_id").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  bandId: uuid("band_id").references(() => bands.id, { onDelete: "set null" }),
+  sec: integer("sec").notNull(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 // 세션과 1:1. 저장 객체와 업로드 상태의 수명주기가 세션과 달라 테이블을 나눈다 (스펙 결정 5)

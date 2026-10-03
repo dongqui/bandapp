@@ -1,4 +1,4 @@
-export type SessionStatus = "uploading" | "analyzing" | "failed" | "ready";
+export type SessionStatus = "uploading" | "analyzing" | "waiting_for_time" | "failed" | "ready";
 
 export interface Session {
   id: string;

@@ -71,6 +71,13 @@
       "when": 1789123850502,
       "tag": "0009_blue_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791006108712,
+      "tag": "0010_lucky_agent_brand",
+      "breakpoints": true
     }
   ]
 }

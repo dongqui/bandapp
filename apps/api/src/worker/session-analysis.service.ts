@@ -7,6 +7,7 @@ import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { defaultTakeName, PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
 import { mergeCandidates, padCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
+import { BillingChargeService } from "../billing/billing-charge.service.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
@@ -39,6 +40,7 @@ export class SessionAnalysisService {
     private readonly storage: StorageService,
     private readonly gemini: GeminiService,
     private readonly ffmpeg: FfmpegRunner,
+    private readonly charges: BillingChargeService,
     private readonly tmpRoot: string = tmpdir(),
     private readonly retryDelayMs: number = 2000,
   ) {}
@@ -67,6 +69,8 @@ export class SessionAnalysisService {
     }
 
     const workDir = await mkdtemp(join(this.tmpRoot, `session-${sessionId}-`));
+    // 이 실행이 직접 예약했을 때만 실패 시 환불한다 — 예약 자체가 throw했다면 환불할 게 없다.
+    let reservedForRefund = false;
     try {
       await this.resetTakes(session.bandId, sessionId);
 
@@ -74,6 +78,20 @@ export class SessionAnalysisService {
       await this.storage.downloadToFile(recording.objectKey, original);
       const durationMs = await this.ffmpeg.probeDurationMs(original);
       await this.db.update(sessions).set({ durationMs, updatedAt: new Date() }).where(eq(sessions.id, sessionId));
+
+      // 결제 게이트 (2026-10-03 스펙): 길이를 확정한 뒤, Gemini를 부르기 전에 시간을 예약한다.
+      // 부족하면 waiting_for_time — 녹음·재생은 되고 분석만 기다린다. 시간을 산 뒤 /retry가 다시 큐에 넣는다.
+      const needSec = Math.ceil(durationMs / 1000);
+      const reserved = await this.charges.reserve(sessionId, session.bandId, needSec);
+      if (!reserved.ok) {
+        await this.db
+          .update(sessions)
+          .set({ status: "waiting_for_time", analysisError: null, updatedAt: new Date() })
+          .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")));
+        this.logger.log(`session ${sessionId}: waiting for time (need ${needSec}s, available ${reserved.availableSec}s)`);
+        return;
+      }
+      reservedForRefund = true;
 
       const chunks = planChunks(durationMs);
       const candidates: TakeCandidate[] = [];
@@ -132,12 +150,15 @@ export class SessionAnalysisService {
           .returning({ id: sessions.id });
         if (updated.length === 0) throw new StaleSessionError(sessionId);
       });
+      // commit은 ready 트랜잭션 밖이다 — 실패하면 예약이 남지만 이중 차감보다 낫고, 다음 retry가 reserved를 재사용해 다시 commit한다.
+      await this.charges.commit(sessionId);
       this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}, sidecar ${sidecarKey ? "uploaded" : "none"}`);
     } catch (err) {
       if (err instanceof StaleSessionError) {
         this.logger.warn(err.message);
       } else {
         this.logger.error(`session ${sessionId} analysis failed: ${String(err)}`);
+        if (reservedForRefund) await this.charges.refund(sessionId).catch((e) => this.logger.error(`session ${sessionId} refund failed: ${String(e)}`));
         await this.fail(sessionId, err instanceof Error ? err.message : String(err));
       }
     } finally {
@@ -226,7 +247,7 @@ export class SessionAnalysisService {
 
 export const sessionAnalysisServiceProvider: Provider = {
   provide: SessionAnalysisService,
-  useFactory: (db: Db, storage: StorageService, gemini: GeminiService) =>
-    new SessionAnalysisService(db, storage, gemini, new ExecFfmpegRunner()),
-  inject: [DB, StorageService, GeminiService],
+  useFactory: (db: Db, storage: StorageService, gemini: GeminiService, charges: BillingChargeService) =>
+    new SessionAnalysisService(db, storage, gemini, new ExecFfmpegRunner(), charges),
+  inject: [DB, StorageService, GeminiService, BillingChargeService],
 };

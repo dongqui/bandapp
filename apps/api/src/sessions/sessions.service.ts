@@ -146,7 +146,8 @@ export class SessionsService {
   async retry(id: string, userId: string): Promise<Session> {
     const session = await this.loadForMember(id, userId);
     const stale = session.status === "analyzing" && Date.now() - session.updatedAt.getTime() > ANALYSIS_STALE_MS;
-    if (session.status !== "failed" && !stale) throw new ConflictException("실패한 세션만 다시 시도할 수 있어요.");
+    const retryable = session.status === "failed" || session.status === "waiting_for_time";
+    if (!retryable && !stale) throw new ConflictException("실패했거나 시간을 기다리는 세션만 다시 시도할 수 있어요.");
     await this.db
       .update(sessions)
       .set({ status: "analyzing", analysisError: null, updatedAt: new Date() })

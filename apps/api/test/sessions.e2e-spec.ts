@@ -165,6 +165,14 @@ describe("sessions API", () => {
     expect(producer.enqueued).toContain(session.id);
   });
 
+  it("waiting_for_time 세션은 retry로 다시 analyzing이 되고 큐에 들어간다", async () => {
+    const { session } = await createSession();
+    await db.update(sessions).set({ status: "waiting_for_time" }).where(eq(sessions.id, session.id));
+    const res = await request(app.getHttpServer()).post(`/sessions/${session.id}/retry`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body.status).toBe("analyzing");
+    expect(producer.enqueued).toContain(session.id);
+  });
+
   it("방금 analyzing이 된 세션은 retry가 409다", async () => {
     const { session } = await createSession();
     const parts = [1, 2, 3].map((partNumber) => ({ partNumber, etag: `e${partNumber}` }));

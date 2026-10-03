@@ -3,6 +3,7 @@ import type {
   AudioUrl,
   AuthTokens,
   Band,
+  BandBilling,
   BandInvite,
   BandMember,
   CommentTarget,
@@ -76,6 +77,16 @@ export interface RehearsalApiClient {
     delete(bandId: string): Promise<void>;
     createInvite(bandId: string): Promise<BandInvite>;
     revokeInvite(bandId: string, inviteId: string): Promise<void>;
+    /** 밴드 결제 상태. 멤버 누구나. 디자인 B01의 재료 */
+    billing(bandId: string): Promise<BandBilling>;
+    /** Owner 전용. 내 활성 풀에 연결. 409 billing_no_active_pool */
+    linkPool(bandId: string): Promise<BandBilling>;
+    /** Owner 전용. 연결 해제 — 밴드는 무료로 돌아가고 추가 시간은 남는다 */
+    unlinkPool(bandId: string): Promise<BandBilling>;
+  };
+  billing: {
+    /** 구매 직후·"Check status"에서. 서버가 RevenueCat 상태를 다시 읽는다. bandId가 있으면 그 밴드 billing을 돌려준다 */
+    sync(bandId?: string): Promise<BandBilling | null>;
   };
   invites: {
     preview(token: string): Promise<InvitePreview>;

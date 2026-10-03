@@ -186,6 +186,40 @@ describe("HttpApiClient", () => {
     );
   });
 
+  const billingBody = { state: "linked" };
+
+  it("bands.billing은 GET /bands/:id/billing", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(200, billingBody));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    await client.bands.billing("b1");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/bands/b1/billing", expect.objectContaining({ method: "GET" }));
+  });
+
+  it("bands.linkPool/unlinkPool은 POST이고 emit한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(200, billingBody));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    await client.bands.linkPool("b1");
+    await client.bands.unlinkPool("b1");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/bands/b1/billing/link", expect.objectContaining({ method: "POST" }));
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/bands/b1/billing/unlink", expect.objectContaining({ method: "POST" }));
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("billing.sync는 POST /billing/sync에 bandId를 보내고 emit한다", async () => {
+    const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
+    const fetchFn = vi.fn(async () => json(200, billingBody));
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    await client.billing.sync("b1");
+    expect(fetchFn).toHaveBeenCalledWith("https://api.test/billing/sync", expect.objectContaining({ method: "POST", body: JSON.stringify({ bandId: "b1" }) }));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it("팀원 내보내기는 DELETE .../members/<userId>로 나간다", async () => {
     const tokens = memoryTokens({ accessToken: "a1", refreshToken: "r1" });
     const fetchFn = vi.fn(async () => new Response(null, { status: 204 }));

@@ -3,6 +3,7 @@ import type {
   AudioUrl,
   AuthTokens,
   Band,
+  BandBilling,
   BandInvite,
   BandMember,
   CommentTarget,
@@ -227,6 +228,25 @@ export class HttpApiClient implements RehearsalApiClient {
       this.request<BandInvite>("POST", `/bands/${bandId}/invites`),
     revokeInvite: async (bandId: string, inviteId: string): Promise<void> => {
       await this.request<void>("DELETE", `/bands/${bandId}/invites/${inviteId}`);
+    },
+    billing: (bandId: string): Promise<BandBilling> => this.request<BandBilling>("GET", `/bands/${bandId}/billing`),
+    linkPool: async (bandId: string): Promise<BandBilling> => {
+      const b = await this.request<BandBilling>("POST", `/bands/${bandId}/billing/link`);
+      this.emit();
+      return b;
+    },
+    unlinkPool: async (bandId: string): Promise<BandBilling> => {
+      const b = await this.request<BandBilling>("POST", `/bands/${bandId}/billing/unlink`);
+      this.emit();
+      return b;
+    },
+  };
+
+  billing = {
+    sync: async (bandId?: string): Promise<BandBilling | null> => {
+      const b = await this.request<BandBilling | null>("POST", "/billing/sync", bandId ? { bandId } : {});
+      this.emit();
+      return b;
     },
   };
 

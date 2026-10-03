@@ -264,4 +264,40 @@ describe("MockApiClient", () => {
     expect((await api.comments.list({ takeId: "s1-t2" })).map((c) => c.id)).toEqual([parent.id]);
     expect((await api.takes.list("s1"))[2]!.commentCount).toBe(takeBefore);
   });
+  it("무료 밴드는 3h 중 30분 사용 상태로 시작한다", async () => {
+    const api = new MockApiClient();
+    const b = await api.bands.billing("b1");
+    expect(b).toMatchObject({ state: "free", freeLeftSec: 2.5 * 3600, availableSec: 2.5 * 3600, isOwner: true, canBuyExtra: false });
+  });
+
+  it("mockPurchase('band')로 linked가 되고, unlinkPool로 free로 돌아간다", async () => {
+    const api = new MockApiClient();
+    api.mockPurchase("band", "b1");
+    expect((await api.bands.billing("b1")).state).toBe("linked");
+    expect((await api.bands.billing("b1")).monthlyLeftSec).toBe(20 * 3600);
+    await api.bands.unlinkPool("b1");
+    expect((await api.bands.billing("b1")).state).toBe("free");
+  });
+
+  it("활성 풀 없이 linkPool하면 409 billing_no_active_pool", async () => {
+    const api = new MockApiClient();
+    await expect(api.bands.linkPool("b1")).rejects.toMatchObject({ code: "billing_no_active_pool" });
+  });
+
+  it("남은 시간보다 긴 녹음은 waiting_for_time이 되고, 시간을 사면 retry로 분석된다", async () => {
+    // resumeUpload가 실제 setTimeout으로 진행률을 흘리므로 fake timer 대신 짧은 분석 지연을 쓴다
+    const api = new MockApiClient({ analysisDelayMs: 10 });
+    const s = await api.sessions.upload(
+      "b1",
+      { startedAt: "2026-10-03T19:00:00+09:00", durationMs: 4 * 3600 * 1000, sizeBytes: 1, contentType: "audio/mp4", source: "recording" },
+      { sizeBytes: 1, readPart: async () => new Uint8Array(1) },
+    );
+    await wait(50);
+    expect((await api.sessions.get(s.id)).status).toBe("waiting_for_time");
+    api.mockPurchase("band", "b1");
+    await api.sessions.retryAnalysis(s.id);
+    await wait(50);
+    expect((await api.sessions.get(s.id)).status).toBe("ready");
+    expect((await api.bands.billing("b1")).monthlyUsedSec).toBe(4 * 3600);
+  });
 });

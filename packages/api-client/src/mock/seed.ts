@@ -7,6 +7,12 @@ export interface MockState {
   sessions: Session[];
   takes: Record<string, Take[]>; // sessionId -> takes
   comments: Record<string, TakeComment[]>; // commentKey(target) -> comments
+  /** 결제 — 디자인 프로토타입의 bill()과 같은 역할. 풀은 MOCK_USER 것 하나 */
+  billing: {
+    pool: { plan: "band" | "plus" | null; status: "active" | "grace" | "expired"; usedSec: number; periodEnd: string; willRenew: boolean };
+    /** bandId → 밴드별 상태 */
+    bands: Record<string, { linked: boolean; freeUsedSec: number; extraSec: number }>;
+  };
 }
 
 /** state.comments의 키 — take 코멘트와 원본 녹음 코멘트를 한 맵에 둔다 */
@@ -212,5 +218,10 @@ export function createSeedState(): MockState {
     sessions,
     takes,
     comments,
+    // 디자인 기본 시나리오: 무료, 30분 사용
+    billing: {
+      pool: { plan: null, status: "expired", usedSec: 0, periodEnd: "2026-11-03T00:00:00.000Z", willRenew: false },
+      bands: { b1: { linked: false, freeUsedSec: 1800, extraSec: 0 } },
+    },
   };
 }

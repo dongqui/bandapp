@@ -2,6 +2,7 @@ import type {
   AppleLoginCredential,
   AudioUrl,
   Band,
+  BandBilling,
   BandInvite,
   BandMember,
   CommentTarget,
@@ -86,6 +87,14 @@ export class MockApiClient implements RehearsalApiClient {
     setTimeout(() => {
       const s = this.state.sessions.find((x) => x.id === sessionId);
       if (!s || s.status !== "analyzing") return;
+      // 가져오기(durationSec 0)는 필요 시간 0 — 항상 분석된다
+      const need = s.durationSec;
+      if (this.bandBilling(s.bandId).availableSec < need) {
+        s.status = "waiting_for_time";
+        this.emit();
+        return;
+      }
+      this.consumeBillingTime(s.bandId, need);
       const count = Math.max(1, Math.min(9, Math.round(s.durationSec / 900)));
       const takes = generateTakes(s.id, count);
       const base = Math.min(300, s.durationSec / count);
@@ -100,6 +109,24 @@ export class MockApiClient implements RehearsalApiClient {
       s.takeCount = takes.length;
       this.emit();
     }, this.analysisDelayMs);
+  }
+
+  /** 분석에 쓴 시간을 깎는다 — linked면 월 풀 → 추가, 아니면 무료 → 추가 순 */
+  private consumeBillingTime(bandId: string, sec: number): void {
+    const state = this.bandBilling(bandId).state;
+    const bb = this.billingOf(bandId);
+    const pool = this.state.billing.pool;
+    let left = sec;
+    if (state === "linked") {
+      const take = Math.min(left, Math.max(0, (pool.plan === "plus" ? 40 : 20) * 3600 - pool.usedSec));
+      pool.usedSec += take;
+      left -= take;
+    } else {
+      const take = Math.min(left, Math.max(0, 3 * 3600 - bb.freeUsedSec));
+      bb.freeUsedSec += take;
+      left -= take;
+    }
+    bb.extraSec = Math.max(0, bb.extraSec - left);
   }
 
   auth = {
@@ -179,6 +206,9 @@ export class MockApiClient implements RehearsalApiClient {
       const target = members.find((m) => m.id === userId);
       if (!target) throw new ApiError(404, "팀원을 찾을 수 없어요.", "band_member_not_found");
       for (const m of members) m.role = m.id === userId ? "owner" : m.id === MOCK_USER.id ? "member" : m.role;
+      // 풀은 내 것이라 소유권이 넘어가면 연결이 풀린다 (서버와 같은 규칙)
+      const bb = this.state.billing.bands[bandId];
+      if (bb) bb.linked = false;
       this.emit();
     },
     delete: async (bandId: string): Promise<void> => {
@@ -196,7 +226,88 @@ export class MockApiClient implements RehearsalApiClient {
     }),
     // mock 토큰은 bandId에서 결정적으로 만들어지므로 무효화할 상태가 없다 — no-op.
     revokeInvite: async (): Promise<void> => undefined,
+    billing: async (bandId: string): Promise<BandBilling> => this.bandBilling(bandId),
+    linkPool: async (bandId: string): Promise<BandBilling> => {
+      this.assertOwner(bandId);
+      const pool = this.state.billing.pool;
+      if (!pool.plan || pool.status === "expired") throw new ApiError(409, "활성 구독이 없어요.", "billing_no_active_pool");
+      this.billingOf(bandId).linked = true;
+      this.emit();
+      return this.bandBilling(bandId);
+    },
+    unlinkPool: async (bandId: string): Promise<BandBilling> => {
+      this.assertOwner(bandId);
+      this.billingOf(bandId).linked = false;
+      this.emit();
+      return this.bandBilling(bandId);
+    },
   };
+
+  billing = {
+    // Mock은 mockPurchase가 이미 상태를 바꿨으므로 sync는 조회만
+    sync: async (bandId?: string): Promise<BandBilling | null> => (bandId ? this.bandBilling(bandId) : null),
+  };
+
+  private billingOf(bandId: string) {
+    return (this.state.billing.bands[bandId] ??= { linked: false, freeUsedSec: 0, extraSec: 0 });
+  }
+
+  private bandBilling(bandId: string): BandBilling {
+    const members = this.state.members[bandId] ?? [];
+    const me = members.find((m) => m.id === MOCK_USER.id);
+    if (!me) throw new ApiError(403, "이 밴드에 접근할 수 없어요.", "band_forbidden");
+    const pool = this.state.billing.pool;
+    const bb = this.billingOf(bandId);
+    const H = 3600;
+    const poolActive = pool.plan !== null && pool.status !== "expired";
+    const monthlyTotalSec = poolActive ? (pool.plan === "plus" ? 40 : 20) * H : 0;
+    const state: BandBilling["state"] = !bb.linked ? "free" : poolActive ? "linked" : "expired";
+    const monthlyLeftSec = state === "linked" ? Math.max(0, monthlyTotalSec - pool.usedSec) : 0;
+    const freeLeftSec = Math.max(0, 3 * H - bb.freeUsedSec);
+    const owner = members.find((m) => m.role === "owner") ?? me;
+    const isOwner = me.role === "owner";
+    const linkedBandCount = Object.values(this.state.billing.bands).filter((b) => b.linked).length;
+    return {
+      state,
+      plan: bb.linked ? pool.plan : null,
+      periodEnd: bb.linked ? pool.periodEnd : null,
+      willRenew: bb.linked && pool.willRenew,
+      store: bb.linked ? "app_store" : null,
+      availableSec: (state === "linked" ? monthlyLeftSec : freeLeftSec) + bb.extraSec,
+      monthlyTotalSec: state === "linked" ? monthlyTotalSec : 0,
+      monthlyLeftSec,
+      monthlyUsedSec: state === "linked" ? pool.usedSec : 0,
+      extraSec: bb.extraSec,
+      freeLeftSec,
+      owner: { id: owner.id, displayName: owner.name },
+      isOwner,
+      linkedBandCount: bb.linked ? linkedBandCount : 0,
+      canBuyExtra: state === "linked",
+      myPool: isOwner && pool.plan
+        ? {
+            plan: pool.plan,
+            status: pool.status,
+            monthlyLeftSec: poolActive ? Math.max(0, monthlyTotalSec - pool.usedSec) : 0,
+            bands: this.state.bands
+              .filter((b) => (this.state.members[b.id] ?? []).some((m) => m.id === MOCK_USER.id && m.role === "owner"))
+              .map((b) => ({ id: b.id, name: b.name, memberCount: b.memberCount, linked: this.state.billing.bands[b.id]?.linked ?? false })),
+          }
+        : null,
+    };
+  }
+
+  /** 테스트·프리뷰용: 스토어 구매를 흉내 낸다. 인터페이스 밖 */
+  mockPurchase(product: "band" | "plus" | "extra", bandId: string): void {
+    const bb = this.billingOf(bandId);
+    if (product === "extra") bb.extraSec += 3 * 3600;
+    else {
+      const pool = this.state.billing.pool;
+      const fresh = pool.plan === null || pool.status === "expired";
+      Object.assign(pool, { plan: product, status: "active", willRenew: true, usedSec: fresh ? 0 : pool.usedSec });
+      bb.linked = true;
+    }
+    this.emit();
+  }
 
   invites = {
     preview: async (token: string): Promise<InvitePreview> => {
@@ -277,7 +388,7 @@ export class MockApiClient implements RehearsalApiClient {
       return { ...s };
     },
     retryAnalysis: async (id: string): Promise<Session> => {
-      const s = this.mustSession(id);
+      const s = this.mustSession(id); // failed·waiting_for_time 모두 같은 흐름으로 다시 탄다
       s.status = "analyzing";
       this.scheduleAnalysis(s.id);
       this.emit();

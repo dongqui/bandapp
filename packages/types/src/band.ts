@@ -29,4 +29,7 @@ export type BandErrorCode =
   | "band_member_not_found" // 404 대상 userId가 멤버 아님
   | "band_cannot_remove_self" // 409 removeMember 대상이 본인
   | "band_cannot_remove_owner" // 409 removeMember 대상이 owner
-  | "band_transfer_self"; // 409 transfer 대상이 본인
+  | "band_transfer_self" // 409 transfer 대상이 본인
+  | "billing_owner_only" // 403 구독·연결은 오너만
+  | "billing_no_active_pool" // 409 활성 구독이 없어 연결할 수 없음
+  | "billing_band_linked_elsewhere"; // 409 다른 사람의 풀에 연결된 밴드

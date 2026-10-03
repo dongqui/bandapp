@@ -159,6 +159,8 @@ export class BandsService {
         .update(bandMembers)
         .set({ role: "member" })
         .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, actorId)));
+      // 풀 주인 = 연결된 모든 밴드의 오너라는 규칙을 지킨다 — 양도하면 밴드는 무료로 돌아간다 (2026-10-03 스펙)
+      await tx.update(bands).set({ poolId: null, updatedAt: new Date() }).where(eq(bands.id, bandId));
     });
   }
 

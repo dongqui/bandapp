@@ -8,6 +8,9 @@ const MESSAGES: Record<BandErrorCode, string> = {
   band_cannot_remove_self: "자기 자신은 내보낼 수 없어요. 팀 나가기를 사용해 주세요.",
   band_cannot_remove_owner: "팀장은 내보낼 수 없어요.",
   band_transfer_self: "이미 소유자예요.",
+  billing_owner_only: "플랜은 밴드 관리자만 바꿀 수 있어요.",
+  billing_no_active_pool: "활성 구독이 없어요.",
+  billing_band_linked_elsewhere: "다른 사람의 플랜에 연결된 밴드예요.",
 };
 
 /**

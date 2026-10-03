@@ -12,6 +12,7 @@ import { CommentsModule } from "./comments/comments.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { AnalysisModule } from "./analysis/analysis.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
+import { BillingModule } from "./billing/billing.module.js";
 import { DbModule } from "./db/db.module.js";
 
 @Module({
@@ -29,6 +30,7 @@ import { DbModule } from "./db/db.module.js";
     StorageModule,
     AnalysisModule,
     NotificationsModule,
+    BillingModule,
     DbModule,
   ],
 })

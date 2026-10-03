@@ -1,6 +1,7 @@
 export * from "./analysis";
 export * from "./auth";
 export * from "./band";
+export * from "./billing";
 export * from "./health";
 export * from "./invite";
 export * from "./peaks";

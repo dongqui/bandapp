@@ -8,6 +8,9 @@ import { createTestDb, truncateAll } from "./db-util.js";
 
 const H = 3600;
 
+// 고정 날짜는 stale-active 규칙(기간 끝 3일 경과) 때문에 시간이 지나면 깨지므로 지금 기준 상대값으로 만든다.
+const PERIOD_END = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+
 describe("billing API", () => {
   const db = createTestDb();
   let app: INestApplication;
@@ -29,7 +32,7 @@ describe("billing API", () => {
   async function activePool(userId: string, plan: "band" | "plus" = "band", usedSec = 0): Promise<string> {
     const [p] = await db
       .insert(billingPools)
-      .values({ ownerUserId: userId, plan, status: "active", usedSec, periodEnd: new Date("2026-11-03T00:00:00Z"), willRenew: true, store: "app_store" })
+      .values({ ownerUserId: userId, plan, status: "active", usedSec, periodEnd: PERIOD_END, willRenew: true, store: "app_store" })
       .returning({ id: billingPools.id });
     return p!.id;
   }
@@ -75,7 +78,7 @@ describe("billing API", () => {
     const res = await request(app.getHttpServer()).post(`/bands/${bandId}/billing/link`).set(auth(owner.accessToken)).expect(201);
     expect(res.body).toMatchObject({
       state: "linked", plan: "plus", monthlyTotalSec: 40 * H, monthlyLeftSec: 38 * H, monthlyUsedSec: 2 * H, availableSec: 38 * H,
-      periodEnd: "2026-11-03T00:00:00.000Z", willRenew: true, store: "app_store", linkedBandCount: 1, canBuyExtra: true,
+      periodEnd: PERIOD_END.toISOString(), willRenew: true, store: "app_store", linkedBandCount: 1, canBuyExtra: true,
     });
     expect(res.body.myPool.bands[0].linked).toBe(true);
   });

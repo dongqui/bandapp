@@ -7,6 +7,9 @@ import { bandMembers, bands, billingPools, extraPurchases } from "../db/schema.j
 import { EXTRA_PRODUCT_IDS, EXTRA_SEC, SUBSCRIPTION_PRODUCTS, type PoolPlan } from "./plans.js";
 import { RevenueCatClient, type RcSubscriber } from "./revenuecat.client.js";
 
+// 스토어가 갱신을 최대 24시간 일찍 청구·보고하므로(purchase_date가 이전 expires_date보다 앞설 수 있음) 여유를 둔다.
+// 기간 막판(48시간 안)의 플랜 변경이 갱신으로 잡혀 used_sec이 0이 되는 건 감수한다.
+const RENEWAL_EARLY_MS = 48 * 3600_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Tx =Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -96,13 +99,13 @@ export class BillingSyncService {
       const [existing] = await tx.select().from(billingPools).where(eq(billingPools.ownerUserId, userId)).for("update");
       if (!existing) throw new Error("billing pool row missing after upsert");
       // 갱신 판단: 플랜 변경(같은 기간 안의 purchase_date 변화)은 갱신이 아니다 — 새 기간이 시작할 때만
-      // used_sec을 0으로 (스펙 "사용 가능 시간 규칙"). 새 기간 시작 = 이전 기간 끝 무렵(1시간 여유) 이후.
+      // used_sec을 0으로 (스펙 "사용 가능 시간 규칙"). 새 기간 시작 = 이전 기간 끝 무렵(RENEWAL_EARLY_MS 여유) 이후.
       // 기간이 없던 행이나 만료됐던 풀은 새 구독이라 0부터.
       const renewed =
         !existing.periodStart ||
         !existing.periodEnd ||
         existing.status === "expired" ||
-        (snap.periodStart !== null && snap.periodStart.getTime() >= existing.periodEnd.getTime() - 3600_000);
+        (snap.periodStart !== null && snap.periodStart.getTime() >= existing.periodEnd.getTime() - RENEWAL_EARLY_MS);
       await tx
         .update(billingPools)
         .set({ ...snap, usedSec: renewed ? 0 : existing.usedSec, updatedAt: new Date() })

@@ -8,7 +8,9 @@ import { createTestDb, truncateAll } from "./db-util.js";
 
 const H = 3600;
 const SECRET = "whsec-test";
-const activeBand = (expires = "2099-01-01T00:00:00Z", purchase = "2026-10-03T00:00:00Z") => ({
+// 고정 날짜는 stale-active 규칙 때문에 시간이 지나면 깨지므로 지금 기준 상대값으로 만든다.
+const daysFromNow = (n: number) => new Date(Date.now() + n * 24 * 3600 * 1000).toISOString();
+const activeBand = (expires = daysFromNow(30), purchase = daysFromNow(0)) => ({
   "rehearsal.band.monthly": { purchase_date: purchase, expires_date: expires, store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" },
 });
 
@@ -37,9 +39,10 @@ describe("billing sync + webhook", () => {
   }
 
   it("sync(bandId): 구독을 풀에 반영하고 그 밴드를 자동 연결한다", async () => {
-    rc.subscribers.set(owner.userId, { subscriptions: activeBand(), non_subscriptions: {} });
+    const expires = daysFromNow(30);
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(expires), non_subscriptions: {} });
     const res = await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({ bandId }).expect(201);
-    expect(res.body).toMatchObject({ state: "linked", plan: "band", monthlyLeftSec: 20 * H, periodEnd: "2099-01-01T00:00:00.000Z" });
+    expect(res.body).toMatchObject({ state: "linked", plan: "band", monthlyLeftSec: 20 * H, periodEnd: expires });
     const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
     expect(pool).toMatchObject({ plan: "band", status: "active", willRenew: true, store: "app_store" });
   });
@@ -48,7 +51,7 @@ describe("billing sync + webhook", () => {
     const other = await createTestApp({ google: providerUser("x-1", "X"), revenueCat: rc });
     const x = await loginAs(other);
     await other.close();
-    rc.subscribers.set(x.userId, { subscriptions: {}, non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-x", purchase_date: "2026-10-04T00:00:00Z", store: "play_store" }] } });
+    rc.subscribers.set(x.userId, { subscriptions: {}, non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-x", purchase_date: daysFromNow(-2), store: "play_store" }] } });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(x.accessToken)).send({ bandId }).expect(403);
     const [band] = await db.select().from(bands).where(eq(bands.id, bandId));
     expect(band!.extraSec).toBe(0);
@@ -74,23 +77,40 @@ describe("billing sync + webhook", () => {
   });
 
   it("갱신(period_start 변경)이면 used_sec이 0이 된다", async () => {
-    rc.subscribers.set(owner.userId, { subscriptions: activeBand("2026-11-03T00:00:00Z", "2026-10-03T00:00:00Z"), non_subscriptions: {} });
+    const e0 = daysFromNow(30);
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(e0, daysFromNow(0)), non_subscriptions: {} });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
     await db.update(billingPools).set({ usedSec: 7 * H }).where(eq(billingPools.ownerUserId, owner.userId));
-    rc.subscribers.set(owner.userId, { subscriptions: activeBand("2026-12-03T00:00:00Z", "2026-11-03T00:00:00Z"), non_subscriptions: {} });
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(daysFromNow(60), e0), non_subscriptions: {} });
+    await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
+    const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
+    expect(pool!.usedSec).toBe(0);
+  });
+
+  it("스토어가 갱신을 이전 만료 12시간 전에 보고해도 갱신으로 본다(48h 여유)", async () => {
+    const e0Ms = Date.now() + 30 * 24 * 3600 * 1000;
+    const e0 = new Date(e0Ms).toISOString();
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(e0, daysFromNow(0)), non_subscriptions: {} });
+    await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
+    await db.update(billingPools).set({ usedSec: 7 * H }).where(eq(billingPools.ownerUserId, owner.userId));
+    rc.subscribers.set(owner.userId, {
+      subscriptions: activeBand(new Date(e0Ms + 30 * 24 * 3600 * 1000).toISOString(), new Date(e0Ms - 12 * 3600 * 1000).toISOString()),
+      non_subscriptions: {},
+    });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
     const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
     expect(pool!.usedSec).toBe(0);
   });
 
   it("플랜 변경(같은 기간 안에서 purchase_date만 바뀜)은 plan만 바꾸고 used_sec을 유지한다", async () => {
-    rc.subscribers.set(owner.userId, { subscriptions: activeBand("2026-11-03T00:00:00Z", "2026-10-03T00:00:00Z"), non_subscriptions: {} });
+    const e0 = daysFromNow(30);
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(e0, daysFromNow(0)), non_subscriptions: {} });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({}).expect(201);
     await db.update(billingPools).set({ usedSec: 7 * H }).where(eq(billingPools.ownerUserId, owner.userId));
     rc.subscribers.set(owner.userId, {
       subscriptions: {
-        ...activeBand("2026-11-03T00:00:00Z", "2026-10-03T00:00:00Z"),
-        "rehearsal.plus.monthly": { purchase_date: "2026-10-10T00:00:00Z", expires_date: "2026-11-10T00:00:00Z", store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" },
+        ...activeBand(e0, daysFromNow(0)),
+        "rehearsal.plus.monthly": { purchase_date: daysFromNow(7), expires_date: daysFromNow(37), store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" },
       },
       non_subscriptions: {},
     });
@@ -113,7 +133,7 @@ describe("billing sync + webhook", () => {
     const m = await loginAs(other);
     await other.close();
     await db.insert(bandMembers).values({ bandId, userId: m.userId, role: "member" });
-    rc.subscribers.set(m.userId, { subscriptions: {}, non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-1", purchase_date: "2026-10-04T00:00:00Z", store: "play_store" }] } });
+    rc.subscribers.set(m.userId, { subscriptions: {}, non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-1", purchase_date: daysFromNow(-2), store: "play_store" }] } });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(m.accessToken)).send({ bandId }).expect(201);
     await request(app.getHttpServer()).post("/billing/sync").set(auth(m.accessToken)).send({ bandId }).expect(201);
     const [band] = await db.select().from(bands).where(eq(bands.id, bandId));
@@ -136,7 +156,7 @@ describe("billing sync + webhook", () => {
   it("웹훅의 소모성 거래는 subscriber_attributes.band_id로 배정하고, 없으면 미배정으로 남긴다", async () => {
     rc.subscribers.set(owner.userId, {
       subscriptions: activeBand(),
-      non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-a", purchase_date: "2026-10-04T00:00:00Z", store: "app_store" }] },
+      non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-a", purchase_date: daysFromNow(-2), store: "app_store" }] },
       subscriber_attributes: { band_id: { value: bandId } },
     });
     await webhook({ id: "ev-a", type: "NON_RENEWING_PURCHASE", app_user_id: owner.userId }).expect(200);
@@ -145,7 +165,7 @@ describe("billing sync + webhook", () => {
 
     rc.subscribers.set(owner.userId, {
       subscriptions: activeBand(),
-      non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-a", purchase_date: "2026-10-04T00:00:00Z", store: "app_store" }, { id: "tx-b", purchase_date: "2026-10-05T00:00:00Z", store: "app_store" }] },
+      non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-a", purchase_date: daysFromNow(-2), store: "app_store" }, { id: "tx-b", purchase_date: daysFromNow(-1), store: "app_store" }] },
     });
     await webhook({ id: "ev-b", type: "NON_RENEWING_PURCHASE", app_user_id: owner.userId }).expect(200);
     const [pending] = await db.select().from(extraPurchases).where(eq(extraPurchases.transactionId, "tx-b"));

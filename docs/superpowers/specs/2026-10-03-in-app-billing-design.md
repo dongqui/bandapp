@@ -4,7 +4,7 @@
 
 출시(2026-10-02 결정)부터 AI 분석을 유료로 판다. 애플·구글 인앱결제만 쓰고 RevenueCat으로 연동한다. 과금 단위는 **오너 개인의 시간 풀**이다. 밴드 오너가 구독하면 풀이 생기고, 오너는 자기가 오너인 밴드를 풀에 연결한다. 연결된 밴드의 멤버 전원은 돈을 내지 않고 풀의 분석 시간을 쓴다.
 
-정책 배경은 Claude Docs "bandapp 결제 정책 초안"(https://claude.ai/code/artifact/2a4342e6-4be2-438a-8f5d-60e41bbb1a75)에 있다. 화면은 Claude Design "Rehersal app"의 B01~B06 화면을 따른다.
+정책 배경은 Claude Docs "bandapp 결제 정책 초안"(https://claude.ai/code/artifact/2a4342e6-4be2-438a-8f5d-60e41bbb1a75)에 있다. 화면은 Claude Design "Rehersal app"의 B01~B06 화면을 따른다. 2026-10-03에 사용자가 B01a(Bands on your plan), 비오너 안내, 만료 상태, 무료 1회 문구를 디자인에 추가했으므로 디자인 갭은 없다.
 
 현재 상태:
 - 결제·플랜·사용량 코드는 어디에도 없다.
@@ -16,13 +16,12 @@
 ## 범위
 
 **포함:**
-- DB: `billing_pools`, `analysis_charges`, `billing_events` 테이블, `bands.pool_id`·`bands.free_used_sec` 컬럼, `session_status`에 `waiting_for_time` 추가 (마이그레이션 1개)
+- DB: `billing_pools`, `analysis_charges`, `billing_events`, `extra_purchases` 테이블, `bands.pool_id`·`bands.free_used_sec`·`bands.extra_sec` 컬럼, `session_status`에 `waiting_for_time` 추가 (마이그레이션 1개)
 - 플랜표 상수와 시간 계산 모듈 (순수 함수)
 - 워커 분석 게이트: 예약 → 확정/환불
 - API: 밴드 결제 조회, 풀 연결/해제, 구매 후 동기화, RevenueCat 웹훅
 - 오너 양도 시 풀 연결 해제
-- 모바일: `react-native-purchases` 설치, 결제 화면 B01~B06, Band 화면 진입 카드, 세션 목록의 시간 부족 상태
-- 디자인에 없는 UI는 `design-delegation`으로 Claude Design에 먼저 요청 (아래 "디자인 갭")
+- 모바일: `react-native-purchases` 설치, 결제 화면 B01·B01a·B02~B06, Band 화면 진입 카드, 세션 목록의 시간 부족 상태, 오너 양도 다이얼로그 문구
 
 **제외:**
 - 무료 분석을 Gemini Flex로 처리, `usageMetadata` 원가 기록 — 원가 최적화 작업으로 따로 한다
@@ -39,11 +38,12 @@
 | `free` | 밴드당 3h, **평생 1회** (초기화 없음) | — | — |
 | `band` | 풀당 월 20h | 구독 갱신일 | 자동갱신 구독, 구독 그룹 `analysis` |
 | `plus` | 풀당 월 40h | 구독 갱신일 | 같은 구독 그룹 |
-| `extra` | 풀에 3h 추가, 이월됨 | — | 소모성(consumable) |
+| `extra` | **밴드**에 3h 추가, 이월됨 | — | 소모성(consumable) |
 
 - band와 plus를 같은 구독 그룹에 넣어, 업그레이드·다운그레이드를 스토어가 처리하게 한다.
 - RevenueCat entitlement는 `band`와 `plus` 2개를 만든다. 어느 플랜인지는 서버가 활성 상품 ID로 판단한다.
-- 추가 시간(`extra`)은 활성 유료 풀이 있는 오너만 살 수 있다. 디자인에서도 무료일 때는 "View plans"만 보인다.
+- 구독(band·plus)은 밴드 오너만 산다.
+- 추가 시간(`extra`)은 **활성 풀에 연결된 밴드의 멤버 누구나** 살 수 있고, 산 밴드의 것이 된다. 무료 밴드와 만료된 밴드에서는 살 수 없다 (디자인: 무료는 "View plans", 만료는 오너에게 "Resubscribe"만 보인다).
 
 ## 데이터 모델
 
@@ -59,7 +59,6 @@
 | `period_start`, `period_end` | 현재 구독 기간 |
 | `will_renew` | false면 해지 예정 (디자인의 "Renewal canceled") |
 | `used_sec` | 이번 기간에 확정된 월 시간 사용량 |
-| `extra_sec` | 남은 추가 시간 |
 | `updated_at` | |
 
 - 월 남은 시간: `PLANS[plan].monthlySec − used_sec − (예약된 pool charge 합)`
@@ -68,6 +67,7 @@
 **`bands`** 컬럼 추가:
 - `pool_id`: nullable, billing_pools FK, on delete set null
 - `free_used_sec`: int, 기본값 0
+- `extra_sec`: int, 기본값 0. 이 밴드가 산 추가 시간의 잔여. 연결 해제·만료·오너 양도 뒤에도 밴드에 남는다.
 
 **`analysis_charges`** — 차감 원장
 
@@ -81,9 +81,20 @@
 | `created_at`, `updated_at` | |
 
 **`billing_events`**:
-- 컬럼: `id`(RevenueCat event id, PK), `type`, `app_user_id`, `transaction_id`, `payload` jsonb, `received_at`
-- 웹훅 중복과 추가 시간의 중복 반영을 막는 용도다.
-- 소모성 상품의 `transaction_id`에는 unique를 건다.
+- 컬럼: `id`(RevenueCat event id, PK), `type`, `app_user_id`, `payload` jsonb, `received_at`
+- 웹훅 중복을 막는 용도다.
+
+**`extra_purchases`** — 소모성 구매 원장
+
+| 컬럼 | 설명 |
+|---|---|
+| `transaction_id` | PK (스토어 거래 ID) |
+| `user_id` | 구매자 |
+| `band_id` | nullable. 어느 밴드에 넣을지 아직 모르면 null |
+| `sec` | 3h |
+| `applied_at` | `bands.extra_sec`에 더한 시각. null이면 미반영 |
+
+- 같은 거래가 웹훅과 sync 양쪽에서 와도 한 번만 반영된다.
 
 **`session_status`** 값 추가: `waiting_for_time`
 
@@ -93,13 +104,13 @@
 
 | 상황 | 차감 순서 |
 |---|---|
-| `B.pool_id` 있음, 풀 `active`/`grace` | 풀 월 시간 → 풀 추가 시간 |
-| `B.pool_id` 있음, 풀 `expired` | 밴드 무료 잔여 → 풀 추가 시간 |
-| `B.pool_id` 없음 | 밴드 무료 잔여 |
+| `B.pool_id` 있음, 풀 `active`/`grace` | 풀 월 시간 → 밴드 추가 시간 |
+| `B.pool_id` 있음, 풀 `expired` | 밴드 무료 잔여 → 밴드 추가 시간 |
+| `B.pool_id` 없음 | 밴드 무료 잔여 → 밴드 추가 시간 |
 
 - 밴드 무료 잔여는 `3h − free_used_sec`이다.
 - 연결된 밴드는 풀이 활성인 동안 무료 시간을 쓰지 않는다. 남은 무료 시간은 그대로 남아, 풀이 만료되면 다시 쓴다.
-- 이미 산 추가 시간은 구독이 만료돼도 없어지지 않는다.
+- 추가 시간은 밴드 것이라 구독 만료, 연결 해제, 오너 양도 뒤에도 그 밴드에 남는다.
 - 월 시간은 갱신 때 `used_sec = 0`으로 초기화되고 이월되지 않는다.
 - 업그레이드나 다운그레이드가 반영되면 `plan`만 바꾸고 `used_sec`는 유지한다. 디자인 B04의 "after" 계산과 같다.
 - **풀 연결**:
@@ -123,7 +134,7 @@
 4. 충분하면 다음을 처리한다.
    - `analysis_charges`를 `reserved`로 insert한다.
    - 무료 시간을 썼으면 그만큼 `bands.free_used_sec`를 올린다.
-   - 추가 시간을 썼으면 그만큼 `pool.extra_sec`를 내린다.
+   - 추가 시간을 썼으면 그만큼 `bands.extra_sec`를 내린다.
    - 월 시간은 예약 합계로 계산하므로 `used_sec`에 바로 더하지 않는다.
 5. 분석이 성공하면 `charged`로 바꾸고, 월 시간분을 `pool.used_sec`에 더한다.
 6. 분석이 실패하면(`fail()`) `refunded`로 바꾸고, 무료 시간과 추가 시간을 되돌린다.
@@ -135,22 +146,24 @@
 ## API
 
 - **`GET /bands/:bandId/billing`** — 밴드 멤버 누구나 볼 수 있다. 응답 항목:
-  - `plan` (`free` | `band` | `plus`), `source` (`free` | `pool`)
+  - `state`: `free` | `linked` | `expired` (연결됐지만 풀 만료). 디자인의 `onPlan`/`expired` 분기와 같다
+  - `plan` (`band` | `plus` | null), `periodEnd`, `willRenew`, `store`
   - `availableSec`, `monthlyTotalSec`, `monthlyLeftSec`, `monthlyUsedSec`, `extraSec`, `freeLeftSec`
-  - `periodEnd`, `willRenew`, `store`
-  - `isOwner`, `poolOwnedByMe`
-  - `myPool` — 요청자가 오너이고 풀을 가졌을 때: `{ plan, status, linkedBands: [{ id, name }] }`
-  - `canLinkToMyPool`
+  - `owner: { id, displayName }`, `isOwner`
+  - `linkedBandCount` — 같은 풀에 연결된 밴드 수 ("Sharing time across N bands")
+  - `canBuyExtra` — `state === 'linked'`이면 멤버 누구나 true
+  - `myPool` — 요청자가 오너이고 풀을 가졌을 때(만료 포함): `{ plan, status, monthlyLeftSec, bands: [{ id, name, memberCount, linked }] }`. B01a와 "Add this band to my plan" 카드의 재료다. `bands`는 요청자가 오너인 밴드 전부다
 - **`POST /bands/:bandId/billing/link`**, **`POST /bands/:bandId/billing/unlink`** — 오너만 호출할 수 있다. 대상은 요청자의 풀이다.
 - **`POST /billing/sync`** — 본문은 `{ bandId?: string }`.
-  - 서버가 RevenueCat REST `GET /v1/subscribers/{userId}`로 상태를 읽어 풀에 반영한다.
-  - 반영할 것: 활성 구독(plan, period, will_renew, store)과, 아직 반영하지 않은 소모성 거래(`non_subscriptions`의 transaction id)의 추가 시간.
-  - `bandId`가 있고 요청자가 그 밴드의 오너이며 풀이 활성이면 자동으로 연결한다.
+  - 서버가 RevenueCat REST `GET /v1/subscribers/{userId}`로 상태를 읽어 반영한다.
+  - 구독: 요청자의 풀에 plan, period, will_renew, store를 반영한다. `bandId`가 있고 요청자가 그 밴드의 오너이며 풀이 활성이면 자동으로 연결한다.
+  - 소모성: `non_subscriptions`의 거래마다 `extra_purchases`를 upsert한다. `bandId`가 있으면 미배정 거래에 밴드를 배정하고 `bands.extra_sec`에 더한다. 요청자가 그 밴드의 멤버여야 한다.
+  - 앱은 추가 시간을 사기 전에 `Purchases.setAttributes({ band_id })`를 호출한다. 앱이 sync를 못 부르고 죽어도 웹훅의 `subscriber_attributes.band_id`로 배정할 수 있다.
   - 구매 직후와 B06의 "Check status"에서 부른다.
 - **`POST /webhooks/revenuecat`** — `AuthGuard`를 쓰지 않는다.
   - `Authorization` 헤더를 `REVENUECAT_WEBHOOK_SECRET`과 비교한다.
   - `billing_events` insert가 충돌하면 200을 즉시 반환한다 (중복).
-  - 그 외에는 이벤트 종류와 관계없이 해당 `app_user_id`를 `/billing/sync`와 같은 동기화 함수로 처리한다. 이벤트 순서가 뒤바뀌어도 결과가 같다.
+  - 그 외에는 이벤트 종류와 관계없이 해당 `app_user_id`를 `/billing/sync`와 같은 동기화 함수로 처리한다. 이벤트 순서가 뒤바뀌어도 결과가 같다. 소모성 거래의 밴드는 `subscriber_attributes.band_id`로 배정한다.
   - 갱신 판단: 동기화할 때 `period_start`가 바뀌었으면 `used_sec = 0`.
 - **환경변수**:
   - 서버: `REVENUECAT_WEBHOOK_SECRET`, `REVENUECAT_API_KEY`
@@ -165,9 +178,13 @@
   - 로그인 뒤 `Purchases.logIn(userId)`, 로그아웃 시 `Purchases.logOut()`.
   - Mock API 모드(`EXPO_PUBLIC_API_URL` 비어 있음)에서는 구매를 흉내 내는 mock 구현을 쓴다.
 - 화면은 `src/features/billing/`에 둔다.
-  - B01 Plan & usage: Band 화면 플랜 카드에서 진입
+  - B01 Plan & usage: Band 화면 플랜 카드에서 진입. 상태별 분기는 디자인 그대로다.
+    - `linked`: 월 시간 바, "Sharing time across N bands"(오너만 Manage로 B01a 진입), 추가 시간, 오너는 Buy extra time + Change plan, 멤버는 Buy extra time + "Only {owner} can change the plan"
+    - `free`: 무료 시간 바("Each band gets 3h once. It doesn't reset."), 오너는 View plans, 멤버는 "Ask {owner} to add {band} to their plan". 오너가 풀을 가졌으면 "Add this band to my plan" 카드
+    - `expired`: "{Plan} plan ended {date}", 추가 시간이 남았으면 표시, 오너는 Resubscribe, 멤버는 "{owner}'s plan ended. Extra time stays available."
+  - B01a Bands on your plan: 연결된 밴드(Remove, 확인 다이얼로그 "Remove {band} from your plan?")와 내가 오너인 다른 밴드(Add)
   - B02 Plans
-  - B03 Not enough time 시트: 세션 목록에서 `waiting_for_time` 세션을 누르면 뜬다
+  - B03 Not enough time 시트: 세션 목록에서 `waiting_for_time` 세션을 누르면 뜬다. 버튼은 상태·권한별로 디자인을 따른다. 오너의 미연결 밴드는 "Add to my plan · Nh left"를 누르면 link 뒤 바로 retry한다
   - B04 Subscription review
   - B05 Extra time
   - B06 Purchase status
@@ -183,38 +200,26 @@
      - 반영됨: `success`
 - **업그레이드·다운그레이드**: Android는 `googleProductChangeInfo`로 기존 구독을 교체한다. iOS는 같은 그룹이라 스토어가 처리한다.
 - **해지·재개**: `Purchases.showManageSubscriptions()`로 스토어 화면을 연다. 돌아오면 sync를 불러 B06 `canceled`/`resumed`를 보여준다.
-- **오너가 아닐 때**:
-  - B01은 사용량만 보여준다. 결제 버튼 자리에 "플랜은 오너만 바꿀 수 있어요" 안내를 둔다.
-  - B03 시트의 구매 버튼도 같은 안내로 바꾼다. "Not now"는 그대로 둔다.
-
-### 디자인 갭
-
-구현 전에 `design-delegation`으로 Claude Design에 요청한다.
-
-1. 풀이 있는 오너가 아직 연결 안 된 자기 밴드를 열었을 때: B01에 "내 플랜에 이 밴드 추가"
-2. 연결된 밴드 목록 보기와 연결 해제 (B01 하위)
-3. 연결된 밴드의 B01에 "N개 밴드와 시간 공유 중" 표시
-4. 오너 양도 확인 문구에 "이 밴드는 내 플랜에서 빠집니다"
-5. 비오너용 B01·B03 안내
-6. 무료 문구: "Free time resets monthly"와 "Free · 3h / month"를 "밴드당 3시간 1회"로 바꾼 버전
-7. 만료됐지만 추가 시간이 남은 밴드의 B01 표시
+- **오너 양도 다이얼로그**: 연결된 밴드면 본문에 "{band} will be removed from your plan."을 덧붙인다.
 
 ## 에러 처리
 
 - B01 로딩 실패: 디자인의 "Couldn't load your plan" + Retry
 - 웹훅·sync 실패: RevenueCat이 웹훅을 재시도한다. 앱은 B06 `delayed`에서 "Check status"로 다시 sync한다.
 - 게이트 트랜잭션 실패: 기존 워커 재시도와 SQS 재전달에 맡긴다. `analysis_charges.session_id` unique 제약으로 이중 예약을 막는다.
-- 환불(REFUND 이벤트): 동기화 결과 구독이 없어지면 `expired`가 된다. 소모성 상품을 환불해도 `extra_sec`는 회수하지 않는다. 이미 썼을 수 있고 금액이 작다.
+- 환불(REFUND 이벤트): 동기화 결과 구독이 없어지면 `expired`가 된다. 소모성 상품을 환불해도 `bands.extra_sec`는 회수하지 않는다. 이미 썼을 수 있고 금액이 작다.
+- 밴드가 배정되지 않은 소모성 거래: sync 호출과 웹훅 속성 둘 다 없으면 `extra_purchases.band_id = null`로 남는다. 다음에 그 사용자가 어느 밴드에서든 `/billing/sync`에 `bandId`를 보내면 그 밴드에 배정한다.
 
 ## 테스트
 
 - **API 단위 (vitest)**:
-  - 시간 계산 모듈: 출처별 차감 순서, 만료 풀 + 추가 시간, 무료 1회, 플랜 변경 시 `used_sec` 유지
+  - 시간 계산 모듈: 출처별 차감 순서, 만료 풀 + 밴드 추가 시간, 무료 1회, 플랜 변경 시 `used_sec` 유지
   - 게이트: 예약 → 확정/환불, 부족 시 `waiting_for_time`, 재분석 무료, 기존 예약 재사용
-  - 동기화: 갱신 시 초기화, 소모성 거래 중복 방지
+  - 동기화: 갱신 시 초기화, 소모성 거래 중복 방지, 밴드 배정(sync bandId / 웹훅 속성 / 미배정)
 - **API e2e**:
   - 웹훅: 시크릿 거부, 같은 event id 중복
   - link/unlink 권한 (비오너, 남의 밴드)
+  - 멤버의 추가 시간 sync는 되고, 멤버가 아닌 밴드로는 안 됨
   - 오너 양도 시 연결 해제
   - `/billing` 응답 형태
   - `/retry`가 `waiting_for_time` 수용

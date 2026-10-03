@@ -25,7 +25,10 @@ export class BillingChargeService {
     return this.db.transaction(async (tx) => {
       // 밴드·풀을 먼저 잠근다 — 아직 없는 charge 행은 잠글 수 없으므로, 같은 세션의 동시 첫 예약이 여기서 직렬화된다
       const { band, pool, a } = await this.lockAndCompute(tx, bandId);
-      const [existing] = await tx.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sessionId)).for("update");
+      // charge 행은 일부러 잠그지 않고 읽기만 한다. 같은 세션의 동시 reserve는 위 밴드 잠금이 이미 직렬화하고,
+      // commit/refund는 charge 행 → 풀/밴드 순으로 잠그므로 여기서 charge 행까지 잠그면 잠금 순서가 뒤집혀 데드락이 난다.
+      // 읽는 사이 commit이 reserved → charged로 바꿔도 무해하다(워커는 그대로 진행하고 뒤의 commit은 no-op).
+      const [existing] = await tx.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sessionId));
       if (existing?.state === "charged") return { ok: true, alreadyCharged: true };
       if (existing?.state === "reserved") return { ok: true, alreadyCharged: false };
 

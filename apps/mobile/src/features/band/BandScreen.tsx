@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { FlatList, View } from "react-native";
 import { useApiData } from "@/api";
 import { useAuth } from "@/features/auth/AuthProvider";
+import { fmtH } from "@/features/billing/billingView";
+import { useBandBilling } from "@/features/billing/useBandBilling";
 import { radius, space, useTheme } from "@/theme";
 import { AppText, BottomSheet, ConfirmDialog, MonoLabel, PressableOpacity, Screen } from "@/ui";
 import { InviteSheet } from "./InviteSheet";
@@ -48,6 +50,7 @@ export function BandScreen() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
   const actions = useBandActions(band);
+  const { data: billing, failed: billingFailed } = useBandBilling(band?.id);
 
   const list = members ?? [];
   const me = list.find((m) => m.id === myId) ?? null;
@@ -81,7 +84,10 @@ export function BandScreen() {
       case "transfer":
         return {
           title: t("band.confirm.transfer.title", { name: confirm.member.name }),
-          body: t("band.confirm.transfer.body"),
+          // 플랜에 연결된 밴드의 오너가 양도하면 구독이 풀린다는 안내를 덧붙인다
+          body:
+            t("band.confirm.transfer.body") +
+            (billing?.state === "linked" && billing.isOwner ? t("billing.transferNote", { band: bandName }) : ""),
           primary: {
             label: t("band.confirm.transfer.primary"),
             onPress: () => void actions.transfer(confirm.member).then(cancel),
@@ -166,6 +172,41 @@ export function BandScreen() {
             />
           );
         }}
+        ListHeaderComponent={
+          <PressableOpacity
+            onPress={() =>
+              band && router.push({ pathname: "/billing/plan", params: { bandId: band.id, from: "band" } })
+            }
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+              backgroundColor: colors.surface,
+              borderWidth: 1,
+              borderColor: colors.borderStrong,
+              borderRadius: radius.input,
+              paddingVertical: 14,
+              paddingHorizontal: 16,
+              marginTop: 4,
+              marginBottom: 10,
+            }}
+          >
+            <AppText variant="rowTitle">
+              {billingFailed
+                ? t("billing.card.unavailable")
+                : billing
+                  ? t("billing.card.summary", {
+                      plan: billing.state === "linked" ? t(`billing.planName.${billing.plan!}`) : t("billing.planName.free"),
+                      time: fmtH(billing.availableSec),
+                    })
+                  : t("billing.b01.loading")}
+            </AppText>
+            <AppText variant="caption">
+              {t("billing.card.planUsage")} <AppText style={{ color: colors.borderHover, fontSize: 18 }}>›</AppText>
+            </AppText>
+          </PressableOpacity>
+        }
         ListFooterComponent={
           <View>
             {isOwner ? (

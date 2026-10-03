@@ -2,6 +2,7 @@ import { ApiError } from "@bandapp/api-client";
 import type { LoginResponse, User } from "@bandapp/types";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useApi } from "@/api";
+import { purchases } from "@/services/purchases";
 import { sessionEvents } from "@/services/session-events";
 import { tokenStorage } from "@/services/token-storage";
 import { appleCredential } from "./providers/apple";
@@ -44,7 +45,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (usingMock) {
           // 서버 없이도 앱이 돌게 Mock에서는 로그인된 상태로 시작
           const user = await api.auth.me();
-          if (!cancelled) settle({ status: "authenticated", user });
+          if (!cancelled) {
+            settle({ status: "authenticated", user });
+            void purchases.logIn(user.id).catch(() => {});
+          }
           return;
         }
         const refreshToken = await tokenStorage.getRefreshToken();
@@ -55,7 +59,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           // access는 메모리에 없으므로 me() 호출이 401 → 자동 refresh → 재시도로 복원된다
           const user = await api.auth.me();
-          if (!cancelled) settle({ status: "authenticated", user });
+          if (!cancelled) {
+            settle({ status: "authenticated", user });
+            // RevenueCat 실패가 로그인을 막지 않는다 — 결제 화면의 sync가 다시 맞춘다
+            void purchases.logIn(user.id).catch(() => {});
+          }
         } catch (err) {
           // 세션이 실제로 죽었다고 증명된 경우(401/403)에만 토큰을 지운다.
           // 오프라인/일시적 오류 등 다른 실패는 refresh token을 보존 — 다음 실행에서 복원 재시도 (완료 조건 3)
@@ -83,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? await api.auth.loginWithGoogle("mock")
       : await api.auth.loginWithGoogle(await googleIdToken());
     setState({ status: "authenticated", user: res.user });
+    void purchases.logIn(res.user.id).catch(() => {});
     return res;
   }
 
@@ -92,21 +101,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (usingMock) {
       const res = await api.auth.loginWithApple({ idToken: "mock" });
       setState({ status: "authenticated", user: res.user });
+      void purchases.logIn(res.user.id).catch(() => {});
       return res;
     }
     const credential = await appleCredential();
     const res = await api.auth.loginWithApple(credential);
     setState({ status: "authenticated", user: res.user });
+    void purchases.logIn(res.user.id).catch(() => {});
     return res;
   }
 
   async function signOut(): Promise<void> {
     await api.auth.logout(); // 서버 세션 revoke + 로컬 토큰 삭제 (기획서 17장)
+    await purchases.logOut().catch(() => {});
     setState({ status: "guest" });
   }
 
   async function deleteAccount(): Promise<void> {
     await api.auth.deleteAccount();
+    await purchases.logOut().catch(() => {});
     setState({ status: "guest" });
   }
 

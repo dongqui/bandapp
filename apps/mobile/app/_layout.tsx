@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { bandGate, gate } from "@/features/auth/authGate";
 import { CurrentBandProvider, useCurrentBandContext } from "@/features/band/CurrentBandProvider";
 import { pendingUploads } from "@/features/upload/pendingUploads";
+import { purchases } from "@/services/purchases";
 import { ThemeProvider, color } from "@/theme";
 import { ToastProvider } from "@/ui";
 
@@ -59,6 +60,7 @@ export default function RootLayout() {
   // 레코드 없이 남은 uploads/*.m4a(create 전에 죽은 경우)를 지운다 — 앱 시작에 한 번이면 충분하다
   useEffect(() => {
     void pendingUploads.sweepOrphans();
+    purchases.configure();
   }, []);
   if (!fontsLoaded) return null;
   return (

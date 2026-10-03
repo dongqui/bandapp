@@ -137,4 +137,35 @@ describe("BillingChargeService", () => {
     await svc.reserve(sid, bandId, 2 * H);
     expect((await svc.allowanceOf(bandId)).monthlyLeftSec).toBe(13 * H);
   });
+
+  it("같은 세션의 동시 예약은 둘 다 ok이고 차감은 한 번뿐이다", async () => {
+    const sid = await makeSession();
+    const r = await Promise.all([svc.reserve(sid, bandId, H), svc.reserve(sid, bandId, H)]);
+    expect(r).toEqual([
+      { ok: true, alreadyCharged: false },
+      { ok: true, alreadyCharged: false },
+    ]);
+    expect(await db.select().from(analysisCharges)).toHaveLength(1);
+    const [band] = await db.select().from(bands).where(eq(bands.id, bandId));
+    expect(band!.freeUsedSec).toBe(H);
+  });
+
+  it("같은 풀의 두 밴드가 동시에 예약해도 월 시간을 초과하지 않는다", async () => {
+    const poolId = await makePool({ usedSec: 0 });
+    const [b2] = await db.insert(bands).values({ name: "B2", poolId }).returning({ id: bands.id });
+    const a = await makeSession();
+    const [s2] = await db
+      .insert(sessions)
+      .values({ bandId: b2!.id, createdBy: userId, title: "T2", status: "analyzing", startedAt: new Date() })
+      .returning({ id: sessions.id });
+    const r = await Promise.all([svc.reserve(a, bandId, 15 * H), svc.reserve(s2!.id, b2!.id, 15 * H)]);
+    expect(r.filter((x) => x.ok)).toHaveLength(1);
+    expect(r.filter((x) => !x.ok)).toHaveLength(1);
+  });
+
+  it("needSec가 0 이하이면 예외", async () => {
+    const sid = await makeSession();
+    await expect(svc.reserve(sid, bandId, 0)).rejects.toThrow();
+    await expect(svc.reserve(sid, bandId, -H)).rejects.toThrow();
+  });
 });

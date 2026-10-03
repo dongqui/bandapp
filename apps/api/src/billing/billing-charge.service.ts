@@ -20,12 +20,15 @@ export class BillingChargeService {
   constructor(private readonly db: Db) {}
 
   async reserve(sessionId: string, bandId: string, needSec: number): Promise<ReserveResult> {
+    // 0 이하·비정수 needSec는 음수 차감으로 예약 합계를 망가뜨린다
+    if (!Number.isInteger(needSec) || needSec <= 0) throw new Error(`invalid needSec: ${needSec}`);
     return this.db.transaction(async (tx) => {
+      // 밴드·풀을 먼저 잠근다 — 아직 없는 charge 행은 잠글 수 없으므로, 같은 세션의 동시 첫 예약이 여기서 직렬화된다
+      const { band, pool, a } = await this.lockAndCompute(tx, bandId);
       const [existing] = await tx.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sessionId)).for("update");
       if (existing?.state === "charged") return { ok: true, alreadyCharged: true };
       if (existing?.state === "reserved") return { ok: true, alreadyCharged: false };
 
-      const { band, pool, a } = await this.lockAndCompute(tx, bandId);
       const split = splitCharge(a, needSec);
       if (!split) return { ok: false, availableSec: a.availableSec };
 

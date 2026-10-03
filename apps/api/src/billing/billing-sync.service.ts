@@ -7,7 +7,9 @@ import { bandMembers, bands, billingPools, extraPurchases } from "../db/schema.j
 import { EXTRA_PRODUCT_IDS, EXTRA_SEC, SUBSCRIPTION_PRODUCTS, type PoolPlan } from "./plans.js";
 import { RevenueCatClient, type RcSubscriber } from "./revenuecat.client.js";
 
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type Tx =Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export interface PoolSnapshot {
   plan: PoolPlan | null;
@@ -30,7 +32,9 @@ export function toPoolSnapshot(sub: RcSubscriber, now: Date): PoolSnapshot {
     if (!plan) continue;
     const periodEnd = s.expires_date ? new Date(s.expires_date) : null;
     const expired = periodEnd !== null && periodEnd.getTime() <= now.getTime();
-    const status: PoolSnapshot["status"] = !expired ? "active" : s.billing_issues_detected_at ? "grace" : "expired";
+    // 유예(grace)는 스토어가 알려준 유예 만료일 전까지만 — 결제 문제 플래그만으로는 영구 유예가 된다
+    const inGrace = s.grace_period_expires_date !== null && s.grace_period_expires_date !== undefined && new Date(s.grace_period_expires_date).getTime() > now.getTime();
+    const status: PoolSnapshot["status"] = !expired ? "active" : inGrace ? "grace" : "expired";
     const snap: PoolSnapshot = {
       plan,
       status,
@@ -70,25 +74,33 @@ export class BillingSyncService {
   async syncUser(userId: string, opts: { bandId?: string; attributeBandId?: string } = {}): Promise<void> {
     const sub = await this.rc.getSubscriber(userId);
     const snap = toPoolSnapshot(sub, this.now());
-    const attrBand = opts.attributeBandId ?? sub.subscriber_attributes?.band_id?.value;
+    const candidate = opts.bandId ?? opts.attributeBandId ?? sub.subscriber_attributes?.band_id?.value;
 
     await this.db.transaction(async (tx) => {
-      const [existing] = await tx.select().from(billingPools).where(eq(billingPools.ownerUserId, userId)).for("update");
-      // 갱신 판단: 기간 시작이 바뀌면 월 사용량을 0으로 (스펙 "웹훅")
-      const renewed = existing?.periodStart?.getTime() !== snap.periodStart?.getTime();
-      const values = { ...snap, usedSec: renewed ? 0 : (existing?.usedSec ?? 0), updatedAt: new Date() };
-      let poolId: string;
-      if (existing) {
-        await tx.update(billingPools).set(values).where(eq(billingPools.id, existing.id));
-        poolId = existing.id;
-      } else {
-        const [row] = await tx.insert(billingPools).values({ ownerUserId: userId, ...values }).returning({ id: billingPools.id });
-        poolId = row!.id;
+      // 락 순서: 밴드 → 풀. reserve(밴드 FOR UPDATE 뒤 풀)와 같은 순서여야 데드락이 없다.
+      // 밴드 락은 오너 양도와의 경합(자동 연결이 양도 뒤에 옛 오너의 풀을 다시 물리는 것)도 막는다.
+      let target: string | undefined;
+      if (candidate && UUID_RE.test(candidate)) {
+        const [locked] = await tx.select({ id: bands.id }).from(bands).where(eq(bands.id, candidate)).for("update");
+        target = locked?.id;
       }
 
-      // 결제 화면에서 들어온 밴드는 자동 연결 — 요청자가 오너이고 풀이 활성일 때만
-      if (opts.bandId && snap.status !== "expired" && (await this.isOwner(tx, opts.bandId, userId))) {
-        await tx.update(bands).set({ poolId, updatedAt: new Date() }).where(and(eq(bands.id, opts.bandId), isNull(bands.poolId)));
+      // 풀 행이 없을 때도 FOR UPDATE가 아무것도 잠그지 못해 동시 첫 sync가 유니크 위반이 난다 —
+      // 먼저 빈 행(expired 기본값)을 upsert해서 항상 잠글 행이 있게 한다.
+      await tx.insert(billingPools).values({ ownerUserId: userId }).onConflictDoNothing();
+      const [existing] = await tx.select().from(billingPools).where(eq(billingPools.ownerUserId, userId)).for("update");
+      if (!existing) throw new Error("billing pool row missing after upsert");
+      // 갱신 판단: 기간 시작이 바뀌면(또는 아직 기간이 없던 행이면) 월 사용량을 0으로 (스펙 "웹훅")
+      const renewed = existing.periodStart === null || existing.periodStart.getTime() !== snap.periodStart?.getTime();
+      await tx
+        .update(billingPools)
+        .set({ ...snap, usedSec: renewed ? 0 : existing.usedSec, updatedAt: new Date() })
+        .where(eq(billingPools.id, existing.id));
+      const poolId = existing.id;
+
+      // 결제 화면에서 들어온 밴드는 자동 연결 — 밴드 락을 쥔 채 요청자가 오너이고 풀이 활성일 때만
+      if (target && opts.bandId === target && snap.status !== "expired" && (await this.isOwner(tx, target, userId))) {
+        await tx.update(bands).set({ poolId, updatedAt: new Date() }).where(and(eq(bands.id, target), isNull(bands.poolId)));
       }
 
       // 소모성 거래: 원장에 upsert하고, 밴드가 정해지면 한 번만 반영
@@ -97,7 +109,6 @@ export class BillingSyncService {
           .insert(extraPurchases)
           .values({ transactionId: t.id, userId, sec: EXTRA_SEC })
           .onConflictDoNothing();
-        const target = opts.bandId ?? attrBand;
         if (!target || !(await this.isMember(tx, target, userId))) continue;
         const [applied] = await tx
           .update(extraPurchases)

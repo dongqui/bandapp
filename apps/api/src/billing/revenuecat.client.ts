@@ -10,6 +10,7 @@ export interface RcSubscriber {
       store: string;
       unsubscribe_detected_at: string | null;
       billing_issues_detected_at: string | null;
+      grace_period_expires_date: string | null;
       period_type: string;
     }
   >;

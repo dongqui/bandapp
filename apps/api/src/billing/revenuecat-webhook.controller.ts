@@ -39,7 +39,14 @@ export class RevenueCatWebhookController {
     if (!UUID_RE.test(ev.app_user_id)) return {};
     const [user] = await this.db.select({ id: users.id }).from(users).where(eq(users.id, ev.app_user_id));
     if (!user) return {};
-    await this.sync.syncUser(ev.app_user_id, { attributeBandId: ev.subscriber_attributes?.band_id?.value });
+    try {
+      await this.sync.syncUser(ev.app_user_id, { attributeBandId: ev.subscriber_attributes?.band_id?.value });
+    } catch (err) {
+      // 동기화가 실패하면 중복 판별 행을 지우고 500으로 돌려보낸다 — 그래야 RevenueCat의 재시도가
+      // 중복으로 오인돼 200으로 끝나지 않고(갱신·만료 누락) 다시 처리된다.
+      await this.db.delete(billingEvents).where(eq(billingEvents.id, ev.id));
+      throw err;
+    }
     return {};
   }
 }

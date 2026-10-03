@@ -4,7 +4,7 @@ import { extraTransactions, toPoolSnapshot } from "./billing-sync.service.js";
 
 const now = new Date("2026-10-10T00:00:00Z");
 const sub = (over: Partial<RcSubscriber> = {}): RcSubscriber => ({ subscriptions: {}, non_subscriptions: {}, ...over });
-const active = { purchase_date: "2026-10-03T00:00:00Z", expires_date: "2026-11-03T00:00:00Z", store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, period_type: "normal" };
+const active = { purchase_date: "2026-10-03T00:00:00Z", expires_date: "2026-11-03T00:00:00Z", store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" };
 
 describe("toPoolSnapshot", () => {
   it("구독 없음 → expired, plan null", () => {
@@ -23,10 +23,17 @@ describe("toPoolSnapshot", () => {
     expect(s).toMatchObject({ plan: "plus", status: "active", willRenew: false });
   });
 
-  it("만료일이 지났고 결제 문제가 있으면 grace, 없으면 expired", () => {
+  it("만료일이 지났고 유예 기간이 남아 있으면 grace, 없으면 expired", () => {
     const past = { ...active, expires_date: "2026-10-09T00:00:00Z" };
-    expect(toPoolSnapshot(sub({ subscriptions: { "rehearsal.band.monthly": { ...past, billing_issues_detected_at: "2026-10-09T00:00:00Z" } } }), now).status).toBe("grace");
+    const issue = { ...past, billing_issues_detected_at: "2026-10-09T00:00:00Z" };
+    const g = toPoolSnapshot(sub({ subscriptions: { "rehearsal.band.monthly": { ...issue, grace_period_expires_date: "2026-10-12T00:00:00Z" } } }), now);
+    expect(g).toMatchObject({ status: "grace", periodEnd: new Date("2026-10-09T00:00:00Z"), willRenew: true });
     expect(toPoolSnapshot(sub({ subscriptions: { "rehearsal.band.monthly": past } }), now).status).toBe("expired");
+  });
+
+  it("유예 기간까지 지났으면 결제 문제가 있어도 expired", () => {
+    const lapsed = { ...active, expires_date: "2026-10-09T00:00:00Z", billing_issues_detected_at: "2026-10-09T00:00:00Z", grace_period_expires_date: "2026-10-09T12:00:00Z" };
+    expect(toPoolSnapshot(sub({ subscriptions: { "rehearsal.band.monthly": lapsed } }), now).status).toBe("expired");
   });
 
   it("활성 구독이 둘이면(전환 중) 만료가 더 늦은 쪽", () => {

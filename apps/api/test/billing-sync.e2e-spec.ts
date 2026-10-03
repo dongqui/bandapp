@@ -9,7 +9,7 @@ import { createTestDb, truncateAll } from "./db-util.js";
 const H = 3600;
 const SECRET = "whsec-test";
 const activeBand = (expires = "2099-01-01T00:00:00Z", purchase = "2026-10-03T00:00:00Z") => ({
-  "rehearsal.band.monthly": { purchase_date: purchase, expires_date: expires, store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, period_type: "normal" },
+  "rehearsal.band.monthly": { purchase_date: purchase, expires_date: expires, store: "app_store", unsubscribe_detected_at: null, billing_issues_detected_at: null, grace_period_expires_date: null, period_type: "normal" },
 });
 
 describe("billing sync + webhook", () => {
@@ -48,7 +48,29 @@ describe("billing sync + webhook", () => {
     const other = await createTestApp({ google: providerUser("x-1", "X"), revenueCat: rc });
     const x = await loginAs(other);
     await other.close();
+    rc.subscribers.set(x.userId, { subscriptions: {}, non_subscriptions: { "rehearsal.extra.3h": [{ id: "tx-x", purchase_date: "2026-10-04T00:00:00Z", store: "play_store" }] } });
     await request(app.getHttpServer()).post("/billing/sync").set(auth(x.accessToken)).send({ bandId }).expect(403);
+    const [band] = await db.select().from(bands).where(eq(bands.id, bandId));
+    expect(band!.extraSec).toBe(0);
+  });
+
+  it("처음 보는 사용자의 동시 sync 두 건도 모두 201이고 풀은 하나다", async () => {
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(), non_subscriptions: {} });
+    const send = () => request(app.getHttpServer()).post("/billing/sync").set(auth(owner.accessToken)).send({ bandId });
+    const [a, b] = await Promise.all([send(), send()]);
+    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId))).toHaveLength(1);
+  });
+
+  it("웹훅 동기화가 실패하면 500과 함께 이벤트 기록을 지우고, 재시도는 정상 처리된다", async () => {
+    rc.subscribers.set(owner.userId, { subscriptions: activeBand(), non_subscriptions: {} });
+    rc.failNext = true;
+    await webhook({ id: "ev-f", type: "RENEWAL", app_user_id: owner.userId }).expect(500);
+    expect(await db.select().from(billingEvents)).toHaveLength(0);
+    await webhook({ id: "ev-f", type: "RENEWAL", app_user_id: owner.userId }).expect(200);
+    expect(await db.select().from(billingEvents)).toHaveLength(1);
+    const [pool] = await db.select().from(billingPools).where(eq(billingPools.ownerUserId, owner.userId));
+    expect(pool).toMatchObject({ plan: "band", status: "active" });
   });
 
   it("갱신(period_start 변경)이면 used_sec이 0이 된다", async () => {

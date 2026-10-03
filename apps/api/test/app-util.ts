@@ -14,7 +14,12 @@ import { StorageService } from "../src/storage/storage.service.js";
 /** RevenueCat REST를 흉내 낸다 — 사용자별 구독자 상태를 테스트가 직접 넣는다. */
 export class FakeRevenueCat extends RevenueCatClient {
   subscribers = new Map<string, RcSubscriber>();
+  failNext = false;
   async getSubscriber(appUserId: string): Promise<RcSubscriber> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("revenuecat down");
+    }
     return this.subscribers.get(appUserId) ?? { subscriptions: {}, non_subscriptions: {} };
   }
 }

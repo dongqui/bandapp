@@ -100,6 +100,7 @@ export const ko: Resource = {
   },
   billing: {
     card: { planUsage: "플랜 & 사용량", unavailable: "플랜 정보를 불러올 수 없어요", summary: "{{plan}} · {{time}} 사용 가능" },
+    links: { comingSoon: "준비 중이에요" },
     planName: { free: "Free", band: "Band", plus: "Plus" },
     b01: {
       title: "플랜 & 사용량", back: "밴드", membersMeta: "{{band}} · 멤버 {{n}}명",

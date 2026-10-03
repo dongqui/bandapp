@@ -97,6 +97,7 @@ export const en = {
   },
   billing: {
     card: { planUsage: "Plan & usage", unavailable: "Plan details unavailable", summary: "{{plan}} · {{time}} available" },
+    links: { comingSoon: "Coming soon" },
     planName: { free: "Free", band: "Band", plus: "Plus" },
     b01: {
       title: "Plan & usage", back: "Band", membersMeta: "{{band}} · {{n}} MEMBERS",

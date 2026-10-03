@@ -10,10 +10,11 @@ describe("MockApiClient", () => {
   it("lists seeded sessions newest first with statuses", async () => {
     const api = new MockApiClient();
     const sessions = await api.sessions.list(BAND);
-    expect(sessions.map((s) => s.id)).toEqual(["p1", "f1", "s1", "s2", "s3"]);
-    expect(sessions[0].status).toBe("analyzing");
-    expect(sessions[1].status).toBe("failed");
-    expect(sessions[2]).toMatchObject({
+    expect(sessions.map((s) => s.id)).toEqual(["s9", "p1", "f1", "s1", "s2", "s3"]);
+    expect(sessions[0].status).toBe("waiting_for_time");
+    expect(sessions[1].status).toBe("analyzing");
+    expect(sessions[2].status).toBe("failed");
+    expect(sessions[3]).toMatchObject({
       status: "ready",
       name: "Full set run-through",
       takeCount: 7,

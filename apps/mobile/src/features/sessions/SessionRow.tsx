@@ -1,4 +1,5 @@
 import type { Session } from "@bandapp/types";
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { dateLabel, fmtDuration, startLabel } from "@/lib/time";
 import { useTheme } from "@/theme";
@@ -14,6 +15,7 @@ export function SessionRow({
   resumable?: boolean;
 }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const s = session;
   const ready = s.status === "ready";
   const primary = ready ? (s.name ?? `${s.takeCount} Takes`) : fmtDuration(s.durationSec);
@@ -48,6 +50,13 @@ export function SessionRow({
             <StatusDot color={colors.accent} />
             <AppText variant="caption" color={colors.accent}>
               {s.status === "uploading" ? (resumable ? "Tap to continue uploading" : "Uploading…") : "Finding takes…"}
+            </AppText>
+          </View>
+        ) : s.status === "waiting_for_time" ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <StatusDot color={colors.textMuted} />
+            <AppText variant="caption" color={colors.textMuted}>
+              {t("billing.sessionRow.waiting")}
             </AppText>
           </View>
         ) : s.status === "failed" ? (

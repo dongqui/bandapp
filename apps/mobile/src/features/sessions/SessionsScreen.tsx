@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { SectionList, View } from "react-native";
 import { useApi } from "@/api";
+import { NoTimeSheet } from "@/features/billing/NoTimeSheet";
 import { BandSwitchSheet } from "@/features/band/BandSwitchSheet";
 import { useCurrentBand } from "@/features/band/useCurrentBand";
 import { inFlightUploads } from "@/features/upload/inFlightUploads";
@@ -18,6 +19,7 @@ export function SessionsScreen() {
   const { data: sessions } = useSessions(band?.id);
   const pendingIds = usePendingUploadIds(sessions);
   const [bandsOpen, setBandsOpen] = useState(false);
+  const [noTime, setNoTime] = useState<Session | null>(null);
   const router = useRouter();
   const api = useApi();
   const toast = useToast();
@@ -36,6 +38,7 @@ export function SessionsScreen() {
 
   const onRowPress = (s: Session) => {
     if (s.status === "ready") router.push(`/session/${s.id}`);
+    else if (s.status === "waiting_for_time") setNoTime(s);
     else if (s.status === "failed")
       void api.sessions.retryAnalysis(s.id).catch(() => toast.show("Something went wrong"));
     else if (s.status === "uploading") {
@@ -72,6 +75,7 @@ export function SessionsScreen() {
         stickySectionHeadersEnabled={false}
       />
       <BandSwitchSheet visible={bandsOpen} onClose={() => setBandsOpen(false)} />
+      <NoTimeSheet session={noTime} bandName={band?.name ?? ""} onClose={() => setNoTime(null)} />
     </Screen>
   );
 }

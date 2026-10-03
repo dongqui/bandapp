@@ -127,6 +127,7 @@ const SEED_COMMENTS: Record<string, SeedComment[]> = {
 
 export function createSeedState(): MockState {
   const sessions = [
+    session("s9", "2026-10-02T19:00:00+09:00", 4 * 3600, 0, "waiting_for_time"),
     session("p1", "2026-08-29T18:47:00", 4620, 0, "analyzing"),
     session("f1", "2026-08-28T15:30:00", 4320, 0, "failed"),
     session("s1", "2026-08-27T19:03:00", 8040, 7, "ready", "Full set run-through"),

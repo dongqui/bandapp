@@ -83,6 +83,17 @@ describe("BillingChargeService", () => {
     expect(c!.state).toBe("charged");
   });
 
+  it("commit(sessionId, tx)는 넘긴 트랜잭션 안에서 동작한다", async () => {
+    const poolId = await makePool();
+    const sid = await makeSession();
+    await svc.reserve(sid, bandId, 2 * H);
+    await db.transaction(async (tx) => { await svc.commit(sid, tx); });
+    const [p] = await db.select().from(billingPools).where(eq(billingPools.id, poolId));
+    expect(p!.usedSec).toBe(2 * H);
+    const [c] = await db.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sid));
+    expect(c!.state).toBe("charged");
+  });
+
   it("refund는 무료·추가 시간을 되돌리고 used_sec은 건드리지 않는다", async () => {
     const poolId = await makePool({ usedSec: 19 * H });
     await db.update(bands).set({ extraSec: 3 * H }).where(eq(bands.id, bandId));

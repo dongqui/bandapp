@@ -52,18 +52,21 @@ export class BillingChargeService {
     });
   }
 
-  async commit(sessionId: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const [c] = await tx.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sessionId)).for("update");
+  /** tx를 넘기면 호출자의 트랜잭션 안에서 동작한다 — 워커가 ready 전환과 확정을 한 트랜잭션에 묶는다. */
+  async commit(sessionId: string, tx?: Tx): Promise<void> {
+    const run = async (t: Tx) => {
+      const [c] = await t.select().from(analysisCharges).where(eq(analysisCharges.sessionId, sessionId)).for("update");
       if (!c || c.state !== "reserved") return;
       if (c.poolId && c.monthlySec > 0) {
-        await tx
+        await t
           .update(billingPools)
           .set({ usedSec: sql`${billingPools.usedSec} + ${c.monthlySec}`, updatedAt: new Date() })
           .where(eq(billingPools.id, c.poolId));
       }
-      await tx.update(analysisCharges).set({ state: "charged", updatedAt: new Date() }).where(eq(analysisCharges.sessionId, sessionId));
-    });
+      await t.update(analysisCharges).set({ state: "charged", updatedAt: new Date() }).where(eq(analysisCharges.sessionId, sessionId));
+    };
+    if (tx) await run(tx);
+    else await this.db.transaction(run);
   }
 
   async refund(sessionId: string): Promise<void> {

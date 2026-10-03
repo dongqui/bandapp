@@ -12,10 +12,10 @@ import { SessionAnalysisService } from "./session-analysis.service.js";
 const MIN = 60_000;
 
 function fakeCharges(result: ReserveResult = { ok: true, alreadyCharged: false }) {
-  const calls = { reserve: [] as Array<{ sessionId: string; bandId: string; needSec: number }>, commit: [] as string[], refund: [] as string[] };
+  const calls = { reserve: [] as Array<{ sessionId: string; bandId: string; needSec: number }>, commit: [] as string[], commitTx: [] as unknown[], refund: [] as string[] };
   const charges = {
     reserve: async (sessionId: string, bandId: string, needSec: number) => { calls.reserve.push({ sessionId, bandId, needSec }); return result; },
-    commit: async (sessionId: string) => { calls.commit.push(sessionId); },
+    commit: async (sessionId: string, tx?: unknown) => { calls.commit.push(sessionId); calls.commitTx.push(tx); },
     refund: async (sessionId: string) => { calls.refund.push(sessionId); },
   } as unknown as BillingChargeService;
   return { charges, calls };
@@ -29,7 +29,7 @@ function fakeCharges(result: ReserveResult = { ok: true, alreadyCharged: false }
 function fakeDb(
   session: { id: string; bandId: string; status: string } | undefined,
   recording = { objectKey: "bands/b/sessions/s/original.m4a" },
-  opts: { staleOnReady?: boolean } = {},
+  opts: { staleOnReady?: boolean; failReadyTx?: boolean } = {},
 ) {
   const state = {
     session,
@@ -39,6 +39,7 @@ function fakeDb(
     existingTakes: [{ objectKey: "bands/b/sessions/s/takes/old.m4a" }],
     // and(eq(id,...), eq(status,"analyzing")) 가드가 실제로 걸렸는지만 센다 — SQL 조건 자체는 검사하지 않는다.
     guardedWhereCalls: 0,
+    lastTx: undefined as unknown,
   };
 
   function mutators(pushInsert: (rows: Record<string, unknown>[]) => void) {
@@ -73,7 +74,9 @@ function fakeDb(
       // 버려져서 실제 롤백을 흉내 낸다.
       const buffered: Record<string, unknown>[] = [];
       const tx = mutators((rows) => buffered.push(...rows));
+      state.lastTx = tx;
       await fn(tx);
+      if (opts.failReadyTx) throw new Error("tx commit failed");
       state.insertedTakes.push(...buffered);
     },
   };
@@ -180,6 +183,39 @@ describe("SessionAnalysisService.run", () => {
     const gemini = { analyzeFile: async () => [] } as unknown as GeminiService;
     await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0).run("s");
     expect(calls.refund).toEqual([]);
+    expect(state.updates.at(-1)).toMatchObject({ status: "failed" });
+  });
+
+  it("commit은 ready 트랜잭션 안에서 불린다", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const { storage } = fakeStorage();
+    const { ffmpeg } = fakeFfmpeg(10 * MIN);
+    const { charges, calls } = fakeCharges();
+    const gemini = { analyzeFile: async () => [] } as unknown as GeminiService;
+    await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0).run("s");
+    expect(calls.commitTx).toHaveLength(1);
+    expect(calls.commitTx[0]).toBe(state.lastTx);
+  });
+
+  it("ready 트랜잭션이 실패하면(StaleSessionError 아님) refund 뒤 failed", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" }, undefined, { failReadyTx: true });
+    const { storage } = fakeStorage();
+    const { ffmpeg } = fakeFfmpeg(10 * MIN);
+    const { charges, calls } = fakeCharges();
+    const gemini = { analyzeFile: async () => [] } as unknown as GeminiService;
+    await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0).run("s");
+    expect(calls.refund).toEqual(["s"]);
+    expect(state.updates.at(-1)).toMatchObject({ status: "failed" });
+  });
+
+  it("refund가 실패해도 fail()은 실행된다", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const { storage } = fakeStorage();
+    const { ffmpeg } = fakeFfmpeg(10 * MIN);
+    const { charges } = fakeCharges();
+    (charges as unknown as { refund: () => Promise<never> }).refund = async () => { throw new Error("refund boom"); };
+    const gemini = { analyzeFile: async () => { throw new Error("boom"); } } as unknown as GeminiService;
+    await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0).run("s");
     expect(state.updates.at(-1)).toMatchObject({ status: "failed" });
   });
 
@@ -334,10 +370,13 @@ describe("SessionAnalysisService.run", () => {
     const { storage } = fakeStorage();
     const { ffmpeg } = fakeFfmpeg(5 * MIN);
     const analyzeFile = vi.fn().mockResolvedValue([{ startMs: 0, endMs: 30_000, type: "PERFORMANCE", confidence: 0.9 }]);
-    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, fakeCharges().charges, tmp, 0).run("s");
+    const sc = fakeCharges();
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, sc.charges, tmp, 0).run("s");
     // 마무리 갱신이 analyzing 가드에 걸려 0행을 반환했으니 트랜잭션이 롤백되고, take는 커밋되지 않는다.
     expect(state.insertedTakes).toEqual([]);
     // "더 이상 내 세션이 아니다"라는 신호라 fail()로 덮어쓰지 않는다.
     expect(state.updates.some((u) => u.status === "failed")).toBe(false);
+    expect(sc.calls.commit).toEqual([]);
+    expect(sc.calls.refund).toEqual([]);
   });
 });

@@ -7,8 +7,8 @@ import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { defaultTakeName, PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
 import { mergeCandidates, padCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
-import { BillingChargeService } from "../billing/billing-charge.service.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
+import { BillingChargeService } from "../billing/billing-charge.service.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { recordings, sessions, takes } from "../db/schema.js";
@@ -149,9 +149,9 @@ export class SessionAnalysisService {
           .where(and(eq(sessions.id, sessionId), eq(sessions.status, "analyzing")))
           .returning({ id: sessions.id });
         if (updated.length === 0) throw new StaleSessionError(sessionId);
+        // ready와 charged를 한 트랜잭션에 묶는다 — 밖에서 commit이 실패하면 ready 세션을 환불하거나 예약이 영원히 남는다.
+        await this.charges.commit(sessionId, tx);
       });
-      // commit은 ready 트랜잭션 밖이다 — 실패하면 예약이 남지만 이중 차감보다 낫고, 다음 retry가 reserved를 재사용해 다시 commit한다.
-      await this.charges.commit(sessionId);
       this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}, sidecar ${sidecarKey ? "uploaded" : "none"}`);
     } catch (err) {
       if (err instanceof StaleSessionError) {

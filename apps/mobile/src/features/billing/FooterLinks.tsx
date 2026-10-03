@@ -12,16 +12,21 @@ const URLS: Record<FooterLink, string> = {
   help: process.env.EXPO_PUBLIC_BILLING_HELP_URL ?? "",
 };
 
-/** B02/B04 하단 약관·개인정보·결제 문의 링크. URL이 없으면 "준비 중" 토스트 */
-export function FooterLinks({ items }: { items: Array<{ key: FooterLink; label: string }> }) {
+/** 링크 열기. URL이 없거나 열 수 없으면 "준비 중" 토스트 */
+export function useOpenLink() {
   const { t } = useTranslation();
-  const { colors } = useTheme();
   const toast = useToast();
-  const open = (key: FooterLink) => {
+  return (key: FooterLink) => {
     const url = URLS[key];
     if (!url) return toast.show(t("billing.links.comingSoon"));
     Linking.openURL(url).catch(() => toast.show(t("billing.links.comingSoon")));
   };
+}
+
+/** B02/B04 하단 약관·개인정보·결제 문의 링크 */
+export function FooterLinks({ items }: { items: Array<{ key: FooterLink; label: string }> }) {
+  const { colors } = useTheme();
+  const open = useOpenLink();
   return (
     <View style={{ flexDirection: "row", justifyContent: "center", gap: 20, paddingTop: 4 }}>
       {items.map((i) => (

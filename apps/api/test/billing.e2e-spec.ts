@@ -2,7 +2,7 @@ import type { INestApplication } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bandMembers, bands, billingPools } from "../src/db/schema.js";
+import { analysisCharges, bandMembers, bands, billingPools, sessions } from "../src/db/schema.js";
 import { createTestApp, loginAs, providerUser } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
@@ -126,6 +126,42 @@ describe("billing API", () => {
     await request(app.getHttpServer()).post(`/bands/${bandId}/transfer`).set(auth(owner.accessToken)).send({ userId: m.userId }).expect(204);
     const [band] = await db.select().from(bands).where(eq(bands.id, bandId));
     expect(band!.poolId).toBeNull();
+  });
+
+  it("link: 다른 사람의 활성 풀에 연결된 밴드는 409 billing_band_linked_elsewhere", async () => {
+    const other = await otherUser("pool-owner-1");
+    const otherPoolId = await activePool(other.userId);
+    await db.update(bands).set({ poolId: otherPoolId }).where(eq(bands.id, bandId));
+    await activePool(owner.userId);
+    const res = await request(app.getHttpServer()).post(`/bands/${bandId}/billing/link`).set(auth(owner.accessToken)).expect(409);
+    expect(res.body.code).toBe("billing_band_linked_elsewhere");
+  });
+
+  it("link: grace 풀도 연결된다", async () => {
+    const poolId = await activePool(owner.userId);
+    await db.update(billingPools).set({ status: "grace" }).where(eq(billingPools.id, poolId));
+    const res = await request(app.getHttpServer()).post(`/bands/${bandId}/billing/link`).set(auth(owner.accessToken)).expect(201);
+    expect(res.body.state).toBe("linked");
+  });
+
+  it("link: 만료된 풀이면 409 billing_no_active_pool", async () => {
+    const poolId = await activePool(owner.userId);
+    await db.update(billingPools).set({ status: "expired" }).where(eq(billingPools.id, poolId));
+    const res = await request(app.getHttpServer()).post(`/bands/${bandId}/billing/link`).set(auth(owner.accessToken)).expect(409);
+    expect(res.body.code).toBe("billing_no_active_pool");
+  });
+
+  it("예약된 차감은 myPool·본문의 monthlyLeftSec에서 빠진다", async () => {
+    const poolId = await activePool(owner.userId, "band", 5 * H);
+    await db.update(bands).set({ poolId }).where(eq(bands.id, bandId));
+    const [s] = await db
+      .insert(sessions)
+      .values({ bandId, createdBy: owner.userId, title: "T", status: "analyzing", startedAt: new Date() })
+      .returning({ id: sessions.id });
+    await db.insert(analysisCharges).values({ sessionId: s!.id, bandId, poolId, monthlySec: 2 * H, state: "reserved" });
+    const res = await request(app.getHttpServer()).get(`/bands/${bandId}/billing`).set(auth(owner.accessToken)).expect(200);
+    expect(res.body.myPool.monthlyLeftSec).toBe(13 * H);
+    expect(res.body.monthlyLeftSec).toBe(13 * H);
   });
 
   it("linkedBandCount는 같은 풀에 연결된 밴드 수", async () => {

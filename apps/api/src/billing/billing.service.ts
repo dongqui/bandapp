@@ -29,9 +29,19 @@ export class BillingService {
     await this.assertOwner(bandId, userId);
     const pool = await this.poolOf(userId);
     if (!pool || pool.status === "expired" || !pool.plan) throw new ConflictException(bandError("billing_no_active_pool"));
-    const [band] = await this.db.select({ poolId: bands.poolId }).from(bands).where(eq(bands.id, bandId));
-    if (band?.poolId && band.poolId !== pool.id) throw new ConflictException(bandError("billing_band_linked_elsewhere"));
-    await this.db.update(bands).set({ poolId: pool.id, updatedAt: new Date() }).where(eq(bands.id, bandId));
+    // 동시에 transferOwnership(poolId=null)이 커밋되면 옛 오너가 양도 뒤에 밴드를 자기 풀에 다시 붙일 수 있다.
+    // 밴드 행을 잠그고 오너 여부를 트랜잭션 안에서 다시 확인한다. 잠금 순서는 밴드 → (풀은 잠그지 않음)이라
+    // reserve의 밴드 → 풀 순서와 순환하지 않는다.
+    await this.db.transaction(async (tx) => {
+      const [band] = await tx.select({ poolId: bands.poolId }).from(bands).where(eq(bands.id, bandId)).for("update");
+      const [member] = await tx
+        .select({ role: bandMembers.role })
+        .from(bandMembers)
+        .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.userId, userId)));
+      if (member?.role !== "owner") throw new ForbiddenException(bandError("billing_owner_only"));
+      if (band?.poolId && band.poolId !== pool.id) throw new ConflictException(bandError("billing_band_linked_elsewhere"));
+      await tx.update(bands).set({ poolId: pool.id, updatedAt: new Date() }).where(eq(bands.id, bandId));
+    });
     return this.build(bandId, userId, true);
   }
 
@@ -47,7 +57,7 @@ export class BillingService {
     }
   }
 
-  async poolOf(userId: string): Promise<PoolRow | undefined> {
+  private async poolOf(userId: string): Promise<PoolRow | undefined> {
     const [pool] = await this.db.select().from(billingPools).where(eq(billingPools.ownerUserId, userId));
     return pool;
   }

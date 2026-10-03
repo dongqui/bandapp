@@ -9,7 +9,7 @@ import { space, useTheme } from "@/theme";
 import { AppText, MonoLabel, PressableOpacity, Screen } from "@/ui";
 import { BillingHeader } from "./BillingHeader";
 import { paramsToCtx } from "./billingContext";
-import { fmtH, monthDay, PLAN_SEC } from "./billingView";
+import { currentPlanOf, fmtH, monthDay, PLAN_SEC } from "./billingView";
 import { FooterLinks } from "./FooterLinks";
 import { KeyValueRows } from "./KeyValueRows";
 import { card, outline, primaryBtn } from "./PlanScreen";
@@ -55,7 +55,11 @@ function ReviewBody({ b, bandId, bandName, memberCount, sel, ctx }: {
   const [prices, setPrices] = useState<StorePrice[] | null>(null);
   useEffect(() => { purchases.prices().then(setPrices).catch(() => setPrices([])); }, []);
   const store = purchases.storeName();
-  const change = b.state === "linked";
+  // 현재 플랜은 오너의 풀 기준 — 미연결 밴드에서 와도 구독 중이면 변경이다
+  const currentPlan = currentPlanOf(b);
+  const change = currentPlan !== null;
+  // 풀의 이번 달 사용량. 미연결 밴드면 본문의 monthlyUsedSec이 0이라 myPool에서 역산한다
+  const poolUsedSec = b.state === "linked" ? b.monthlyUsedSec : currentPlan && b.myPool ? Math.max(0, PLAN_SEC[currentPlan] - b.myPool.monthlyLeftSec) : 0;
   const price = (k: "band" | "plus" | null) => prices?.find((p) => p.key === k)?.priceString ?? "";
   const planName = (p: "band" | "plus" | null) => (p ? t(`billing.planName.${p}`) : t("billing.planName.free"));
   const ready = prices !== null && price(sel) !== "";
@@ -64,7 +68,7 @@ function ReviewBody({ b, bandId, bandName, memberCount, sel, ctx }: {
 
   const rows = change
     ? [
-        { k: t("billing.b04.rowCurrent"), v: `${planName(b.plan)} · ${t("billing.b04.vMonthly", { price: price(b.plan) })}` },
+        { k: t("billing.b04.rowCurrent"), v: `${planName(currentPlan)} · ${t("billing.b04.vMonthly", { price: price(currentPlan) })}` },
         { k: t("billing.b04.rowNew"), v: `${planName(sel)} · ${t("billing.b04.vTime", { time: fmtH(PLAN_SEC[sel]) })}` },
         { k: t("billing.b04.rowBilledThrough"), v: store },
       ]
@@ -76,7 +80,7 @@ function ReviewBody({ b, bandId, bandName, memberCount, sel, ctx }: {
 
   let ctxLine: { text: string; ok: boolean } | null = null;
   if (ctx.from === "analysis") {
-    const after = (change ? Math.max(0, PLAN_SEC[sel] - b.monthlyUsedSec) : PLAN_SEC[sel]) + b.extraSec;
+    const after = (change ? Math.max(0, PLAN_SEC[sel] - poolUsedSec) : PLAN_SEC[sel]) + b.extraSec;
     ctxLine = after >= ctx.durationSec
       ? { ok: true, text: t("billing.b04.ctxOk", { session: ctx.title, time: fmtH(ctx.durationSec) }) }
       : { ok: false, text: t("billing.b04.ctxShort", { session: ctx.title, time: fmtH(ctx.durationSec - after) }) };

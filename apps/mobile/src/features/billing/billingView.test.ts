@@ -1,6 +1,6 @@
 import type { BandBilling } from "@bandapp/types";
 import { describe, expect, it } from "vitest";
-import { fmtH, monthDay, noTimeActions, phaseAfterSync } from "./billingView";
+import { currentPlanOf, fmtH, monthDay, noTimeActions, phaseAfterSync } from "./billingView";
 
 const H = 3600;
 const base: BandBilling = {
@@ -45,4 +45,18 @@ describe("noTimeActions", () => {
   it("linked band 플랜 → Buy 3h + View Plus", () => expect(noTimeActions(linked, 6 * H)).toEqual(["buyExtra", "viewPlus", "notNow"]));
   it("linked plus 플랜 → Buy 3h만", () => expect(noTimeActions({ ...linked, plan: "plus" }, 6 * H)).toEqual(["buyExtra", "notNow"]));
   it("linked 멤버 → Buy 3h만", () => expect(noTimeActions({ ...linked, isOwner: false }, 6 * H)).toEqual(["buyExtra", "notNow"]));
+});
+
+describe("currentPlanOf", () => {
+  it("오너의 미연결 밴드라도 활성 풀이 있으면 그 플랜", () => {
+    expect(currentPlanOf({ ...base, myPool: { plan: "plus", status: "active", monthlyLeftSec: 10 * H, bands: [] } })).toBe("plus");
+  });
+  it("grace 풀도 현재 플랜으로 본다", () => {
+    expect(currentPlanOf({ ...base, myPool: { plan: "band", status: "grace", monthlyLeftSec: 0, bands: [] } })).toBe("band");
+  });
+  it("만료된 풀은 현재 플랜이 아니다", () => {
+    expect(currentPlanOf({ ...base, myPool: { plan: "band", status: "expired", monthlyLeftSec: 0, bands: [] } })).toBeNull();
+  });
+  it("멤버의 linked 밴드 → 밴드 플랜", () => expect(currentPlanOf({ ...linked, isOwner: false })).toBe("band"));
+  it("무료 → null", () => expect(currentPlanOf(base)).toBeNull());
 });

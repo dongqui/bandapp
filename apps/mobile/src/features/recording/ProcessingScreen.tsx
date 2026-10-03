@@ -1,11 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { useUploadSession } from "@/features/upload/useUploadSession";
 import type { ResumeParams, UploadParams } from "@/features/upload/useUploadSession";
 import { fmtDuration } from "@/lib/time";
 import { space, useTheme } from "@/theme";
-import { AppText, Chip, MonoLabel, ProgressBar, Screen } from "@/ui";
+import { AppText, Chip, MonoLabel, ProgressBar, Screen, useToast } from "@/ui";
 
 export function ProcessingScreen() {
   const raw = useLocalSearchParams<{ sessionId?: string; fileUri?: string; source?: "recording" | "import"; startedAt?: string; durationMs?: string }>();
@@ -22,6 +23,15 @@ export function ProcessingScreen() {
   const { phase, progress, session, error, retry, retryable } = useUploadSession(params);
   const router = useRouter();
   const { colors } = useTheme();
+  const toast = useToast();
+  const { t } = useTranslation();
+
+  // 분석 시간이 모자라 멈췄으면 세션 목록으로 — 거기서 세션을 누르면 B03 시트가 뜬다
+  useEffect(() => {
+    if (phase !== "waiting") return;
+    router.replace("/");
+    toast.show(t("billing.b03.uploadWaitingToast"));
+  }, [phase, router, toast, t]);
 
   useEffect(() => {
     if (phase !== "ready" || !session) return;

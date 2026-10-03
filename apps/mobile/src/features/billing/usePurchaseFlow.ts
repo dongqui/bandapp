@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { useApi } from "@/api";
 import { purchases, type ProductKey } from "@/services/purchases";
 import { ctxToParams, type BillingCtx } from "./billingContext";
-import { phaseAfterSync, type PurchasePhase } from "./billingView";
+import { currentPlanOf, phaseAfterSync, type PurchasePhase } from "./billingView";
 
 /**
  * 스토어 구매 → 서버 sync → B06. 사용자가 취소하면 현재 화면에 머문다.
@@ -19,12 +19,14 @@ export function usePurchaseFlow(bandId: string) {
   const busyRef = useRef(false);
 
   // 구매 전 기준값을 함께 넘긴다 — 상태 화면이 뒤늦게 받은 서버 상태엔 이미 구매가 반영됐을 수 있다
-  const toStatus = (phase: PurchasePhase, product: ProductKey, ctx: BillingCtx, ret: string, before: BandBilling) =>
+  // manage가 있으면 해지/재개에서 온 것 — 상태 화면의 "Check status"가 willRenew 변화로 판정한다
+  const toStatus = (phase: PurchasePhase, product: ProductKey, ctx: BillingCtx, ret: string, before: BandBilling, manage?: "cancel" | "resume") =>
     router.replace({
       pathname: "/billing/status",
       params: {
         bandId, phase, product, ret, ...ctxToParams(ctx),
         beforeExtraSec: String(before.extraSec), beforePlan: before.plan ?? "", beforeState: before.state,
+        ...(manage ? { manage, beforeWillRenew: String(before.willRenew) } : {}),
       },
     });
 
@@ -35,7 +37,7 @@ export function usePurchaseFlow(bandId: string) {
       busyRef.current = true;
       setBusy(true);
       try {
-        const outcome = await purchases.purchase(product, { bandId, currentPlan: before.state === "linked" ? before.plan : null });
+        const outcome = await purchases.purchase(product, { bandId, currentPlan: currentPlanOf(before) });
         if (outcome === "cancelled") return;
         if (api instanceof MockApiClient && outcome === "success") api.mockPurchase(product, bandId);
         // 스토어가 끝났으니 서버에 알린다. sync가 죽어도 구매는 유효 — delayed로 보내 "Check status"가 다시 부른다
@@ -57,7 +59,7 @@ export function usePurchaseFlow(bandId: string) {
         const after = await api.billing.sync(bandId).catch(() => null);
         const product = (before.plan ?? "band") as ProductKey;
         const changed = after ? after.willRenew !== before.willRenew : false;
-        toStatus(changed ? (kind === "cancel" ? "canceled" : "resumed") : "delayed", product, ctx, "/billing/plans", before);
+        toStatus(changed ? (kind === "cancel" ? "canceled" : "resumed") : "delayed", product, ctx, "/billing/plans", before, kind);
       } finally {
         busyRef.current = false;
         setBusy(false);

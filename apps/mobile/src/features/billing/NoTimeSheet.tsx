@@ -27,6 +27,19 @@ export function NoTimeSheet({ session: sessionProp, bandName, onClose }: { sessi
   const router = useRouter();
   const api = useApi();
   const toast = useToast();
+  // 연타 방지 — 렌더 클로저가 아니라 ref로 동기 검사한다
+  const busyRef = useRef(false);
+  const guarded = async (fn: () => Promise<void>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      await fn();
+    } catch (err) {
+      toast.show(apiErrorMessage(err, t));
+    } finally {
+      busyRef.current = false;
+    }
+  };
 
   // 닫기(바깥 탭/뒤로)는 "Not now"와 같다 — 저장됐다는 토스트를 보여준다.
   const notNow = () => { onClose(); toast.show(t("billing.b03.savedToast")); };
@@ -36,15 +49,31 @@ export function NoTimeSheet({ session: sessionProp, bandName, onClose }: { sessi
     const need = Math.max(0, session.durationSec - b.availableSec);
     const ctx: BillingCtx = { from: "analysis", sessionId: session.id, title: session.name ?? session.title, durationSec: session.durationSec };
     const go = (path: string, extra: Record<string, string> = {}) => { onClose(); router.push({ pathname: path, params: { bandId: session.bandId, ...ctxToParams(ctx), ...extra } }); };
-    const addToPlan = async () => {
-      try {
-        await api.bands.linkPool(session.bandId);
-        await api.sessions.retryAnalysis(session.id);
-        onClose();
-      } catch (err) {
-        toast.show(apiErrorMessage(err, t));
-      }
-    };
+    const addToPlan = () => guarded(async () => {
+      await api.bands.linkPool(session.bandId);
+      await api.sessions.retryAnalysis(session.id);
+      onClose();
+    });
+    // 시간을 산 뒤 다시 누른 waiting 세션 — 이제 시간이 충분하면 바로 분석을 다시 건다
+    const analyzeNow = () => guarded(async () => {
+      await api.sessions.retryAnalysis(session.id);
+      onClose();
+    });
+    if (need === 0) {
+      return (
+        <>
+          <AppText variant="body">{t("billing.b03.enoughBody", { band: bandName, time: fmtH(b.availableSec) })}</AppText>
+          <View style={{ gap: 10, paddingTop: 16 }}>
+            <PressableOpacity onPress={() => void analyzeNow()} style={primaryBtn(colors)}>
+              <AppText style={{ fontSize: 15, color: colors.bg, fontWeight: "600" }}>{t("billing.b03.analyzeNow")}</AppText>
+            </PressableOpacity>
+            <PressableOpacity onPress={onClose} style={{ padding: 12, alignItems: "center" }}>
+              <AppText style={{ fontSize: 15, color: colors.textMuted }}>{t("billing.b03.notNow")}</AppText>
+            </PressableOpacity>
+          </View>
+        </>
+      );
+    }
     const onAction = (a: NoTimeAction) => {
       switch (a) {
         case "viewPlans": return go("/billing/plans", { sel: "band" });
@@ -84,8 +113,14 @@ export function NoTimeSheet({ session: sessionProp, bandName, onClose }: { sessi
   })();
 
   const need = session && b ? Math.max(0, session.durationSec - b.availableSec) : 0;
+  const enough = need === 0;
   return (
-    <BottomSheet visible={sessionProp !== null && !!b} onClose={notNow} title={t("billing.b03.title", { time: fmtH(need) })}>
+    <BottomSheet
+      visible={sessionProp !== null && !!b}
+      // 시간이 충분할 때 닫기는 그냥 닫기 — "저장됐어요" 토스트는 시간이 모자랄 때만
+      onClose={enough ? onClose : notNow}
+      title={enough ? t("billing.b03.enoughTitle") : t("billing.b03.title", { time: fmtH(need) })}
+    >
       {body}
     </BottomSheet>
   );

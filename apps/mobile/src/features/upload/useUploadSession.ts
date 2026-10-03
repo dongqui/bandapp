@@ -22,7 +22,8 @@ export interface ResumeParams {
   sessionId: string;
 }
 
-export type UploadPhase = "idle" | "uploading" | "analyzing" | "ready" | "failed";
+/** waiting = 분석 시간이 모자라 서버가 waiting_for_time으로 멈춤 (화면이 세션 목록으로 보낸다) */
+export type UploadPhase = "idle" | "uploading" | "analyzing" | "ready" | "failed" | "waiting";
 
 const POLL_MS = 3000;
 /** 이만큼 연속으로 폴링이 실패하면 조용히 계속 두지 않고 실패로 알린다. */
@@ -73,6 +74,8 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
       setError(ANALYZE_ERROR);
       setRetryable(true);
       setPhase("failed");
+    } else if (created.status === "waiting_for_time") {
+      setPhase("waiting");
     } else {
       setPhase("analyzing");
     }
@@ -227,6 +230,8 @@ export function useUploadSession(params: UploadParams | ResumeParams | null) {
           failures = 0;
           setSession(s);
           if (s.status === "ready") setPhase("ready");
+          // 시간이 모자라 멈춘 세션은 기다려도 안 바뀐다 — failed처럼 폴링을 끝낸다
+          if (s.status === "waiting_for_time") setPhase("waiting");
           if (s.status === "failed") {
             setError(ANALYZE_ERROR);
             setPhase("failed");

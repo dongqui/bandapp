@@ -1,4 +1,4 @@
-import type { BandBilling } from "@bandapp/types";
+import type { BandBilling, PoolPlan } from "@bandapp/types";
 import type { ProductKey } from "../../services/purchases";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -32,6 +32,16 @@ export function phaseAfterSync(
   if (!after) return "delayed";
   if (product === "extra") return after.extraSec > before.extraSec ? "success" : "delayed";
   return after.state === "linked" && after.plan === product ? "success" : "delayed";
+}
+
+/**
+ * 요청자(오너)가 지금 구독 중인 플랜. 밴드가 아니라 풀에서 읽는다 — 미연결 밴드에서 결제 화면에 들어와도
+ * 이미 구독 중이면 "변경"으로 다뤄야 Android에서 구독이 둘로 생기지 않는다.
+ * 멤버는 myPool이 없으므로 연결된 밴드의 플랜을 쓴다.
+ */
+export function currentPlanOf(b: BandBilling): PoolPlan | null {
+  if (b.myPool && b.myPool.plan && b.myPool.status !== "expired") return b.myPool.plan;
+  return b.state === "linked" ? b.plan : null;
 }
 
 export type NoTimeAction = "viewPlans" | "resubscribe" | "addToPlan" | "buyExtra" | "viewPlus" | "notNow";

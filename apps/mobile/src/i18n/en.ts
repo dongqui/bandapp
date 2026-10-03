@@ -171,6 +171,8 @@ export const en = {
       short: "Buying 3h still leaves {{time}} short.",
       viewPlans: "View plans", resubscribe: "Resubscribe", addToPlan: "Add to my plan · {{time}} left", buyExtra: "Buy 3h for {{price}}", viewPlus: "View Plus", notNow: "Not now",
       footer: "You can still listen, comment, and add takes manually.", savedToast: "Saved. Analyze it anytime from Sessions.",
+      enoughTitle: "Time is available", enoughBody: "{{band}} has {{time}} available. Analyze this recording now?", analyzeNow: "Analyze now",
+      uploadWaitingToast: "Not enough analysis time. Tap the session for options.",
     },
     sessionRow: { waiting: "Waiting for analysis time — tap for options" },
     transferNote: " {{band}} will be removed from your plan.",

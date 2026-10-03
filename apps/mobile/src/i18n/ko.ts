@@ -174,6 +174,8 @@ export const ko: Resource = {
       short: "3시간을 사도 {{time}}이 부족해요.",
       viewPlans: "플랜 보기", resubscribe: "다시 구독", addToPlan: "내 플랜에 추가 · {{time}} 남음", buyExtra: "3시간 사기 · {{price}}", viewPlus: "Plus 보기", notNow: "나중에",
       footer: "듣고, 댓글 달고, 테이크를 직접 추가하는 건 계속할 수 있어요.", savedToast: "저장됐어요. Sessions에서 언제든 분석할 수 있어요.",
+      enoughTitle: "분석 시간이 있어요", enoughBody: "{{band}}에 {{time}}이(가) 남아 있어요. 지금 분석할까요?", analyzeNow: "지금 분석",
+      uploadWaitingToast: "분석 시간이 부족해요. 세션을 눌러 선택해 주세요.",
     },
     sessionRow: { waiting: "분석 시간 대기 중 — 옵션 보기" },
     transferNote: " {{band}}은(는) 내 플랜에서 제외돼요.",

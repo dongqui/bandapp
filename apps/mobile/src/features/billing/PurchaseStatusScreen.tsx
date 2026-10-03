@@ -83,8 +83,15 @@ export function PurchaseStatusScreen() {
       plan: plan === undefined ? base.plan : plan,
       state: st === "free" || st === "linked" || st === "expired" ? st : base.state,
     };
+    const manage = params.manage === "cancel" || params.manage === "resume" ? params.manage : null;
+    const beforeWillRenew = params.beforeWillRenew === "true" ? true : params.beforeWillRenew === "false" ? false : before?.willRenew;
     setPhase("checking");
     const after = await api.billing.sync(bandId).catch(() => null);
+    if (manage && product !== "extra") {
+      // 해지·재개에서 왔다면 구매 비교가 아니라 willRenew 변화로 판정한다 (아니면 영영 delayed)
+      setPhase(after && beforeWillRenew !== undefined && after.willRenew !== beforeWillRenew ? (after.willRenew ? "resumed" : "canceled") : "delayed");
+      return;
+    }
     // before를 못 구했으면 비교할 수 없다 — delayed 유지
     setPhase(before ? phaseAfterSync("success", before, after, product) : "delayed");
   };

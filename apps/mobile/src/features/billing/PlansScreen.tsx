@@ -9,7 +9,7 @@ import { space, useTheme } from "@/theme";
 import { AppText, MonoLabel, PressableOpacity, Screen } from "@/ui";
 import { BillingHeader } from "./BillingHeader";
 import { ctxToParams, paramsToCtx } from "./billingContext";
-import { fmtH, monthDay, PLAN_SEC } from "./billingView";
+import { currentPlanOf, fmtH, monthDay, PLAN_SEC } from "./billingView";
 import { FooterLinks } from "./FooterLinks";
 import { card, outline, primaryBtn } from "./PlanScreen";
 import { useBandBilling } from "./useBandBilling";
@@ -27,7 +27,9 @@ export function PlansScreen() {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const router = useRouter();
-  const [sel, setSel] = useState<Sel>(params.sel === "plus" ? "plus" : "band");
+  const paramSel: Sel | null = params.sel === "plus" || params.sel === "band" ? params.sel : null;
+  // null이면 아직 안 고름 — 데이터가 오면 기본값을 정한다
+  const [picked, setSel] = useState<Sel | null>(null);
 
   return (
     <Screen>
@@ -41,10 +43,17 @@ export function PlansScreen() {
           <PressableOpacity onPress={reload} style={outline(colors)}><AppText>{t("billing.b01.retry")}</AppText></PressableOpacity>
         </View>
       ) : (
-        <PlansBody b={b} bandId={bandId} bandName={band?.name ?? ""} sel={sel} setSel={setSel} ctx={ctx} />
+        <PlansBody b={b} bandId={bandId} bandName={band?.name ?? ""} sel={picked ?? defaultSel(b, paramSel)} setSel={setSel} ctx={ctx} />
       )}
     </Screen>
   );
+}
+
+/** 구독 중이면 기본 선택은 다른 플랜 — param이 없거나 현재 플랜을 가리킬 때 */
+function defaultSel(b: BandBilling, param: Sel | null): Sel {
+  const current = currentPlanOf(b);
+  if (current && (param === null || param === current)) return current === "band" ? "plus" : "band";
+  return param ?? "band";
 }
 
 function PlansBody({ b, bandId, bandName, sel, setSel, ctx }: {
@@ -57,11 +66,13 @@ function PlansBody({ b, bandId, bandName, sel, setSel, ctx }: {
   const [prices, setPrices] = useState<StorePrice[] | null>(null);
   useEffect(() => { purchases.prices().then(setPrices).catch(() => setPrices([])); }, []);
   const store = purchases.storeName();
-  const paid = b.state === "linked";
+  // 현재 플랜은 밴드가 아니라 오너의 풀 기준 (미연결 밴드에서 들어와도 이미 구독 중이면 "변경")
+  const currentPlan = currentPlanOf(b);
+  const paid = currentPlan !== null;
   const pricesReady = prices !== null && prices.length > 0;
   const price = (k: Sel) => prices?.find((p) => p.key === k)?.priceString ?? "";
   const planName = (p: Sel | null) => (p ? t(`billing.planName.${p}`) : t("billing.planName.free"));
-  const canGo = pricesReady && !(paid && sel === b.plan) && !flow.busy;
+  const canGo = pricesReady && sel !== currentPlan && !flow.busy;
   const date = monthDay(b.periodEnd);
 
   const goReview = () => router.push({ pathname: "/billing/review", params: { bandId, sel, ...ctxToParams(ctx) } });
@@ -74,7 +85,7 @@ function PlansBody({ b, bandId, bandName, sel, setSel, ctx }: {
       </View>
 
       {(["band", "plus"] as const).map((k) => {
-        const current = paid && b.plan === k;
+        const current = currentPlan === k;
         const selected = sel === k;
         return (
           <PressableOpacity
@@ -107,7 +118,8 @@ function PlansBody({ b, bandId, bandName, sel, setSel, ctx }: {
 
       <AppText variant="caption">{t("billing.b02.note")}</AppText>
 
-      {paid && b.isOwner ? (
+      {/* 해지·재개는 이 밴드가 풀에 연결돼 있을 때만 — willRenew·periodEnd는 연결된 풀 값만 내려온다 */}
+      {paid && b.state === "linked" && b.isOwner ? (
         b.willRenew ? (
           <PressableOpacity disabled={flow.busy} onPress={() => flow.manage("cancel", b, ctx)} style={[card(colors), { gap: 4 }]}>
             <AppText variant="rowTitle">{t("billing.b02.cancel")}</AppText>

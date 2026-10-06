@@ -204,8 +204,15 @@ export const en = {
       failed: "Couldn’t update your photo. Please try again.",
     },
     delete: {
-      title: "Delete your account?", body: "You’ll be signed out on every device and your account will be removed.",
+      title: "Delete account?",
+      blocked: "You own {{band}}. Make another member the owner first, so the band and its sessions stay with them.",
+      goToBand: "Go to band",
+      bullet1: "Your profile and sign-in are removed permanently.",
+      bullet2: "You leave every band you’re in.",
+      bullet3: "Sessions and comments stay with the band, shown as “Former member”.",
+      subscriptionWarn: "Deleting your account doesn’t cancel your subscription. Cancel it in {{store}} settings to stop being billed.",
       primary: "Delete account",
+      deletedToast: "Account deleted",
     },
   },
   contact: {

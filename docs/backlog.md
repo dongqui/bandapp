@@ -33,7 +33,7 @@
 
 ## 팀·설정
 - **문의 이메일 알림.** `POST /support/requests`는 DB 저장 + `SUPPORT_WEBHOOK_URL`(Slack/Discord `{text}`) 전송만 한다 ([2026-10-06 스펙](superpowers/specs/2026-10-06-me-tab-profile-contact-design.md)). 이메일 발송 인프라가 생기면 붙인다. 운영용 문의 목록 화면도 없다.
-- **Me 디자인에 회원 탈퇴 행 추가.** 스토어 심사 때문에 Sign out 아래 "Delete account"를 코드에 넣었는데 Claude Design에는 없다. 디자인에 반영하고 스타일을 맞춘다.
+- **회원 탈퇴 시트의 "소유권 먼저 넘기기" 검사는 현재 밴드만 본다.** 다른 밴드의 유일 오너면 서버 409 메시지가 토스트로 뜬다. 밴드 목록에 내 역할이 실리면 전부 미리 검사할 수 있다.
 - **프로필 사진을 멤버 목록·코멘트 아바타에도.** 지금은 Me 화면·탭 아이콘만 사진을 쓴다 (디자인이 이니셜 유지). `BandMember`/`TakeComment`에 사진 URL을 실어야 한다.
 - **네브바 backdrop blur.** 디자인의 `backdrop-filter: blur(24px)`는 반투명 배경으로 대체했다. expo-blur를 들이면 맞출 수 있다.
 - **프로필 사진 URL 만료.** presigned GET 7일. 앱이 7일 넘게 재시작 없이 살아 있으면 사진이 깨진다 — 포그라운드 복귀 시 `me()` 재조회로 해결.

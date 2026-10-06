@@ -14,12 +14,16 @@ import { useBandBilling } from "@/features/billing/useBandBilling";
 import { apiErrorMessage } from "@/i18n/apiErrorMessage";
 import { purchases, type StorePrice } from "@/services/purchases";
 import { font, radius, space, useTheme } from "@/theme";
-import { AppText, Avatar, BottomSheet, ConfirmDialog, MonoLabel, PressableOpacity, Screen, initialOf, useToast } from "@/ui";
+import { AppText, Avatar, BottomSheet, MonoLabel, PressableOpacity, Screen, initialOf, useToast } from "@/ui";
+import { DeleteAccountSheet } from "./DeleteAccountSheet";
 import { mePlanModel } from "./mePlanView";
 import { PhotoSheet } from "./PhotoSheet";
 import { PhotoPermissionDeniedError, pickProfilePhoto } from "./pickProfilePhoto";
 
-type Sheet = "name" | "photo" | null;
+type Sheet = "name" | "photo" | "delete" | null;
+
+/** 디자인 Delete account 행 색 — danger 텍스트(#E0736B)보다 밝다 */
+const DELETE_ROW_FG = "#FF6B6B";
 
 /** 디자인 "Me" 화면 (2026-10-06): 프로필 · 구독 카드 · 지원 · 로그아웃 */
 export function MeScreen() {
@@ -35,7 +39,6 @@ export function MeScreen() {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const [sheet, setSheet] = useState<Sheet>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const name = user?.displayName ?? "";
@@ -94,17 +97,21 @@ export function MeScreen() {
   // 디자인은 확인 없이 바로 로그아웃한다. signOut이 guest로 바꾸면 authGate가 /login으로 보낸다
   const onSignOut = () => void run(() => signOut(), t("me.signOutFailed"));
 
+  // 유일 owner 밴드가 있으면 서버가 409로 막는다 (기획서 18장). 시트에서는 현재 밴드만 미리 검사하고,
+  // 다른 밴드 때문에 막히면 서버 메시지를 토스트로 보여준다.
   const onDelete = () => {
-    setConfirmDelete(false);
-    void run(
-      () => deleteAccount(),
-      undefined, // 유일 owner 밴드가 있으면 서버 409 메시지를 그대로 보여준다 (기획서 18장)
-    );
+    close();
+    void run(async () => {
+      await deleteAccount();
+      toast.show(t("me.delete.deletedToast"));
+    });
   };
+  const blockedBand = billing?.isOwner && (band?.memberCount ?? 0) > 1 ? (band?.name ?? "") : null;
 
   const price = (plan: PoolPlan) => prices.find((p) => p.key === plan)?.priceString ?? "";
   const planName = (p: PoolPlan) => t(`billing.planName.${p}`);
   const model = billing ? mePlanModel(billing) : null;
+  const subscriptionStore = model?.kind === "active" && model.willRenew ? purchases.storeName() : null;
   const goPlans = (sel: PoolPlan) =>
     band && router.push({ pathname: "/billing/plans", params: { bandId: band.id, from: "me", sel } });
 
@@ -216,9 +223,8 @@ export function MeScreen() {
 
         <MonoLabel style={{ paddingTop: 32, paddingBottom: 4, letterSpacing: 1.6 }}>{t("me.support")}</MonoLabel>
         <ListRow title={t("me.contact")} chevron onPress={() => router.push("/contact")} />
-        <ListRow title={t("me.signOut")} muted onPress={onSignOut} />
-        {/* 디자인에는 없지만 스토어 심사상 앱 안에서 탈퇴할 수 있어야 한다 (2026-10-06 스펙 "디자인 갭") */}
-        <ListRow title={t("me.deleteAccount")} danger onPress={() => setConfirmDelete(true)} />
+        <ListRow title={t("me.signOut")} muted divider onPress={onSignOut} />
+        <ListRow title={t("me.deleteAccount")} color={DELETE_ROW_FG} onPress={() => setSheet("delete")} />
       </ScrollView>
 
       <BottomSheet
@@ -237,14 +243,17 @@ export function MeScreen() {
         onPick={pickPhoto}
         onRemove={removePhoto}
       />
-      <ConfirmDialog
-        visible={confirmDelete}
-        title={t("me.delete.title")}
-        body={t("me.delete.body")}
-        primary={{ label: t("me.delete.primary"), danger: true, onPress: onDelete }}
-        cancelLabel={t("common.cancel")}
-        onCancel={() => setConfirmDelete(false)}
+      <DeleteAccountSheet
+        visible={sheet === "delete"}
+        blockedBand={blockedBand}
+        subscriptionStore={subscriptionStore}
         busy={busy}
+        onClose={close}
+        onGoBand={() => {
+          close();
+          router.navigate("/band");
+        }}
+        onConfirm={onDelete}
       />
     </Screen>
   );
@@ -267,12 +276,12 @@ function CardRow({ title, value, accent = false, onPress }: { title: string; val
   );
 }
 
-/** SUPPORT 아래 행 — Contact us(›, 아래 구분선), Sign out(회색), Delete account(빨강) */
-function ListRow({ title, chevron = false, muted = false, danger = false, onPress }: {
-  title: string; chevron?: boolean; muted?: boolean; danger?: boolean; onPress: () => void;
+/** SUPPORT 아래 행 — Contact us(›, 아래 구분선), Sign out(회색, 아래 구분선), Delete account(빨강) */
+function ListRow({ title, chevron = false, muted = false, divider = false, color: colorOverride, onPress }: {
+  title: string; chevron?: boolean; muted?: boolean; divider?: boolean; color?: string; onPress: () => void;
 }) {
   const { colors } = useTheme();
-  const color = danger ? colors.danger : muted ? colors.textMuted : colors.text;
+  const color = colorOverride ?? (muted ? colors.textMuted : colors.text);
   return (
     <PressableOpacity
       onPress={onPress}
@@ -281,7 +290,7 @@ function ListRow({ title, chevron = false, muted = false, danger = false, onPres
         alignItems: "center",
         justifyContent: "space-between",
         paddingVertical: 16,
-        borderBottomWidth: chevron ? 1 : 0,
+        borderBottomWidth: chevron || divider ? 1 : 0,
         borderBottomColor: colors.border,
         borderRadius: radius.row,
       }}

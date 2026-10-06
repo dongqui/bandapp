@@ -208,8 +208,15 @@ export const ko: Resource = {
       failed: "사진을 바꾸지 못했어요. 다시 시도해 주세요.",
     },
     delete: {
-      title: "정말 탈퇴할까요?", body: "모든 기기에서 로그아웃되고 계정 정보가 삭제돼요.",
+      title: "탈퇴할까요?",
+      blocked: "{{band}}의 관리자예요. 밴드와 세션이 남도록 먼저 다른 멤버에게 소유권을 넘겨 주세요.",
+      goToBand: "밴드로 가기",
+      bullet1: "프로필과 로그인 정보가 영구 삭제돼요.",
+      bullet2: "참여 중인 모든 밴드에서 나가요.",
+      bullet3: "세션과 댓글은 밴드에 남고, 작성자는 “탈퇴한 멤버”로 표시돼요.",
+      subscriptionWarn: "탈퇴해도 구독은 해지되지 않아요. 결제가 계속되지 않게 {{store}} 설정에서 구독을 해지해 주세요.",
       primary: "탈퇴하기",
+      deletedToast: "탈퇴했어요",
     },
   },
   contact: {

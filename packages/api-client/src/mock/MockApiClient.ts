@@ -8,26 +8,29 @@ import type {
   CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
+  CreateSupportRequestInput,
   CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
+  SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateMeInput,
   UploadPartUrl,
   UploadStatus,
   User,
 } from "@bandapp/types";
-import { checkTakeRange, defaultTakeName, neighborsOf, TAKE_NAME_MAX, type UpdateTakeInput } from "@bandapp/types";
-import type { RehearsalApiClient, UploadProgress, UploadSource } from "../client";
+import { checkTakeRange, defaultTakeName, DISPLAY_NAME_MAX, neighborsOf, SUPPORT_BODY_MAX, SUPPORT_TOPICS, TAKE_NAME_MAX, type UpdateTakeInput } from "@bandapp/types";
+import type { ProfilePhotoUpload, RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { UploadRecordingError } from "../upload";
 import { seededUnit } from "./rand";
 import { commentKey, createSeedState, fakePeaks, generateTakes, type MockState } from "./seed";
 
-const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null };
+const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null, email: "dongjin@gmail.com" };
 /** 서버 billing/plans.ts와 같은 값 */
 const HOUR_SEC = 3600;
 const BAND_MONTHLY_SEC = 20 * HOUR_SEC;
@@ -48,7 +51,11 @@ function normalizeText(text: string): string {
 
 export class MockApiClient implements RehearsalApiClient {
   private state: MockState = createSeedState();
+  /** 이름·사진 변경을 기억한다. 멤버 목록의 이름은 state.members에서 같이 바꾼다 */
+  private user: User = { ...MOCK_USER };
   private listeners = new Set<() => void>();
+  /** 보낸 문의 — 테스트가 확인한다 */
+  supportRequests: CreateSupportRequestInput[] = [];
   private analysisDelayMs: number;
   private nextId = 1;
   // uploadStatus가 partCount를 실제로 만든 세션과 맞게 돌려주도록, create가 계산한 값을 세션별로 기억해 둔다.
@@ -141,15 +148,53 @@ export class MockApiClient implements RehearsalApiClient {
     loginWithApple: async (credential: AppleLoginCredential): Promise<LoginResponse> =>
       this.loginResult(credential.displayName),
     logout: async (): Promise<void> => {},
-    me: async (): Promise<User> => ({ ...MOCK_USER }),
+    me: async (): Promise<User> => ({ ...this.user }),
+    updateMe: async (input: UpdateMeInput): Promise<User> => {
+      const displayName = input.displayName.trim();
+      if (displayName.length < 1 || displayName.length > DISPLAY_NAME_MAX) {
+        throw new ApiError(400, `displayName must be 1-${DISPLAY_NAME_MAX} characters`);
+      }
+      this.user = { ...this.user, displayName };
+      for (const list of Object.values(this.state.members)) {
+        for (const m of list) if (m.id === this.user.id) m.name = displayName;
+      }
+      this.emit();
+      return { ...this.user };
+    },
+    setPhoto: async (photo: ProfilePhotoUpload): Promise<User> => {
+      const url =
+        "uri" in photo
+          ? photo.uri
+          : typeof URL !== "undefined" && "createObjectURL" in URL
+            ? URL.createObjectURL(photo)
+            : "mock://photo";
+      this.user = { ...this.user, profileImageUrl: url };
+      this.emit();
+      return { ...this.user };
+    },
+    removePhoto: async (): Promise<void> => {
+      this.user = { ...this.user, profileImageUrl: null };
+      this.emit();
+    },
     deleteAccount: async (): Promise<void> => {},
   };
 
+  support = {
+    send: async (input: CreateSupportRequestInput): Promise<SupportRequestCreated> => {
+      const body = input.body.trim();
+      if (!SUPPORT_TOPICS.includes(input.topic)) throw new ApiError(400, "topic must be one of " + SUPPORT_TOPICS.join(", "));
+      if (body.length < 1 || body.length > SUPPORT_BODY_MAX) throw new ApiError(400, `body must be 1-${SUPPORT_BODY_MAX} characters`);
+      this.supportRequests.push({ ...input, body });
+      return { id: `support-${this.supportRequests.length}` };
+    },
+  };
+
   private loginResult(displayName?: string): LoginResponse {
+    if (displayName) this.user = { ...this.user, displayName };
     return {
       accessToken: "mock-access",
       refreshToken: "mock-refresh",
-      user: { ...MOCK_USER, displayName: displayName ?? MOCK_USER.displayName },
+      user: { ...this.user },
       isNewUser: false,
     };
   }
@@ -161,7 +206,7 @@ export class MockApiClient implements RehearsalApiClient {
       const band: Band = { id: `b${this.nextId++}`, name, memberCount: 1 };
       this.state.bands.push(band);
       this.state.members[band.id] = [
-        { id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "owner", part: null },
+        { id: this.user.id, name: this.user.displayName ?? "나", role: "owner", part: null },
       ];
       this.emit();
       return { ...band };
@@ -289,10 +334,13 @@ export class MockApiClient implements RehearsalApiClient {
       isOwner,
       linkedBandCount: bb.linked ? linkedBandCount : 0,
       canBuyExtra: state === "linked",
-      myPool: isOwner && pool.plan
+      myPool: pool.plan
         ? {
             plan: pool.plan,
             status: pool.status,
+            periodEnd: pool.periodEnd,
+            willRenew: pool.willRenew,
+            store: "app_store",
             monthlyLeftSec: poolActive ? Math.max(0, monthlyTotalSec - pool.usedSec) : 0,
             bands: this.state.bands
               .filter((b) => (this.state.members[b.id] ?? []).some((m) => m.id === MOCK_USER.id && m.role === "owner"))
@@ -328,7 +376,7 @@ export class MockApiClient implements RehearsalApiClient {
       const band = this.bandFromInviteToken(token);
       const members = (this.state.members[band.id] ??= []);
       if (members.some((m) => m.id === MOCK_USER.id)) return { bandId: band.id, alreadyMember: true };
-      members.push({ id: MOCK_USER.id, name: MOCK_USER.displayName ?? "나", role: "member", part: null });
+      members.push({ id: this.user.id, name: this.user.displayName ?? "나", role: "member", part: null });
       band.memberCount = members.length;
       this.emit();
       return { bandId: band.id, alreadyMember: false };

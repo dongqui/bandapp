@@ -54,7 +54,7 @@ export function PurchaseStatusScreen() {
   const date = monthDay(b?.periodEnd ?? null);
 
   const goPlan = () => router.replace({ pathname: "/billing/plan", params: { bandId, from: "band" } });
-  const done = () => (ctx.from === "analysis" ? router.replace("/") : goPlan());
+  const done = () => (ctx.from === "analysis" ? router.replace("/") : ctx.from === "me" ? router.replace("/me") : goPlan());
   const tryAgain = () => router.replace({ pathname: ret, params: { bandId, ...ctxToParams(ctx) } });
   const continueAnalysis = async () => {
     // 연타 방지는 렌더 클로저가 아니라 ref로 동기 검사한다

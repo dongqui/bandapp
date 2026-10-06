@@ -40,9 +40,27 @@ const timestamps = {
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   displayName: text("display_name"),
+  // 로그인 제공자가 준 사진 URL. 직접 올린 사진은 profile_image_key가 우선한다
   profileImageUrl: text("profile_image_url"),
+  // 직접 올린 사진의 R2 키(avatars/{userId}/{uuid}.jpg). 응답에서는 presigned URL로 바뀐다
+  profileImageKey: text("profile_image_key"),
   ...timestamps,
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
+});
+
+// Contact us 문의. 알림은 웹훅(best-effort)이고 저장이 원본이다 (2026-10-06 스펙)
+export const supportRequests = pgTable("support_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // 보낼 당시의 identity 이메일 — 탈퇴로 identity가 지워져도 답장 주소가 남는다
+  email: text("email"),
+  topic: text("topic").notNull(),
+  body: text("body").notNull(),
+  appVersion: text("app_version"),
+  device: text("device"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const userIdentities = pgTable(

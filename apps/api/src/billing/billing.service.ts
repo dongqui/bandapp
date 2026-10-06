@@ -74,7 +74,8 @@ export class BillingService {
       .innerJoin(users, eq(users.id, bandMembers.userId))
       .where(and(eq(bandMembers.bandId, bandId), eq(bandMembers.role, "owner")));
     const linkedBandCount = linkedPool ? await this.countLinked(linkedPool.id) : 0;
-    const myPool = isOwner ? await this.myPool(userId) : null;
+    // 오너가 아닌 밴드에서도 채운다 — Me 화면의 "내 구독" 카드가 현재 밴드와 무관하게 내 풀을 보여준다
+    const myPool = await this.myPool(userId);
     const monthlyTotalSec = state === "linked" && linkedPool?.plan ? PLANS[linkedPool.plan].monthlySec : 0;
     return {
       state,
@@ -115,6 +116,9 @@ export class BillingService {
     return {
       plan: pool.plan,
       status: pool.status,
+      periodEnd: pool.periodEnd?.toISOString() ?? null,
+      willRenew: pool.willRenew,
+      store: pool.store,
       monthlyLeftSec,
       bands: rows.map((r) => ({ id: r.id, name: r.name, memberCount: r.memberCount, linked: r.poolId === pool.id })),
     };

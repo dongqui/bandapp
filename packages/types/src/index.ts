@@ -6,6 +6,7 @@ export * from "./health";
 export * from "./invite";
 export * from "./peaks";
 export * from "./session";
+export * from "./support";
 export * from "./take";
 export * from "./take-rules";
 export * from "./user";

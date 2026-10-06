@@ -27,7 +27,7 @@ describe("GET /me", () => {
       .get("/me")
       .set("authorization", `Bearer ${accessToken}`)
       .expect(200);
-    expect(res.body).toEqual({ id: userId, displayName: "Dongjin", profileImageUrl: null });
+    expect(res.body).toEqual({ id: userId, displayName: "Dongjin", profileImageUrl: null, email: "g-1@test.dev" });
   });
 
   it("가드 없는 access 토큰 형식(Bearer 누락)은 401", async () => {

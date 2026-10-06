@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { UsersService } from "../src/users/users.service.js";
 import type { VerifiedProviderToken } from "../src/auth/provider-token.js";
+import { FakeStorage } from "./app-util.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
 const verified = (subject: string, over?: Partial<VerifiedProviderToken>): VerifiedProviderToken => ({
@@ -14,7 +15,7 @@ const verified = (subject: string, over?: Partial<VerifiedProviderToken>): Verif
 
 describe("UsersService", () => {
   const db = createTestDb();
-  const service = new UsersService(db);
+  const service = new UsersService(db, new FakeStorage());
   beforeEach(() => truncateAll(db));
 
   it("최초 로그인이면 user+identity를 만들고 isNewUser=true", async () => {

@@ -13,6 +13,7 @@ import { StorageModule } from "./storage/storage.module.js";
 import { AnalysisModule } from "./analysis/analysis.module.js";
 import { NotificationsModule } from "./notifications/notifications.module.js";
 import { BillingModule } from "./billing/billing.module.js";
+import { SupportModule } from "./support/support.module.js";
 import { DbModule } from "./db/db.module.js";
 
 @Module({
@@ -31,6 +32,7 @@ import { DbModule } from "./db/db.module.js";
     AnalysisModule,
     NotificationsModule,
     BillingModule,
+    SupportModule,
     DbModule,
   ],
 })

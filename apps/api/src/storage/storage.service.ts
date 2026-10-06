@@ -33,6 +33,8 @@ export abstract class StorageService {
   abstract presignGet(key: string, expiresSec: number): Promise<string>;
   abstract downloadToFile(key: string, path: string): Promise<void>;
   abstract putFile(key: string, path: string, contentType: string): Promise<void>;
+  /** 메모리에 있는 작은 객체(프로필 사진 등)를 그대로 올린다 */
+  abstract putObject(key: string, body: Uint8Array, contentType: string): Promise<void>;
   abstract deleteObjects(keys: string[]): Promise<void>;
   abstract listKeys(prefix: string): Promise<string[]>;
 }
@@ -160,6 +162,12 @@ export class R2StorageService extends StorageService {
         ContentLength: size,
         ContentType: contentType,
       }),
+    );
+  }
+
+  async putObject(key: string, body: Uint8Array, contentType: string): Promise<void> {
+    await this.s3.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentLength: body.byteLength, ContentType: contentType }),
     );
   }
 

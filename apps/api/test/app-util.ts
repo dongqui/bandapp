@@ -93,6 +93,10 @@ export class FakeStorage extends StorageService {
   async putFile(key: string, path: string) {
     this.put.push({ key, path });
   }
+  objects = new Map<string, { contentType: string; size: number }>();
+  async putObject(key: string, body: Uint8Array, contentType: string) {
+    this.objects.set(key, { contentType, size: body.byteLength });
+  }
   async deleteObjects(keys: string[]) {
     this.deleted.push(...keys);
   }

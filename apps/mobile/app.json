@@ -31,6 +31,13 @@
       "expo-secure-store",
       "expo-apple-authentication",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Take N uses your photos to set your profile picture.",
+          "cameraPermission": "Take N uses the camera to take your profile picture."
+        }
+      ],
+      [
         "expo-audio",
         {
           "microphonePermission": "Take N records your rehearsal so it can find the takes."

@@ -11,7 +11,8 @@ export function gate(status: GateStatus, firstSegment: string | undefined): { re
   return null;
 }
 
-const BAND_EXEMPT_SEGMENTS = new Set(["onboarding", "invite", "login", "settings"]);
+// 설정 화면은 Me 탭으로 흡수됐다(2026-10-06). 탭은 밴드가 있어야 보이므로 예외가 아니다
+const BAND_EXEMPT_SEGMENTS = new Set(["onboarding", "invite", "login"]);
 
 /**
  * 밴드 0개인 인증 사용자를 온보딩으로 보낸다 (기획서 10장).

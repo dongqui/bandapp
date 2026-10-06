@@ -34,11 +34,13 @@ describe("phaseAfterSync", () => {
   });
 });
 
+const pool: NonNullable<BandBilling["myPool"]> = { plan: null, status: "expired", periodEnd: null, willRenew: false, store: null, monthlyLeftSec: 0, bands: [] };
+
 describe("noTimeActions", () => {
   it("오너 + 무료 → View plans", () => expect(noTimeActions(base, 4 * H)).toEqual(["viewPlans", "notNow"]));
   it("멤버 + 무료 → Not now만", () => expect(noTimeActions({ ...base, isOwner: false }, 4 * H)).toEqual(["notNow"]));
   it("오너 + 풀 있음 + 미연결 → Add to my plan", () => {
-    const b: BandBilling = { ...base, myPool: { plan: "band", status: "active", monthlyLeftSec: 10 * H, bands: [] } };
+    const b: BandBilling = { ...base, myPool: { ...pool, plan: "band", status: "active", monthlyLeftSec: 10 * H } };
     expect(noTimeActions(b, 4 * H)).toEqual(["addToPlan", "notNow"]);
   });
   it("오너 + 만료 → Resubscribe", () => expect(noTimeActions({ ...base, state: "expired", plan: "band" }, 4 * H)).toEqual(["resubscribe", "notNow"]));
@@ -49,13 +51,13 @@ describe("noTimeActions", () => {
 
 describe("currentPlanOf", () => {
   it("오너의 미연결 밴드라도 활성 풀이 있으면 그 플랜", () => {
-    expect(currentPlanOf({ ...base, myPool: { plan: "plus", status: "active", monthlyLeftSec: 10 * H, bands: [] } })).toBe("plus");
+    expect(currentPlanOf({ ...base, myPool: { ...pool, plan: "plus", status: "active", monthlyLeftSec: 10 * H } })).toBe("plus");
   });
   it("grace 풀도 현재 플랜으로 본다", () => {
-    expect(currentPlanOf({ ...base, myPool: { plan: "band", status: "grace", monthlyLeftSec: 0, bands: [] } })).toBe("band");
+    expect(currentPlanOf({ ...base, myPool: { ...pool, plan: "band", status: "grace", monthlyLeftSec: 0 } })).toBe("band");
   });
   it("만료된 풀은 현재 플랜이 아니다", () => {
-    expect(currentPlanOf({ ...base, myPool: { plan: "band", status: "expired", monthlyLeftSec: 0, bands: [] } })).toBeNull();
+    expect(currentPlanOf({ ...base, myPool: { ...pool, plan: "band", status: "expired", monthlyLeftSec: 0 } })).toBeNull();
   });
   it("멤버의 linked 밴드 → 밴드 플랜", () => expect(currentPlanOf({ ...linked, isOwner: false })).toBe("band"));
   it("무료 → null", () => expect(currentPlanOf(base)).toBeNull());

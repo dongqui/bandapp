@@ -32,7 +32,7 @@ describe("bandGate", () => {
     expect(bandGate(0, "invite")).toBeNull();
   });
 
-  it("밴드 0개여도 설정 화면은 예외 — 로그아웃/탈퇴 경로가 막히지 않게", () => {
-    expect(bandGate(0, "settings")).toBeNull();
+  it("설정 화면은 Me 탭으로 흡수돼 더 이상 예외가 아니다", () => {
+    expect(bandGate(0, "settings")).toEqual({ redirect: "/onboarding" });
   });
 });

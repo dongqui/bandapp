@@ -18,9 +18,13 @@ export interface BandBilling {
   isOwner: boolean;
   linkedBandCount: number;
   canBuyExtra: boolean;
+  /** 요청자 본인의 풀. 풀 행이 없으면 null. 오너가 아닌 밴드에서도 채운다 — Me 화면의 "내 구독" 카드 재료 */
   myPool: {
     plan: PoolPlan | null;
     status: "active" | "grace" | "expired";
+    periodEnd: string | null; // ISO
+    willRenew: boolean;
+    store: "app_store" | "play_store" | null;
     monthlyLeftSec: number;
     bands: Array<{ id: string; name: string; memberCount: number; linked: boolean }>;
   } | null;

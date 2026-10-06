@@ -9,14 +9,17 @@ import type {
   CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
+  CreateSupportRequestInput,
   CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
+  SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateMeInput,
   UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
@@ -24,7 +27,13 @@ import type {
   User,
 } from "@bandapp/types";
 
-export type { CommentTarget, CreateCommentInput, CreateSessionInput, UpdateCommentInput } from "@bandapp/types";
+export type { CommentTarget, CreateCommentInput, CreateSessionInput, UpdateCommentInput, UpdateMeInput } from "@bandapp/types";
+
+/**
+ * 프로필 사진 업로드 조각. 웹은 Blob, RN은 fetch가 네이티브 파일로 읽는 `{ uri, name, type }`를
+ * FormData에 그대로 넣는다 — api-client는 플랫폼을 모르므로 호출자가 고른다.
+ */
+export type ProfilePhotoUpload = Blob | { uri: string; name: string; type: string };
 
 /**
  * PUT body로 그대로 넘길 수 있는 파트 한 조각. 웹은 Blob(게으른 slice), RN은 Uint8Array를
@@ -58,7 +67,17 @@ export interface RehearsalApiClient {
     /** 서버 refresh 세션 revoke + 로컬 토큰 삭제. 인자 없음 — 구현이 보관소에서 읽는다. */
     logout(): Promise<void>;
     me(): Promise<User>;
+    /** 이름 변경. trim 후 1~DISPLAY_NAME_MAX자. 성공하면 구독자에게 통지한다 (멤버 목록의 이름이 바뀐다) */
+    updateMe(input: UpdateMeInput): Promise<User>;
+    /** 프로필 사진 교체. 응답의 profileImageUrl은 새 사진 URL */
+    setPhoto(photo: ProfilePhotoUpload): Promise<User>;
+    /** 프로필 사진 제거 — 제공자 사진도 함께 지워져 이니셜만 남는다 */
+    removePhoto(): Promise<void>;
     deleteAccount(): Promise<void>;
+  };
+  support: {
+    /** Contact us 전송. 서버가 저장하고 운영 채널에 알린다 */
+    send(input: CreateSupportRequestInput): Promise<SupportRequestCreated>;
   };
   bands: {
     list(): Promise<Band[]>;

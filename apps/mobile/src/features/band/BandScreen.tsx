@@ -145,14 +145,9 @@ export function BandScreen() {
   return (
     <Screen>
       <View style={{ paddingHorizontal: space.screenX, paddingBottom: 10, gap: 8 }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <MonoLabel color={colors.textMuted} style={{ letterSpacing: 1.8 }}>
-            {t("band.header.yourBand")}
-          </MonoLabel>
-          <PressableOpacity onPress={() => router.push("/settings")} style={{ padding: 4 }}>
-            <AppText style={{ fontSize: 16, color: colors.textMuted }}>⚙</AppText>
-          </PressableOpacity>
-        </View>
+        <MonoLabel color={colors.textMuted} style={{ letterSpacing: 1.8 }}>
+          {t("band.header.yourBand")}
+        </MonoLabel>
         <AppText variant="titleXL">{bandName}</AppText>
         <MonoLabel>{t("band.header.members", { n: band?.memberCount ?? 0 })}</MonoLabel>
       </View>

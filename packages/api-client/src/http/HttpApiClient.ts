@@ -9,14 +9,17 @@ import type {
   CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
+  CreateSupportRequestInput,
   CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
   Session,
+  SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
+  UpdateMeInput,
   UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
@@ -24,6 +27,7 @@ import type {
   User,
 } from "@bandapp/types";
 import type {
+  ProfilePhotoUpload,
   RehearsalApiClient,
   TokenStorage,
   UploadProgress,
@@ -78,7 +82,9 @@ export class HttpApiClient implements RehearsalApiClient {
     config?: RequestConfig,
   ): Promise<T> {
     const headers: Record<string, string> = {};
-    if (body !== undefined) headers["content-type"] = "application/json";
+    // FormData는 런타임이 boundary 포함 content-type을 붙인다 — 직접 넣으면 boundary가 빠져 서버가 못 읽는다
+    const isForm = typeof FormData !== "undefined" && body instanceof FormData;
+    if (body !== undefined && !isForm) headers["content-type"] = "application/json";
     if (config?.auth !== false) {
       const access = await this.opts.tokens.getAccessToken();
       if (access) headers.authorization = `Bearer ${access}`;
@@ -86,7 +92,7 @@ export class HttpApiClient implements RehearsalApiClient {
     const res = await this.fetchFn(`${this.opts.baseUrl}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401 && config?.auth !== false && !config?.isRetry) {
       if (await this.refreshOnce()) {
@@ -181,10 +187,32 @@ export class HttpApiClient implements RehearsalApiClient {
       await this.opts.tokens.clear();
     },
     me: (): Promise<User> => this.request<User>("GET", "/me"),
+    updateMe: async (input: UpdateMeInput): Promise<User> => {
+      const user = await this.request<User>("PATCH", "/me", input);
+      this.emit();
+      return user;
+    },
+    setPhoto: async (photo: ProfilePhotoUpload): Promise<User> => {
+      const form = new FormData();
+      // RN의 FormData는 { uri, name, type } 객체를 파일로 읽는다 — DOM 타입에는 없는 모양이라 캐스팅한다
+      form.append("photo", photo as Blob);
+      const user = await this.request<User>("PUT", "/me/photo", form);
+      this.emit();
+      return user;
+    },
+    removePhoto: async (): Promise<void> => {
+      await this.request<void>("DELETE", "/me/photo");
+      this.emit();
+    },
     deleteAccount: async (): Promise<void> => {
       await this.request<void>("DELETE", "/me");
       await this.opts.tokens.clear();
     },
+  };
+
+  support = {
+    send: (input: CreateSupportRequestInput): Promise<SupportRequestCreated> =>
+      this.request<SupportRequestCreated>("POST", "/support/requests", input),
   };
 
   bands = {

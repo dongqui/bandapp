@@ -7,6 +7,7 @@ import { apiErrorMessage } from "@/i18n/apiErrorMessage";
 import { space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, MonoLabel, PressableOpacity, Screen, useToast } from "@/ui";
 import { BillingHeader } from "./BillingHeader";
+import { paramsToCtx } from "./billingContext";
 import { fmtH, PLAN_SEC } from "./billingView";
 import { useBandBilling } from "./useBandBilling";
 
@@ -75,7 +76,7 @@ export function LinkedBandsScreen() {
 
   return (
     <Screen>
-      <BillingHeader back={t("billing.b01a.back")} onBack={() => router.back()} />
+      <BillingHeader back={paramsToCtx(params).from === "me" ? t("me.title") : t("billing.b01a.back")} onBack={() => router.back()} />
       <View style={{ paddingHorizontal: space.screenX, gap: 6, paddingBottom: 14 }}>
         <AppText variant="title">{t("billing.b01a.title")}</AppText>
         <AppText variant="caption">{t("billing.b01a.sub", { plan: planLabel, time })}</AppText>

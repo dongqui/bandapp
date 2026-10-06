@@ -19,6 +19,8 @@ interface AuthContextValue {
   signInWithApple(): Promise<LoginResponse>;
   signOut(): Promise<void>;
   deleteAccount(): Promise<void>;
+  /** 이름·사진 변경 응답을 반영한다. 로그인 상태가 아니면 무시 */
+  updateUser(user: User): void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -123,8 +125,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ status: "guest" });
   }
 
+  function updateUser(user: User): void {
+    setState((prev) => (prev.status === "authenticated" ? { status: "authenticated", user } : prev));
+  }
+
   return (
-    <AuthContext.Provider value={{ state, signInWithGoogle, signInWithApple, signOut, deleteAccount }}>
+    <AuthContext.Provider value={{ state, signInWithGoogle, signInWithApple, signOut, deleteAccount, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

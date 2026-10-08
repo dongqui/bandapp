@@ -262,6 +262,8 @@ export const takes = pgTable(
     // 재컷 진행 상태 — updating이면 앱이 재생을 막는다. 실패 사유는 audio_error (결정 3)
     audioStatus: takeAudioStatus("audio_status").notNull().default("ready"),
     audioError: text("audio_error"),
+    // 사용자가 Edit 화면에서 직접 만든 take (2026-10-08). 분석(재분석)이 지우지 않고, Gemini 후보는 이 구간을 피해 잘린다
+    manual: boolean("manual").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("takes_session_index_uq").on(t.sessionId, t.index)],

@@ -30,6 +30,12 @@ export interface UpdateTakeInput {
   version: number;
 }
 
+/** 수동 take 만들기 (2026-10-08 Edit 화면 "Add take"). 서버가 index·이름을 정하고 재컷 잡으로 오디오를 만든다 */
+export interface CreateTakeInput {
+  startMs: number;
+  endMs: number;
+}
+
 export interface TakeComment {
   id: string;
   sessionId: string;

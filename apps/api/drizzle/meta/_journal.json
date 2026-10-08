@@ -85,6 +85,13 @@
       "when": 1791290783681,
       "tag": "0011_married_black_cat",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791445040871,
+      "tag": "0012_manual_takes",
+      "breakpoints": true
     }
   ]
 }

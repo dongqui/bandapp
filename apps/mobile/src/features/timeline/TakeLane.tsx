@@ -25,23 +25,28 @@ const PILL_MIN_W = 12;
  */
 function TakePill({
   take,
+  label,
   vp,
   draft,
   selected,
   onPress,
 }: {
-  take: Take;
+  /** 저장된 경계. 새 take 초안(2026-10-08)은 아직 없으니 null — 초안만 따라간다 */
+  take: Take | null;
+  label: string;
   vp: TimelineViewportState;
   draft: SharedValue<Draft | null>;
   selected: boolean;
-  onPress: () => void;
+  onPress?: () => void;
 }) {
   const { colors } = useTheme();
   const style = useAnimatedStyle(() => {
     const v = { startMs: vp.startMs.value, msPerPx: vp.msPerPx.value, widthPx: vp.widthPx.value };
     const d = selected ? draft.value : null;
-    const x0 = timeToX(v, d ? d.startMs : take.startMs);
-    const x1 = timeToX(v, d ? d.endMs : take.endMs);
+    const s = d ? d.startMs : take ? take.startMs : 0;
+    const e = d ? d.endMs : take ? take.endMs : 0;
+    const x0 = timeToX(v, s);
+    const x1 = timeToX(v, e);
     const visible = v.widthPx > 0 && x1 > 0 && x0 < v.widthPx;
     const left = Math.max(-2, x0);
     const right = Math.min(v.widthPx + 2, x1);
@@ -64,7 +69,7 @@ function TakePill({
         }}
       >
         <AppText numberOfLines={1} style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 0.6, color: selected ? colors.text : colors.textMuted }}>
-          {`T${take.index + 1}`}
+          {label}
         </AppText>
       </Pressable>
     </Animated.View>
@@ -77,6 +82,7 @@ export function TakeLane({
   kick,
   draft,
   selectedTakeId,
+  newTake = false,
   onSelect,
 }: {
   takes: Take[];
@@ -85,11 +91,13 @@ export function TakeLane({
   kick: number;
   draft: SharedValue<Draft | null>;
   selectedTakeId: string | null;
+  /** 새 take 초안이 살아 있다 — 초안을 따라가는 "NEW" 필을 더 그린다 (2026-10-08) */
+  newTake?: boolean;
   onSelect: (take: Take) => void;
 }) {
   const { colors } = useTheme();
   const remount = useRemountKey(kick);
-  if (takes.length === 0) {
+  if (takes.length === 0 && !newTake) {
     return (
       <View style={{ height: LANE_H, alignItems: "center", justifyContent: "center", borderWidth: 1, borderStyle: "dashed", borderColor: colors.borderStrong, borderRadius: 8 }}>
         <AppText style={{ fontFamily: font.mono, fontSize: 10, letterSpacing: 1.4, color: colors.textFaint }}>NO TAKES IN THIS RECORDING</AppText>
@@ -99,8 +107,9 @@ export function TakeLane({
   return (
     <View style={{ height: LANE_H, overflow: "hidden" }}>
       {takes.map((t) => (
-        <TakePill key={`${t.id}:${remount}`} take={t} vp={vp} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} />
+        <TakePill key={`${t.id}:${remount}`} take={t} label={`T${t.index + 1}`} vp={vp} draft={draft} selected={t.id === selectedTakeId} onPress={() => onSelect(t)} />
       ))}
+      {newTake ? <TakePill key={`new:${remount}`} take={null} label="NEW" vp={vp} draft={draft} selected /> : null}
     </View>
   );
 }

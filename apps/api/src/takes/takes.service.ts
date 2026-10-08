@@ -1,12 +1,13 @@
 import { BadRequestException, ConflictException, Logger, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { checkTakeRange, defaultTakeName, neighborsOf, type AudioUrl, type Take, type TakeAudioStatus, type TakeCandidateType, type TakeRangeError, type UpdateTakeInput } from "@bandapp/types";
+import { checkTakeRange, defaultTakeName, neighborsAt, neighborsOf, type AudioUrl, type CreateTakeInput, type Take, type TakeAudioStatus, type TakeCandidateType, type TakeRangeError, type UpdateTakeInput } from "@bandapp/types";
 import { AnalysisProducer } from "../analysis/analysis.producer.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { comments, sessions, takes } from "../db/schema.js";
-import { type SessionRow } from "../sessions/session-mapper.js";
+import { takeKey, type SessionRow } from "../sessions/session-mapper.js";
 import { PRESIGN_EXPIRES_SEC, SessionsService } from "../sessions/sessions.service.js";
 import { StorageService } from "../storage/storage.service.js";
 
@@ -65,6 +66,16 @@ const RANGE_MESSAGES: Record<TakeRangeError, string> = {
   take_overlap: "옆 take와 겹칠 수 없어요.",
 };
 
+/**
+ * take를 만들거나 고칠 수 있는 세션 상태. 2026-10-08까지는 ready만이었지만 수동 take가 생기면서 분석 안 한
+ * 세션(waiting_for_time·failed)에서도 허용한다 — 막는 건 워커가 take를 쓰고 있는 analyzing과 녹음이 아직 없는 uploading.
+ */
+function assertEditable(session: SessionRow, verb: string): void {
+  if (session.status === "analyzing" || session.status === "uploading") {
+    throw new ConflictException({ message: `분석 중에는 take를 ${verb} 수 없어요.`, code: "session_not_ready" });
+  }
+}
+
 export class TakesService {
   private readonly logger = new Logger(TakesService.name);
 
@@ -77,8 +88,65 @@ export class TakesService {
 
   async list(sessionId: string, userId: string): Promise<Take[]> {
     await this.sessions.loadForMember(sessionId, userId);
-    const rows = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.sessionId, sessionId)).orderBy(asc(takes.index));
+    // 시간 순 — 수동 take는 index가 제일 크면서 시간상 중간에 들어간다 (2026-10-08)
+    const rows = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.sessionId, sessionId)).orderBy(asc(takes.startMs), asc(takes.index));
     return rows.map(toTake);
+  }
+
+  /**
+   * 수동 take (2026-10-08 Edit 화면 "Add take"). index는 세션의 다음 번호, 이름은 기본 이름. 오디오는 아직 없다 —
+   * 재컷 잡이 `{takeId}-v1` 키에 잘라 올리므로 objectKey를 그 키로 미리 적고 updating으로 시작한다 (update()와 같은 흐름).
+   * 분석 안 한 세션에도 만들 수 있지만 길이를 모르면(durationMs null) 범위를 검사할 수 없어 막는다.
+   */
+  async create(sessionId: string, userId: string, input: CreateTakeInput): Promise<Take> {
+    const session = await this.sessions.loadForMember(sessionId, userId);
+    assertEditable(session, "만들");
+    if (session.durationMs === null) throw new ConflictException({ message: "녹음 길이를 아직 몰라 take를 만들 수 없어요.", code: "session_not_ready" });
+    const siblings = await this.db.select({ index: takes.index, startMs: takes.startMs, endMs: takes.endMs }).from(takes).where(eq(takes.sessionId, sessionId));
+    const error = checkTakeRange(input.startMs, input.endMs, session.durationMs, neighborsAt(siblings, input.startMs));
+    if (error) throw new BadRequestException({ message: RANGE_MESSAGES[error], code: error });
+
+    const takeId = randomUUID();
+    const version = 1;
+    const index = siblings.reduce((m, t) => Math.max(m, t.index + 1), 0);
+    await this.db.transaction(async (tx) => {
+      await tx.insert(takes).values({
+        id: takeId,
+        sessionId,
+        index,
+        name: defaultTakeName(index),
+        startMs: input.startMs,
+        endMs: input.endMs,
+        type: "PERFORMANCE",
+        confidence: 1,
+        objectKey: takeKey(session.bandId, sessionId, `${takeId}-v${version}`),
+        peaks: null,
+        version,
+        audioStatus: "updating",
+        manual: true,
+      });
+      await tx
+        .update(sessions)
+        .set({ takeCount: sql`${sessions.takeCount} + 1`, updatedAt: new Date() })
+        .where(eq(sessions.id, sessionId));
+    });
+    await this.enqueueRecutOrFail(takeId, version);
+    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
+    return toTake(row);
+  }
+
+  /** 큐 실패는 사용자가 Save/Retry를 다시 눌러 복구한다 — 세션 enqueue 실패와 같은 패턴 */
+  private async enqueueRecutOrFail(takeId: string, version: number): Promise<void> {
+    try {
+      await this.producer.enqueueRecut(takeId, version);
+    } catch (err) {
+      this.logger.error(`failed to enqueue recut for take ${takeId}: ${String(err)}`);
+      await this.db
+        .update(takes)
+        .set({ audioStatus: "failed", audioError: "재컷 요청을 보내지 못했어요." })
+        .where(and(eq(takes.id, takeId), eq(takes.version, version)));
+    }
   }
 
   /** take → 세션 순으로 검증한다 (sessions.loadForMember가 멤버십을 확인한다). 없으면 404, 멤버가 아니면 403. */
@@ -110,7 +178,7 @@ export class TakesService {
    */
   async update(takeId: string, userId: string, input: UpdateTakeInput): Promise<Take> {
     const { take, session } = await this.loadWithSession(takeId, userId);
-    if (session.status !== "ready") throw new ConflictException({ message: "분석 중에는 take를 고칠 수 없어요.", code: "session_not_ready" });
+    assertEditable(session, "고칠");
     if (input.version !== take.version) throw new ConflictException({ message: "다른 멤버가 먼저 고쳤어요.", code: "take_version_conflict" });
     const siblings = await this.db.select({ index: takes.index, startMs: takes.startMs, endMs: takes.endMs }).from(takes).where(eq(takes.sessionId, take.sessionId));
     const error = checkTakeRange(input.startMs, input.endMs, session.durationMs ?? 0, neighborsOf(siblings, take.index));
@@ -129,16 +197,7 @@ export class TakesService {
       if (shiftMs !== 0) await tx.update(comments).set({ atMs: sql`${comments.atMs} + ${shiftMs}` }).where(eq(comments.takeId, takeId));
     });
 
-    try {
-      await this.producer.enqueueRecut(takeId, nextVersion);
-    } catch (err) {
-      // 큐 실패는 사용자가 Save를 다시 눌러 복구한다 — 세션 enqueue 실패와 같은 패턴
-      this.logger.error(`failed to enqueue recut for take ${takeId}: ${String(err)}`);
-      await this.db
-        .update(takes)
-        .set({ audioStatus: "failed", audioError: "재컷 요청을 보내지 못했어요." })
-        .where(and(eq(takes.id, takeId), eq(takes.version, nextVersion)));
-    }
+    await this.enqueueRecutOrFail(takeId, nextVersion);
     const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
     // 트랜잭션과 재조회 사이에 다른 멤버가 지웠을 수 있다 — non-null assertion 대신 명시적으로 404
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
@@ -161,7 +220,7 @@ export class TakesService {
   /** 삭제 (결정 1·6). 코멘트는 FK cascade. 남은 take의 name·index는 그대로. 객체 삭제 실패는 정리 배치(백로그)가 줍는다 */
   async remove(takeId: string, userId: string): Promise<void> {
     const { take, session } = await this.loadWithSession(takeId, userId);
-    if (session.status !== "ready") throw new ConflictException({ message: "분석 중에는 take를 지울 수 없어요.", code: "session_not_ready" });
+    assertEditable(session, "지울");
     await this.db.transaction(async (tx) => {
       await tx.delete(takes).where(eq(takes.id, takeId));
       await tx

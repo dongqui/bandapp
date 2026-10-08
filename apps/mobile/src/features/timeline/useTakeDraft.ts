@@ -1,4 +1,4 @@
-import { neighborsOf, type Neighbors, type Take } from "@bandapp/types";
+import { neighborsAt, neighborsOf, type Neighbors, type Take } from "@bandapp/types";
 import { useCallback, useState } from "react";
 import { useAnimatedReaction, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
@@ -13,6 +13,10 @@ export interface TakeDraftState {
   /** 초안이 저장된 값과 다른가 (React 미러) */
   dirty: boolean;
   begin: (take: Take, siblings: Take[]) => void;
+  /** 새 take 초안 (2026-10-08 "Add take") — 저장된 값이 없으니 original은 null이고 dirty는 화면이 isNew로 본다 */
+  beginNew: (draft: Draft, siblings: Take[]) => void;
+  /** JS가 초안을 통째로 바꾼다 — START/END 입력 (2026-10-08). dirty는 reaction이 다시 계산한다 */
+  set: (draft: Draft) => void;
   /** Cancel — 초안을 저장된 값으로 */
   reset: () => void;
   /** 선택 해제 */
@@ -63,6 +67,25 @@ export function useTakeDraft(): TakeDraftState {
     },
     [draft, neighbors, originalSV, lastDirty],
   );
+  const beginNew = useCallback(
+    (d: Draft, siblings: Take[]) => {
+      setOriginal(null);
+      setDirty(false);
+      neighbors.value = neighborsAt(siblings, d.startMs);
+      originalSV.value = null;
+      lastDirty.value = false;
+      draft.value = { ...d };
+      setEpoch((e) => e + 1);
+    },
+    [draft, neighbors, originalSV, lastDirty],
+  );
+  const set = useCallback(
+    (d: Draft) => {
+      draft.value = { ...d };
+      setEpoch((e) => e + 1);
+    },
+    [draft],
+  );
   const reset = useCallback(() => {
     if (original) draft.value = { ...original };
     lastDirty.value = false;
@@ -79,5 +102,5 @@ export function useTakeDraft(): TakeDraftState {
   }, [draft, originalSV, lastDirty]);
   const current = useCallback(() => draft.value, [draft]);
 
-  return { draft, neighbors, original, dirty, begin, reset, clear, current, epoch };
+  return { draft, neighbors, original, dirty, begin, beginNew, set, reset, clear, current, epoch };
 }

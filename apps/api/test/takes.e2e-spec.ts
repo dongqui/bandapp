@@ -40,7 +40,7 @@ describe("takes API", () => {
 
   const auth = (token: string) => ({ authorization: `Bearer ${token}` });
 
-  it("세션의 take를 index 순으로 commentCount와 함께 준다", async () => {
+  it("세션의 take를 시간 순으로 commentCount와 함께 준다", async () => {
     const [first] = await db.select().from(takes).where(eq(takes.index, 0));
     await db.insert(comments).values({ sessionId, takeId: first!.id, authorId: owner.userId, atMs: 1000, text: "x" });
     const res = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
@@ -102,11 +102,17 @@ describe("takes API", () => {
       expect(beyond.body.code).toBe("take_range_invalid");
     });
 
-    it("세션이 ready가 아니면 409 session_not_ready", async () => {
+    it("세션이 분석 중이면 409 session_not_ready", async () => {
       await db.update(sessions).set({ status: "analyzing" }).where(eq(sessions.id, sessionId));
       const t1 = await takeByIndex(0);
       const res = await request(app.getHttpServer()).patch(`/takes/${t1.id}`).set(auth(owner.accessToken)).send({ startMs: 20_000, endMs: 240_000, version: 1 }).expect(409);
       expect(res.body.code).toBe("session_not_ready");
+    });
+
+    it("분석 안 한 세션(waiting_for_time)의 수동 take는 고칠 수 있다 (2026-10-08)", async () => {
+      await db.update(sessions).set({ status: "waiting_for_time" }).where(eq(sessions.id, sessionId));
+      const t1 = await takeByIndex(0);
+      await request(app.getHttpServer()).patch(`/takes/${t1.id}`).set(auth(owner.accessToken)).send({ startMs: 20_000, endMs: 240_000, version: 1 }).expect(200);
     });
 
     it("큐 발행이 실패하면 failed로 남는다", async () => {
@@ -150,6 +156,63 @@ describe("takes API", () => {
     });
   });
 
+  describe("POST /sessions/:id/takes (2026-10-08 수동 take)", () => {
+    const create = (body: unknown, token = owner.accessToken) => request(app.getHttpServer()).post(`/sessions/${sessionId}/takes`).set(auth(token)).send(body);
+
+    it("다음 index·기본 이름으로 updating 상태의 take를 만들고 재컷 잡을 v1로 발행한다", async () => {
+      const res = await create({ startMs: 260_000, endMs: 290_000 }).expect(201);
+      expect(res.body).toMatchObject({ sessionId, index: 2, name: "Take 3", startMs: 260_000, endMs: 290_000, durationSec: 30, type: "PERFORMANCE", commentCount: 0, peaks: null, version: 1, audioStatus: "updating" });
+      const [row] = await db.select().from(takes).where(eq(takes.id, res.body.id));
+      expect(row!.manual).toBe(true);
+      expect(row!.objectKey).toBe(`bands/${bandId}/sessions/${sessionId}/takes/${res.body.id}-v1.m4a`);
+      expect(producer.recuts).toEqual([{ takeId: res.body.id, version: 1 }]);
+      const [s] = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      expect(s!.takeCount).toBe(3);
+    });
+
+    it("목록은 시간 순이라 중간에 넣은 take가 가운데 온다", async () => {
+      const res = await create({ startMs: 260_000, endMs: 290_000 }).expect(201);
+      const list = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
+      expect(list.body.map((t: { id: string }) => t.id)).toEqual([(await takeByIndex(0)).id, res.body.id, (await takeByIndex(1)).id]);
+    });
+
+    it("기존 take와 겹치면 400 take_overlap, 범위 밖이면 400 take_range_invalid", async () => {
+      expect((await create({ startMs: 240_000, endMs: 290_000 }).expect(400)).body.code).toBe("take_overlap");
+      expect((await create({ startMs: 260_000, endMs: 310_000 }).expect(400)).body.code).toBe("take_overlap");
+      expect((await create({ startMs: 500_000, endMs: 600_001 }).expect(400)).body.code).toBe("take_range_invalid");
+      await create({ startMs: 1.5, endMs: 5000 }).expect(400);
+      await create({ startMs: 260_000 }).expect(400);
+    });
+
+    it("분석 중이면 409 session_not_ready, 분석 안 한 세션(waiting_for_time·failed)엔 만들 수 있다", async () => {
+      await db.update(sessions).set({ status: "analyzing" }).where(eq(sessions.id, sessionId));
+      expect((await create({ startMs: 260_000, endMs: 290_000 }).expect(409)).body.code).toBe("session_not_ready");
+      await db.update(sessions).set({ status: "waiting_for_time" }).where(eq(sessions.id, sessionId));
+      await create({ startMs: 260_000, endMs: 290_000 }).expect(201);
+      await db.update(sessions).set({ status: "failed" }).where(eq(sessions.id, sessionId));
+      await create({ startMs: 500_000, endMs: 560_000 }).expect(201);
+    });
+
+    it("길이를 모르는 세션(durationMs null)이면 409 session_not_ready", async () => {
+      await db.update(sessions).set({ status: "waiting_for_time", durationMs: null }).where(eq(sessions.id, sessionId));
+      expect((await create({ startMs: 260_000, endMs: 290_000 }).expect(409)).body.code).toBe("session_not_ready");
+    });
+
+    it("큐 발행이 실패하면 failed로 만들어진다", async () => {
+      producer.failNext = true;
+      const res = await create({ startMs: 260_000, endMs: 290_000 }).expect(201);
+      expect(res.body.audioStatus).toBe("failed");
+    });
+
+    it("비멤버는 403, 없는 세션은 404", async () => {
+      const other = await createTestApp({ google: providerUser("stranger-1", "S"), storage: new FakeStorage() });
+      const stranger = await loginAs(other);
+      await other.close();
+      await create({ startMs: 260_000, endMs: 290_000 }, stranger.accessToken).expect(403);
+      await request(app.getHttpServer()).post("/sessions/00000000-0000-0000-0000-000000000000/takes").set(auth(owner.accessToken)).send({ startMs: 0, endMs: 1000 }).expect(404);
+    });
+  });
+
   describe("DELETE /takes/:id", () => {
     it("행·코멘트가 사라지고 takeCount가 줄고 객체가 지워진다", async () => {
       const t1 = await takeByIndex(0);
@@ -166,10 +229,12 @@ describe("takes API", () => {
       await request(app.getHttpServer()).get(`/takes/${t1.id}/audio`).set(auth(owner.accessToken)).expect(404);
     });
 
-    it("세션이 ready가 아니면 409", async () => {
+    it("세션이 분석 중이면 409, waiting_for_time이면 지울 수 있다", async () => {
       await db.update(sessions).set({ status: "analyzing" }).where(eq(sessions.id, sessionId));
       const t1 = await takeByIndex(0);
       await request(app.getHttpServer()).delete(`/takes/${t1.id}`).set(auth(owner.accessToken)).expect(409);
+      await db.update(sessions).set({ status: "waiting_for_time" }).where(eq(sessions.id, sessionId));
+      await request(app.getHttpServer()).delete(`/takes/${t1.id}`).set(auth(owner.accessToken)).expect(204);
     });
 
     it("비멤버는 403, 없는 take는 404", async () => {

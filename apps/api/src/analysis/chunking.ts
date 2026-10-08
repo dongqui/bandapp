@@ -79,3 +79,28 @@ export function padCandidates(candidates: TakeCandidate[], durationMs: number, o
     };
   });
 }
+
+export interface Blocked {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * 수동 take(blocked)와 겹치는 구간을 후보에서 도려낸다 (2026-10-08 — 분석이 수동 take를 지우지 않는다).
+ * 후보 한가운데에 수동 take가 있으면 양쪽 조각이 남고, minMs보다 짧은 조각은 버린다 — 5초 패딩만 남은 조각 같은 것.
+ * 입력은 padCandidates까지 거친(겹침 없는) 목록이어야 하고 순서는 유지된다.
+ */
+export function carveAround(candidates: TakeCandidate[], blocked: ReadonlyArray<Blocked>, minMs: number = DEFAULT_MERGE.minDurationMs): TakeCandidate[] {
+  const walls = [...blocked].sort((a, b) => a.startMs - b.startMs);
+  const out: TakeCandidate[] = [];
+  for (const c of candidates) {
+    let cursor = c.startMs;
+    for (const w of walls) {
+      if (w.endMs <= cursor || w.startMs >= c.endMs) continue;
+      if (w.startMs > cursor) out.push({ ...c, startMs: cursor, endMs: w.startMs });
+      cursor = Math.max(cursor, w.endMs);
+    }
+    if (cursor < c.endMs) out.push({ ...c, startMs: cursor, endMs: c.endMs });
+  }
+  return out.filter((t) => t.endMs - t.startMs >= minMs);
+}

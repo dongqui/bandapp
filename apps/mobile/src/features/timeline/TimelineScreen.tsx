@@ -2,11 +2,12 @@ import { ApiError } from "@bandapp/api-client";
 import { defaultTakeName, type Take } from "@bandapp/types";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View } from "react-native";
+import { TextInput, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAnimatedReaction, useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
+import Svg, { Path } from "react-native-svg";
 import { useApi } from "@/api";
 import { TakeActionSheet } from "@/features/takes/TakeActionSheet";
 import { TakeDeleteDialog } from "@/features/takes/TakeDeleteDialog";
@@ -17,9 +18,11 @@ import { useSession } from "@/features/takes/useSession";
 import { useTakes } from "@/features/takes/useTakes";
 import { useTakesPolling } from "@/features/takes/useTakesPolling";
 import { fmtClock, fmtDuration } from "@/lib/time";
+import { newTakeAt } from "@/lib/timeline/addTake";
 import { previewSeekMs, type Draft, type Handle } from "@/lib/timeline/edit";
-import { xToTime } from "@/lib/timeline/viewport";
-import { font, space, useTheme } from "@/theme";
+import { clockDigits, formatClockDigits, secToClockInput, validateTimeInput } from "@/lib/timeline/timeInput";
+import { viewportEndMs, xToTime } from "@/lib/timeline/viewport";
+import { font, radius, space, useTheme } from "@/theme";
 import { AppText, ConfirmDialog, PressableOpacity, Screen, useToast } from "@/ui";
 import { OverviewStrip } from "./OverviewStrip";
 import { Playhead } from "./Playhead";
@@ -94,6 +97,72 @@ function StatusLine({ text, color, dot }: { text: string; color: string; dot: bo
   );
 }
 
+/** 헤더의 "+ Add take" accent 필 (2026-10-08 디자인) */
+function AddTakeButton({ onPress }: { onPress: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <PressableOpacity
+      onPress={onPress}
+      hitSlop={6}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        backgroundColor: colors.accent,
+        borderRadius: 18,
+        paddingVertical: 9,
+        paddingLeft: 13,
+        paddingRight: 16,
+        shadowColor: "#000",
+        shadowOpacity: 0.35,
+        shadowRadius: 9,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 4,
+      }}
+    >
+      <Svg width={13} height={13} viewBox="0 0 12 12" fill="none" stroke={colors.bg} strokeWidth={2} strokeLinecap="round">
+        <Path d="M6 1.5v9M1.5 6h9" />
+      </Svg>
+      <AppText style={{ fontSize: 14, lineHeight: 17, fontWeight: "600", color: colors.bg }}>Add take</AppText>
+    </PressableOpacity>
+  );
+}
+
+/**
+ * 편집 카드의 START / END 시간 입력 (2026-10-08 디자인). 숫자 키패드만 쓰고 콜론은 오른쪽부터 자동으로 채운다 —
+ * 모바일 숫자 키패드에는 ':'가 없다 (lib/timeline/timeInput 설명 참고). 커밋은 blur·Enter.
+ */
+function TimeField({ label, digits, fallback, error, onChange, onCommit }: { label: string; digits: string | null; fallback: string; error: boolean; onChange: (digits: string) => void; onCommit: () => void }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+      <AppText style={{ fontFamily: font.mono, fontSize: 9, letterSpacing: 1.3, color: colors.textFaint }}>{label}</AppText>
+      <TextInput
+        value={digits !== null ? formatClockDigits(digits) : fallback}
+        onChangeText={(t) => onChange(clockDigits(t))}
+        onBlur={onCommit}
+        onSubmitEditing={onCommit}
+        keyboardType="number-pad"
+        returnKeyType="done"
+        selectTextOnFocus
+        placeholder="0:00"
+        placeholderTextColor={colors.textFaint}
+        style={{
+          backgroundColor: colors.surfaceSunken,
+          borderWidth: 1,
+          borderColor: error ? colors.danger : colors.borderStrong,
+          borderRadius: radius.chipSm,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          fontSize: 15,
+          fontFamily: font.mono,
+          color: colors.text,
+        }}
+      />
+    </View>
+  );
+}
+
 /** 디자인의 −1s / +1s 필 */
 function NudgeButton({ label, onPress }: { label: string; onPress: () => void }) {
   const { colors } = useTheme();
@@ -113,6 +182,8 @@ function NudgeButton({ label, onPress }: { label: string; onPress: () => void })
  * 때만 뜬다. take를 고르면 재생 위치도 그 시작으로 옮긴다(재생을 누르면 그 take가 들린다).
  * 2026-10-02: 재생 컨트롤 위에 전체 녹음 기준 프로그레스바가 생겼고 "⟲ PLAYHEAD" 필이 돌아왔다. 내비 오른쪽 ··· 가 선택
  * take의 이름 변경·삭제 시트를 연다(레인 롱프레스 진입점은 뺐다). Take Feedback의 "Edit take"는 `?take=`로 그 take를 열어 준다.
+ * 2026-10-08: 헤더의 "Add take"가 플레이헤드 위치에 새 take 초안(NEW 필·핸들)을 만든다 — 카드의 "Add take"가 POST로 저장한다.
+ * 내비의 범위 텍스트를 누르면 카드에 START/END 입력이 열려 드래그 대신 시간을 직접 칠 수 있다 (초안이 dirty가 아니면 Done으로 닫는다).
  */
 export function TimelineScreen() {
   const { id, take: initialTakeId } = useLocalSearchParams<{ id: string; take?: string }>();
@@ -144,6 +215,21 @@ export function TimelineScreen() {
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
   /** 카드의 범위 텍스트용 초안 미러. 초 단위라 초가 바뀔 때만 React로 넘긴다 (매 프레임 리렌더 방지) */
   const [draftRange, setDraftRange] = useState<Draft | null>(null);
+  /** 새 take 초안이 살아 있다 — 선택 take는 없고 초안만 있다 (2026-10-08). 항상 dirty로 친다 */
+  const [newTake, setNewTake] = useState(false);
+  const [adding, setAdding] = useState(false);
+  /** 선택 take의 START/END 입력을 열어 둔 상태 (내비 범위 텍스트 탭) */
+  const [timeEdit, setTimeEdit] = useState(false);
+  /** 입력 칸에 친 자리수. null이면 초안 값을 보여 준다 — 핸들을 끌면 비운다 */
+  const [typedStart, setTypedStart] = useState<string | null>(null);
+  const [typedEnd, setTypedEnd] = useState<string | null>(null);
+  const [inputError, setInputError] = useState("");
+  const clearTyped = useCallback(() => {
+    setTypedStart(null);
+    setTypedEnd(null);
+    setInputError("");
+  }, []);
+  const dirty = newTake || draftState.dirty;
 
   // 파형 탭 → seek. onTap이 vp를 필요로 하고 vp가 onTap을 받으니 ref로 순환을 끊는다
   const vpRef = useRef<TimelineViewportState | null>(null);
@@ -157,8 +243,14 @@ export function TimelineScreen() {
     },
     [clock],
   );
-  // 핸들을 놓으면 그 경계를 미리 들려준다 (스펙 B)
-  const onHandleRelease = useCallback((handle: Handle, d: Draft) => clock.seekTo(previewSeekMs(d, handle)), [clock]);
+  // 핸들을 놓으면 그 경계를 미리 들려준다 (스펙 B). 입력 칸에 치던 값은 버린다 — 초안이 진실이다
+  const onHandleRelease = useCallback(
+    (handle: Handle, d: Draft) => {
+      clearTyped();
+      clock.seekTo(previewSeekMs(d, handle));
+    },
+    [clock, clearTyped],
+  );
   const editing = useMemo(
     () => ({ draft: draftState.draft, neighbors: draftState.neighbors, onHandleRelease }),
     [draftState.draft, draftState.neighbors, onHandleRelease],
@@ -181,22 +273,70 @@ export function TimelineScreen() {
   const applySelect = useCallback(
     (t: Take) => {
       setSelectedTakeId(t.id);
+      setTimeEdit(false);
+      clearTyped();
       clock.seekTo(t.startMs);
       vp.fitTo(t.startMs, t.endMs, FIT_PAD);
       // playhead가 take 시작(화면 20% 지점)에 있으니 재생 중이어도 그대로 따라간다
       vp.follow.value = true;
     },
-    [vp, clock],
+    [vp, clock, clearTyped],
   );
-  // 초안이 dirty면 먼저 버릴지 묻는다
+  // 초안이 dirty면(새 take 초안 포함) 먼저 버릴지 묻는다
   const selectTake = useCallback(
     (t: Take) => {
-      if (t.id === selectedTakeId) return;
-      if (draftState.dirty) setPendingDiscard(() => () => applySelect(t));
+      if (t.id === selectedTakeId && !newTake) return;
+      if (dirty) setPendingDiscard(() => () => applySelect(t));
       else applySelect(t);
     },
-    [selectedTakeId, draftState.dirty, applySelect],
+    [selectedTakeId, newTake, dirty, applySelect],
   );
+
+  /** 초안이 화면 밖이면 보이게 맞춘다 (디자인: 밖일 때만 fit) */
+  const ensureVisible = useCallback(
+    (d: Draft) => {
+      const v = vp.snapshot();
+      if (d.startMs < v.startMs || d.endMs > viewportEndMs(v)) vp.fitTo(d.startMs, d.endMs, FIT_PAD);
+    },
+    [vp],
+  );
+
+  // "Add take" — 플레이헤드 위치에 새 take 초안. 기존 take 안이거나 자리가 없으면 토스트로 알린다 (2026-10-08 디자인)
+  const addTake = useCallback(() => {
+    const r = newTakeAt(clock.positionMs, takeList, durationMs);
+    if ("error" in r) {
+      toast.show(r.error === "inside" ? `Move the playhead outside ${r.take.name} first` : "Not enough room here for a take");
+      return;
+    }
+    const start = () => {
+      if (clock.playing) clock.toggle();
+      setSelectedTakeId(null);
+      setTimeEdit(false);
+      clearTyped();
+      setNewTake(true);
+      draftState.beginNew(r.draft, takeList);
+      ensureVisible(r.draft);
+    };
+    if (dirty) setPendingDiscard(() => start);
+    else start();
+  }, [clock, takeList, durationMs, toast, dirty, clearTyped, draftState, ensureVisible]);
+
+  const discardNew = useCallback(() => {
+    setNewTake(false);
+    draftState.clear();
+    clearTyped();
+  }, [draftState, clearTyped]);
+
+  // 새 take를 저장한 뒤 목록이 다시 오면 그 take를 선택한다 — 목록이 오기 전에 선택하면 "지워진 take" 분기가 선택을 풀어 버린다
+  const pendingSelectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = pendingSelectRef.current;
+    if (!id) return;
+    const t = takeList.find((x) => x.id === id);
+    if (!t) return;
+    pendingSelectRef.current = null;
+    applySelect(t);
+  }, [takeList, applySelect]);
 
   // 화면은 첫 take에서 시작한다 (2026-09-20 디자인 개정). Take Feedback의 "Edit take"로 왔으면(?take=) 그 take에서.
   // 한 번만 — 이후 선택 해제(삭제·409)는 그대로 둔다
@@ -220,8 +360,8 @@ export function TimelineScreen() {
   }, [clock.error, toast]);
 
   const selectedTake = useMemo(() => takeList.find((t) => t.id === selectedTakeId) ?? null, [takeList, selectedTakeId]);
-  /** 핸들·초안은 선택 take가 ready이고 피크가 다 로드된 뒤에만 산다 (디자인 노트 editOn) */
-  const editOn = selectedTake !== null && selectedTake.audioStatus === "ready" && !peaks.loading;
+  /** 핸들·초안은 선택 take가 ready이고 피크가 다 로드된 뒤에만 산다 (디자인 노트 editOn). 새 take 초안은 항상 */
+  const editOn = newTake || (selectedTake !== null && selectedTake.audioStatus === "ready" && !peaks.loading);
 
   // 목록이 새로고침되면(폴링·저장 후) 선택 take의 최신 값으로 original을 맞추되 dirty 초안은 유지한다.
   // 편집할 수 없는 상태(updating/failed·피크 로딩 중)면 초안을 비워 핸들과 hit-test를 같이 끈다.
@@ -241,9 +381,9 @@ export function TimelineScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTakeId, selectedTake?.version, selectedTake?.audioStatus, editOn, takeList]);
 
-  // 저장하지 않은 초안을 두고 화면을 떠나려 하면 먼저 묻는다
+  // 저장하지 않은 초안(새 take 포함)을 두고 화면을 떠나려 하면 먼저 묻는다
   useEffect(() => {
-    if (!draftState.dirty) return;
+    if (!dirty) return;
     const off = navigation.addListener("beforeRemove", (e) => {
       e.preventDefault();
       // 리스너를 먼저 떼야 한다 — reset()의 state 갱신은 dispatch보다 늦게 커밋되므로 그대로 두면 다시 막힌다
@@ -253,7 +393,7 @@ export function TimelineScreen() {
       });
     });
     return off;
-  }, [navigation, draftState.dirty]);
+  }, [navigation, dirty]);
 
   const save = useCallback(async () => {
     const t = selectedTake;
@@ -283,6 +423,41 @@ export function TimelineScreen() {
     }
   }, [api, draftState, reloadTakes, saving, selectedTake, toast]);
 
+  // 카드의 "Add take" — 초안을 POST로 저장한다. 응답은 updating이라 폴링이 ready를 기다린다
+  const addNew = useCallback(async () => {
+    const d = draftState.current();
+    if (!d || !session || adding) return;
+    setAdding(true);
+    try {
+      const created = await api.takes.create(session.id, { startMs: d.startMs, endMs: d.endMs });
+      toast.show(`${created.name} added`);
+      pendingSelectRef.current = created.id;
+      discardNew();
+      reloadTakes();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "take_overlap") toast.show("Can’t overlap another take");
+      else if (err instanceof ApiError && err.code === "take_range_invalid") toast.show("Invalid take range");
+      else if (err instanceof ApiError && err.code === "session_not_ready") toast.show("Can’t add a take while this session is analyzing");
+      else toast.show("Something went wrong");
+    } finally {
+      setAdding(false);
+    }
+  }, [api, draftState, session, adding, toast, discardNew, reloadTakes]);
+
+  // START/END 입력 커밋 (blur·Enter). 안 건드린 칸은 초안의 정확한 ms를 쓴다. 통과하면 초안을 바꾸고 화면 밖이면 보이게 맞춘다
+  const commitInputs = useCallback(() => {
+    const d = draftState.current();
+    if (!d || (typedStart === null && typedEnd === null)) return;
+    const r = validateTimeInput(typedStart ?? { ms: d.startMs }, typedEnd ?? { ms: d.endMs }, { ...draftState.neighbors.value, durationMs });
+    if ("error" in r) {
+      setInputError(r.error);
+      return;
+    }
+    clearTyped();
+    draftState.set(r);
+    ensureVisible(r);
+  }, [draftState, typedStart, typedEnd, durationMs, clearTyped, ensureVisible]);
+
   const doDelete = () => {
     const t = confirmDelete;
     if (!t || deleting) return;
@@ -306,34 +481,42 @@ export function TimelineScreen() {
 
   if (!session) return <Screen>{null}</Screen>;
   const durLabel = `${fmtDuration(session.durationSec)} · ${takeList.length === 0 ? "No takes" : `${takeList.length} Takes`}`;
-  // 카드의 범위 텍스트 — 초안이 dirty면 초안 값, 아니면 저장된 값 (디자인 노트)
-  const edited = draftState.dirty ? draftRange : null;
-  const navRange = !selectedTake
-    ? ""
-    : edited
-      ? `${fmtClock(edited.startMs / 1000)} – ${fmtClock(edited.endMs / 1000)}`
-      : `${fmtClock(selectedTake.startMs / 1000)} – ${fmtClock(selectedTake.endMs / 1000)}`;
-  const rangeLabel = !selectedTake
-    ? ""
-    : edited
-      ? `${fmtClock(edited.startMs / 1000)} – ${fmtClock(edited.endMs / 1000)} · ${fmtClock((edited.endMs - edited.startMs) / 1000)}`
-      : `${fmtClock(selectedTake.startMs / 1000)} – ${fmtClock(selectedTake.endMs / 1000)} · ${fmtClock(selectedTake.durationSec)}`;
-  // 내비 라벨 — 기본 이름이면 `TAKE n / N`, 이름을 붙였으면 `T n · 이름` (2026-10-02 디자인)
-  const navLabel = !selectedTake
-    ? `${takeList.length} TAKES`
-    : selectedTake.name === defaultTakeName(selectedTake.index)
-      ? `TAKE ${selectedTake.index + 1} / ${takeList.length}`
-      : `T${selectedTake.index + 1} · ${selectedTake.name.toUpperCase()}`;
+  // 내비의 범위 텍스트 — 초안이 dirty면(새 take 포함) 초안 값, 아니면 저장된 값 (디자인 노트)
+  const edited = dirty ? draftRange : null;
+  const navRange = edited
+    ? `${fmtClock(edited.startMs / 1000)} – ${fmtClock(edited.endMs / 1000)}`
+    : selectedTake
+      ? `${fmtClock(selectedTake.startMs / 1000)} – ${fmtClock(selectedTake.endMs / 1000)}`
+      : "";
+  // 내비 라벨 — 기본 이름이면 `TAKE n / N`, 이름을 붙였으면 `T n · 이름` (2026-10-02 디자인). 새 take 초안은 NEW TAKE
+  const navLabel = newTake
+    ? "NEW TAKE"
+    : !selectedTake
+      ? `${takeList.length} TAKES`
+      : selectedTake.name === defaultTakeName(selectedTake.index)
+        ? `TAKE ${selectedTake.index + 1} / ${takeList.length}`
+        : `T${selectedTake.index + 1} · ${selectedTake.name.toUpperCase()}`;
+  // 새 take 초안 중에는 ‹ ›가 초안 앞뒤의 take로 간다 (시간 순)
+  const draftStart = draftRange?.startMs ?? 0;
+  const navPrev = newTake ? [...takeList].reverse().find((t) => t.startMs < draftStart) : prevTake;
+  const navNext = newTake ? takeList.find((t) => t.startMs > draftStart) : nextTake;
+  // 범위 텍스트 탭 → START/END 입력. 편집할 수 있는 take(또는 새 초안)일 때만
+  const canEditTime = newTake || (selectedTake !== null && selectedTake.audioStatus === "ready" && editOn);
+  const cardOn = newTake || (selectedTake !== null && (draftState.dirty || selectedTake.audioStatus !== "ready" || timeEdit));
+  const inputsOn = editOn && draftRange !== null;
+  const addOn = !peaks.loading && !newTake;
 
   return (
     <Screen>
-      <View style={{ paddingHorizontal: space.sheetX }}>
+      <View style={{ paddingHorizontal: space.sheetX, flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 34 }}>
         <PressableOpacity onPress={() => router.back()} style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", padding: 8 }}>
           <AppText style={{ fontSize: 18, lineHeight: 20, color: colors.textMuted }}>‹</AppText>
           <AppText variant="body" color={colors.textMuted}>
             Session
           </AppText>
         </PressableOpacity>
+        {/* 플레이헤드 위치에 새 take (2026-10-08 디자인). 파형 로딩 중이거나 이미 초안이 있으면 숨긴다 */}
+        {addOn ? <AddTakeButton onPress={addTake} /> : null}
       </View>
       <View style={{ paddingHorizontal: space.screenX, paddingTop: 2, paddingBottom: 4, gap: 5 }}>
         {/* DEBUG는 왼쪽에 — 오른쪽 위는 Expo dev client의 톱니 버튼이 덮는다 */}
@@ -387,52 +570,86 @@ export function TimelineScreen() {
         ) : null}
       </View>
       <View style={{ marginTop: 10, marginHorizontal: space.screenX }}>
-        <TakeLane takes={takeList} vp={vp} kick={kick} draft={draftState.draft} selectedTakeId={selectedTakeId} onSelect={selectTake} />
+        <TakeLane takes={takeList} vp={vp} kick={kick} draft={draftState.draft} selectedTakeId={selectedTakeId} newTake={newTake} onSelect={selectTake} />
       </View>
       <View style={{ marginTop: 14, marginHorizontal: space.screenX }}>
         <OverviewStrip levels={peaks.levels} vp={vp} takes={takeList} durationMs={durationMs} playheadMs={clock.playheadMs} kick={kick} seekEpoch={clock.seekEpoch} />
       </View>
-      {takeList.length > 0 ? (
+      {takeList.length > 0 || newTake ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, marginTop: 14, marginHorizontal: space.screenX }}>
-          {/* 선택 take의 메뉴(이름 변경·삭제) — 내비 줄 오른쪽 끝 (2026-10-02 디자인) */}
-          {selectedTake ? <TakeMoreButton onPress={() => setActionTake(selectedTake)} style={{ position: "absolute", right: 0 }} /> : null}
-          <NavButton label="‹" enabled={prevTake !== undefined} onPress={() => prevTake && selectTake(prevTake)} />
+          {/* 선택 take의 메뉴(이름 변경·삭제) — 내비 줄 오른쪽 끝 (2026-10-02 디자인). 새 take 초안에는 없다 */}
+          {selectedTake && !newTake ? <TakeMoreButton onPress={() => setActionTake(selectedTake)} style={{ position: "absolute", right: 0 }} /> : null}
+          <NavButton label="‹" enabled={navPrev !== undefined} onPress={() => navPrev && selectTake(navPrev)} />
           <View style={{ minWidth: 132, alignItems: "center", gap: 4 }}>
             <AppText numberOfLines={1} style={{ maxWidth: 170, fontFamily: font.mono, fontSize: 11, letterSpacing: 1.3, color: colors.textSecondary }}>
               {navLabel}
             </AppText>
-            {/* 선택 take의 범위 — 초안이 dirty면 초안 값을 accent로 (2026-10-02 디자인 추가) */}
+            {/* 선택 take의 범위 — 초안이 dirty면 초안 값을 accent로 (2026-10-02). 누르면 START/END 입력이 열린다 (2026-10-08, 점선 밑줄 + 연필) */}
             {navRange ? (
-              <AppText style={{ fontFamily: font.mono, fontSize: 11, color: draftState.dirty ? colors.accent : colors.textMuted }}>{navRange}</AppText>
+              <PressableOpacity
+                onPress={canEditTime ? () => setTimeEdit(true) : undefined}
+                disabled={!canEditTime}
+                hitSlop={6}
+                style={{ flexDirection: "row", alignItems: "center", gap: 5, borderBottomWidth: canEditTime ? 1 : 0, borderStyle: "dashed", borderBottomColor: NAV_DISABLED, paddingBottom: 2 }}
+              >
+                <AppText style={{ fontFamily: font.mono, fontSize: 11, color: dirty ? colors.accent : colors.textMuted }}>{navRange}</AppText>
+                {canEditTime ? (
+                  <Svg width={10} height={10} viewBox="0 0 14 14" fill="none" stroke={colors.textFaint} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                    <Path d="M9.5 2.5l2 2L5 11l-2.5.5L3 9z" />
+                  </Svg>
+                ) : null}
+              </PressableOpacity>
             ) : null}
           </View>
-          <NavButton label="›" enabled={nextTake !== undefined} onPress={() => nextTake && selectTake(nextTake)} />
+          <NavButton label="›" enabled={navNext !== undefined} onPress={() => navNext && selectTake(navNext)} />
         </View>
       ) : null}
 
       <View style={{ flex: 1 }} />
 
-      {selectedTake && (draftState.dirty || selectedTake.audioStatus !== "ready") ? (
-        <View style={{ marginHorizontal: space.screenX, marginVertical: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <AppText variant="rowTitle">{selectedTake.name}</AppText>
-            <AppText style={{ fontFamily: font.mono, fontSize: 11, color: colors.textMuted, marginTop: 5 }}>{rangeLabel}</AppText>
-            {selectedTake.audioStatus === "updating" ? <StatusLine text="Updating…" color={colors.accent} dot /> : null}
-            {/* 경계는 이미 저장됐고 재컷만 실패한 상태다 (디자인 노트) */}
-            {selectedTake.audioStatus === "failed" ? <StatusLine text="Couldn’t update audio" color={colors.danger} dot={false} /> : null}
+      {cardOn ? (
+        <View style={{ marginHorizontal: space.screenX, marginVertical: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, gap: 12 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <AppText variant="rowTitle" numberOfLines={1}>
+                {newTake ? "New take" : selectedTake?.name}
+              </AppText>
+              {selectedTake?.audioStatus === "updating" ? <StatusLine text="Updating…" color={colors.accent} dot /> : null}
+              {/* 경계는 이미 저장됐고 재컷만 실패한 상태다 (디자인 노트) */}
+              {selectedTake?.audioStatus === "failed" ? <StatusLine text="Couldn’t update audio" color={colors.danger} dot={false} /> : null}
+            </View>
+            {newTake ? (
+              <>
+                <CardOutlineButton label="Cancel" onPress={discardNew} />
+                <CardButton label={adding ? "Adding…" : "Add take"} onPress={adding ? undefined : () => void addNew()} wide />
+              </>
+            ) : draftState.dirty ? (
+              <>
+                <CardOutlineButton label="Cancel" onPress={() => setPendingDiscard(() => () => undefined)} />
+                <CardButton label={saving ? "Saving…" : "Save"} onPress={saving ? undefined : () => { setTimeEdit(false); void save(); }} wide />
+              </>
+            ) : selectedTake?.audioStatus === "failed" ? (
+              <CardButton label={saving ? "Saving…" : "Retry"} onPress={saving ? undefined : () => void save()} />
+            ) : selectedTake?.audioStatus === "updating" ? (
+              // 재컷 메시지가 유실되면 서버가 failed로 바꿔 주지 않아(재전달 3회 후 DLQ로 빠질 뿐) 사용자가 직접
+              // 재요청할 수 있어야 한다 — 최종 리뷰 결정. save()는 초안이 없으면 저장된 값 그대로 같은-값 PATCH를 보낸다
+              <CardOutlineButton label={saving ? "Saving…" : "Retry"} onPress={() => { if (!saving) void save(); }} />
+            ) : (
+              // 시간 입력만 열어 둔 상태 — 바뀐 게 없으니 닫기만
+              <CardOutlineButton label="Done" onPress={() => { setTimeEdit(false); clearTyped(); }} />
+            )}
           </View>
-          {draftState.dirty ? (
+          {inputsOn && draftRange ? (
             <>
-              <CardOutlineButton label="Cancel" onPress={() => setPendingDiscard(() => () => undefined)} />
-              <CardButton label={saving ? "Saving…" : "Save"} onPress={saving ? undefined : () => void save()} wide />
+              <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 8 }}>
+                <TimeField label="START" digits={typedStart} fallback={secToClockInput(draftRange.startMs / 1000)} error={inputError !== ""} onChange={(d) => { setTypedStart(d); setInputError(""); }} onCommit={commitInputs} />
+                <AppText style={{ color: colors.textFaint, paddingBottom: 11 }}>–</AppText>
+                <TimeField label="END" digits={typedEnd} fallback={secToClockInput(draftRange.endMs / 1000)} error={inputError !== ""} onChange={(d) => { setTypedEnd(d); setInputError(""); }} onCommit={commitInputs} />
+              </View>
+              {inputError ? <AppText style={{ fontSize: 12, color: colors.danger, marginTop: -4 }}>{inputError}</AppText> : null}
+              <AppText style={{ fontSize: 12, color: colors.textFaint, marginTop: -4 }}>Or drag the handles to set start and end.</AppText>
             </>
-          ) : selectedTake.audioStatus === "failed" ? (
-            <CardButton label={saving ? "Saving…" : "Retry"} onPress={saving ? undefined : () => void save()} />
-          ) : (
-            // updating. 재컷 메시지가 유실되면 서버가 failed로 바꿔 주지 않아(재전달 3회 후 DLQ로 빠질 뿐) 사용자가 직접
-            // 재요청할 수 있어야 한다 — 최종 리뷰 결정. save()는 초안이 없으면 저장된 값 그대로 같은-값 PATCH를 보낸다
-            <CardOutlineButton label={saving ? "Saving…" : "Retry"} onPress={() => { if (!saving) void save(); }} />
-          )}
+          ) : null}
         </View>
       ) : null}
 
@@ -498,15 +715,19 @@ export function TimelineScreen() {
       {pendingDiscard ? (
         <ConfirmDialog
           visible
-          title="Discard changes?"
-          body={`Take ${(selectedTake?.index ?? 0) + 1} keeps its current start and end.`}
+          title={newTake ? "Discard new take?" : "Discard changes?"}
+          body={newTake ? "The new take won’t be added." : `Take ${(selectedTake?.index ?? 0) + 1} keeps its current start and end.`}
           primary={{
             label: "Discard changes",
             danger: true,
             onPress: () => {
               const go = pendingDiscard;
               setPendingDiscard(null);
-              draftState.reset();
+              if (newTake) discardNew();
+              else {
+                draftState.reset();
+                clearTyped();
+              }
               go();
             },
           }}

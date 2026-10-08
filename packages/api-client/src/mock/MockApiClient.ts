@@ -23,7 +23,7 @@ import type {
   UploadStatus,
   User,
 } from "@bandapp/types";
-import { checkTakeRange, defaultTakeName, DISPLAY_NAME_MAX, neighborsOf, SUPPORT_BODY_MAX, SUPPORT_TOPICS, TAKE_NAME_MAX, type UpdateTakeInput } from "@bandapp/types";
+import { checkTakeRange, defaultTakeName, DISPLAY_NAME_MAX, neighborsAt, neighborsOf, SUPPORT_BODY_MAX, SUPPORT_TOPICS, TAKE_NAME_MAX, type CreateTakeInput, type UpdateTakeInput } from "@bandapp/types";
 import type { ProfilePhotoUpload, RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { UploadRecordingError } from "../upload";
@@ -62,6 +62,8 @@ export class MockApiClient implements RehearsalApiClient {
   private partCounts = new Map<string, number>();
   /** take 재컷(오디오 재생성) 시뮬레이션 지연 — 테스트가 0으로 줄인다 */
   recutDelayMs = 1500;
+  /** 사용자가 Edit 화면에서 만든 take — 서버의 takes.manual. 분석이 지우지 않는다 (2026-10-08) */
+  private manualTakeIds = new Set<string>();
 
   constructor(opts?: { analysisDelayMs?: number }) {
     this.analysisDelayMs = opts?.analysisDelayMs ?? 4000;
@@ -110,12 +112,19 @@ export class MockApiClient implements RehearsalApiClient {
       }
       this.consumeBillingTime(s.bandId, need);
       const count = Math.max(1, Math.min(9, Math.round(s.durationSec / 900)));
-      const takes = generateTakes(s.id, count);
+      const generated = generateTakes(s.id, count);
       const base = Math.min(300, s.durationSec / count);
-      takes.forEach((t, i) => {
+      generated.forEach((t, i) => {
         t.durationSec = Math.max(4, Math.round(base * (0.55 + 0.8 * seededUnit(i * 31 + 7))));
         t.endMs = t.startMs + t.durationSec * 1000;
       });
+      // 수동 take는 남기고, 생성 take는 그 뒤 index를 받으며 수동 take와 겹치는 건 버린다 (서버는 겹친 구간만 도려낸다)
+      const manual = (this.state.takes[s.id] ?? []).filter((t) => this.manualTakeIds.has(t.id));
+      const indexBase = manual.reduce((m, t) => Math.max(m, t.index + 1), 0);
+      const kept = generated
+        .filter((g) => manual.every((m) => g.endMs <= m.startMs || g.startMs >= m.endMs))
+        .map((g, i) => ({ ...g, id: `${s.id}-g${indexBase + i}`, index: indexBase + i, name: defaultTakeName(indexBase + i) }));
+      const takes = [...manual, ...kept].sort((a, b) => a.startMs - b.startMs);
       this.state.takes[s.id] = takes;
       // 워커가 ready로 바꿀 때 세션 피크도 채우는 것을 흉내 낸다 (take는 generateTakes가 채운다)
       s.peaks = fakePeaks(s.id.length * 31 + s.durationSec);
@@ -473,13 +482,52 @@ export class MockApiClient implements RehearsalApiClient {
   };
 
   takes = {
-    list: async (sessionId: string): Promise<Take[]> => (this.state.takes[sessionId] ?? []).map((t) => ({ ...t })),
+    // 시간 순 — 수동 take는 index가 제일 크면서 시간상 중간에 들어간다
+    list: async (sessionId: string): Promise<Take[]> =>
+      (this.state.takes[sessionId] ?? [])
+        .slice()
+        .sort((a, b) => a.startMs - b.startMs || a.index - b.index)
+        .map((t) => ({ ...t })),
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
+    create: async (sessionId: string, input: CreateTakeInput): Promise<Take> => {
+      const session = this.state.sessions.find((x) => x.id === sessionId);
+      if (!session) throw new ApiError(404, "세션을 찾을 수 없어요.");
+      this.assertTakesEditable(session, "만들");
+      const siblings = (this.state.takes[sessionId] ??= []);
+      const error = checkTakeRange(input.startMs, input.endMs, session.durationSec * 1000, neighborsAt(siblings, input.startMs));
+      if (error) throw new ApiError(400, error === "take_overlap" ? "옆 take와 겹칠 수 없어요." : "take 구간이 올바르지 않아요.", error);
+      const index = siblings.reduce((m, t) => Math.max(m, t.index + 1), 0);
+      const take: Take = {
+        id: `m${this.nextId++}`,
+        sessionId,
+        index,
+        name: defaultTakeName(index),
+        durationSec: Math.round((input.endMs - input.startMs) / 1000),
+        startMs: input.startMs,
+        endMs: input.endMs,
+        type: "PERFORMANCE",
+        commentCount: 0,
+        peaks: null,
+        version: 1,
+        audioStatus: "updating",
+      };
+      siblings.push(take);
+      this.manualTakeIds.add(take.id);
+      session.takeCount += 1;
+      setTimeout(() => {
+        if (take.version !== 1) return;
+        take.audioStatus = "ready";
+        take.peaks = fakePeaks(take.startMs + 1);
+        this.emit();
+      }, this.recutDelayMs);
+      this.emit();
+      return { ...take };
+    },
     update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
       const take = this.findTake(takeId);
       if (!take) throw new ApiError(404, "Take를 찾을 수 없어요.");
       const session = this.mustSession(take.sessionId);
-      if (session.status !== "ready") throw new ApiError(409, "분석 중에는 take를 고칠 수 없어요.", "session_not_ready");
+      this.assertTakesEditable(session, "고칠");
       if (input.version !== take.version) throw new ApiError(409, "다른 멤버가 먼저 고쳤어요.", "take_version_conflict");
       const siblings = this.state.takes[take.sessionId] ?? [];
       const error = checkTakeRange(input.startMs, input.endMs, session.durationSec * 1000, neighborsOf(siblings, take.index));
@@ -515,7 +563,7 @@ export class MockApiClient implements RehearsalApiClient {
       const take = this.findTake(takeId);
       if (!take) throw new ApiError(404, "Take를 찾을 수 없어요.");
       const session = this.mustSession(take.sessionId);
-      if (session.status !== "ready") throw new ApiError(409, "분석 중에는 take를 지울 수 없어요.", "session_not_ready");
+      this.assertTakesEditable(session, "지울");
       const key = commentKey({ takeId });
       const topLevel = (this.state.comments[key] ?? []).filter((c) => c.parentId === null).length;
       delete this.state.comments[key];
@@ -584,6 +632,13 @@ export class MockApiClient implements RehearsalApiClient {
       this.emit();
     },
   };
+
+  /** 서버 TakesService.assertEditable과 같다 — 분석 중(analyzing)·업로드 중만 막는다 (2026-10-08) */
+  private assertTakesEditable(session: Session, verb: string): void {
+    if (session.status === "analyzing" || session.status === "uploading") {
+      throw new ApiError(409, `분석 중에는 take를 ${verb} 수 없어요.`, "session_not_ready");
+    }
+  }
 
   private findTake(takeId: string): Take | undefined {
     for (const takes of Object.values(this.state.takes)) {

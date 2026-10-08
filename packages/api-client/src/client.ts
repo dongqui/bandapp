@@ -10,6 +10,7 @@ import type {
   CreateCommentInput,
   CreateSessionInput,
   CreateSupportRequestInput,
+  CreateTakeInput,
   CreateSessionResult,
   InvitePreview,
   JoinInviteResult,
@@ -136,6 +137,11 @@ export interface RehearsalApiClient {
   takes: {
     list(sessionId: string): Promise<Take[]>;
     audioUrl(takeId: string): Promise<AudioUrl>;
+    /**
+     * 수동 take 만들기 (2026-10-08 Edit "Add take"). 서버가 다음 index·기본 이름을 정하고 재컷 잡으로 오디오를 만든다 —
+     * 응답은 audioStatus "updating". 409 session_not_ready(분석 중이거나 길이를 모름), 400 take_range_invalid / take_overlap
+     */
+    create(sessionId: string, input: CreateTakeInput): Promise<Take>;
     /** 경계 변경. 409 take_version_conflict / session_not_ready, 400 take_range_invalid / take_overlap. 응답은 audioStatus "updating" */
     update(takeId: string, input: UpdateTakeInput): Promise<Take>;
     /** 삭제. 코멘트도 함께 사라진다 */

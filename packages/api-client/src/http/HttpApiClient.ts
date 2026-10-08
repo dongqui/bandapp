@@ -9,6 +9,7 @@ import type {
   CommentTarget,
   CreateCommentInput,
   CreateSessionInput,
+  CreateTakeInput,
   CreateSupportRequestInput,
   CreateSessionResult,
   InvitePreview,
@@ -326,6 +327,11 @@ export class HttpApiClient implements RehearsalApiClient {
   takes = {
     list: (sessionId: string): Promise<Take[]> => this.request<Take[]>("GET", `/sessions/${sessionId}/takes`),
     audioUrl: (takeId: string): Promise<AudioUrl> => this.request<AudioUrl>("GET", `/takes/${takeId}/audio`),
+    create: async (sessionId: string, input: CreateTakeInput): Promise<Take> => {
+      const take = await this.request<Take>("POST", `/sessions/${sessionId}/takes`, input);
+      this.emit();
+      return take;
+    },
     update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
       const take = await this.request<Take>("PATCH", `/takes/${takeId}`, input);
       this.emit();

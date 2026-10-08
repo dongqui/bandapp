@@ -284,6 +284,49 @@ describe("SessionAnalysisService.run", () => {
     expect(sessionPeaks[127]).toBe(255);
   });
 
+  it("수동 take는 지우지 않고, Gemini 후보는 그 구간을 피해 잘리며, index는 그 뒤부터 매긴다 (2026-10-08)", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    const manualKey = "bands/b/sessions/s/takes/m1-v1.m4a";
+    state.existingTakes = [
+      { objectKey: "bands/b/sessions/s/takes/old.m4a", manual: false, index: 0, startMs: 0, endMs: 30_000 },
+      { objectKey: manualKey, manual: true, index: 2, startMs: 4 * MIN, endMs: 6 * MIN },
+    ];
+    // listKeys는 수동 take의 객체도 돌려준다 — 고아로 오인해 지우면 안 된다
+    const { storage, calls } = fakeStorage([manualKey, "bands/b/sessions/s/takes/orphan.m4a"]);
+    // 15분이면 청크가 하나라 같은 후보가 두 번 잡히지 않는다
+    const { ffmpeg, cuts } = fakeFfmpeg(15 * MIN);
+    const analyzeFile = vi.fn().mockResolvedValue([
+      { startMs: 1 * MIN, endMs: 5 * MIN, type: "PERFORMANCE", confidence: 0.9 },
+      { startMs: 9 * MIN, endMs: 11 * MIN, type: "PERFORMANCE", confidence: 0.8 },
+    ]);
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, fakeCharges().charges, tmp, 0).run("s");
+
+    expect(calls.deleted).toEqual(["bands/b/sessions/s/takes/old.m4a", "bands/b/sessions/s/takes/orphan.m4a"]);
+    expect(state.deletedTakes).toBe(1);
+    // [0:55, 5:05]는 수동 take [4:00, 6:00]에 걸려 [0:55, 4:00]만 남는다
+    expect(state.insertedTakes.map((t) => [t.index, t.name, t.startMs, t.endMs, t.manual])).toEqual([
+      [3, "Take 4", 1 * MIN - 5_000, 4 * MIN, false],
+      [4, "Take 5", 9 * MIN - 5_000, 11 * MIN + 5_000, false],
+    ]);
+    expect(cuts.slice(-2)).toEqual([
+      { startMs: 1 * MIN - 5_000, endMs: 4 * MIN },
+      { startMs: 9 * MIN - 5_000, endMs: 11 * MIN + 5_000 },
+    ]);
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 3 });
+  });
+
+  it("수동 take만 있는 세션은 delete(takes)를 부르지 않는다", async () => {
+    const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+    state.existingTakes = [{ objectKey: "bands/b/sessions/s/takes/m1-v1.m4a", manual: true, index: 0, startMs: 0, endMs: 30_000 }];
+    const { storage, calls } = fakeStorage([]);
+    const { ffmpeg } = fakeFfmpeg(MIN);
+    const analyzeFile = vi.fn().mockResolvedValue([]);
+    await new SessionAnalysisService(db, storage, { analyzeFile } as unknown as GeminiService, ffmpeg, fakeCharges().charges, tmp, 0).run("s");
+    expect(state.deletedTakes).toBe(0);
+    expect(calls.deleted).toEqual([]);
+    expect(state.updates.at(-1)).toMatchObject({ status: "ready", takeCount: 1 });
+  });
+
   it("retries a chunk once and succeeds", async () => {
     const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
     const { storage } = fakeStorage();

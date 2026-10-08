@@ -1,4 +1,4 @@
-import { DEFAULT_CHUNKING, DEFAULT_PAD, mergeCandidates, padCandidates, planChunks } from "./chunking.js";
+import { carveAround, DEFAULT_CHUNKING, DEFAULT_PAD, mergeCandidates, padCandidates, planChunks } from "./chunking.js";
 
 const MIN = 60_000;
 
@@ -89,5 +89,37 @@ describe("padCandidates", () => {
 
   it("returns an empty list for no candidates", () => {
     expect(padCandidates([], 10 * MIN)).toEqual([]);
+  });
+});
+
+describe("carveAround", () => {
+  const take = (startMs: number, endMs: number, type: "PERFORMANCE" | "PARTIAL_PRACTICE" = "PERFORMANCE", confidence = 0.9) => ({ startMs, endMs, type, confidence });
+  const blocked = [{ startMs: 100_000, endMs: 160_000 }];
+
+  it("겹치지 않는 후보는 그대로", () => {
+    expect(carveAround([take(0, 90_000)], blocked)).toEqual([take(0, 90_000)]);
+  });
+
+  it("수동 take와 겹친 쪽을 잘라낸다 — 패딩이 수동 take에 닿은 경우", () => {
+    expect(carveAround([take(40_000, 105_000)], blocked)).toEqual([take(40_000, 100_000)]);
+    expect(carveAround([take(150_000, 240_000)], blocked)).toEqual([take(160_000, 240_000)]);
+  });
+
+  it("수동 take가 후보 한가운데면 양쪽 조각을 남긴다", () => {
+    expect(carveAround([take(60_000, 200_000)], blocked)).toEqual([take(60_000, 100_000), take(160_000, 200_000)]);
+  });
+
+  it("남은 조각이 minMs보다 짧으면 버린다", () => {
+    expect(carveAround([take(95_000, 165_000)], blocked, 10_000)).toEqual([]);
+    expect(carveAround([take(98_000, 300_000)], blocked, 10_000)).toEqual([take(160_000, 300_000)]);
+  });
+
+  it("수동 take 안에 완전히 들어간 후보는 사라진다", () => {
+    expect(carveAround([take(110_000, 150_000)], blocked)).toEqual([]);
+  });
+
+  it("기본 최소 길이는 mergeCandidates와 같은 20초", () => {
+    expect(carveAround([take(85_000, 300_000)], blocked)).toEqual([take(160_000, 300_000)]);
+    expect(carveAround([take(70_000, 300_000)], blocked)).toEqual([take(70_000, 100_000), take(160_000, 300_000)]);
   });
 });

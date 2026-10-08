@@ -116,3 +116,41 @@ describe("MockApiClient takes 편집", () => {
     await expect(api.takes.rename(t!.id, "x".repeat(41))).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe("MockApiClient 수동 take (2026-10-08)", () => {
+  it("create는 다음 index·기본 이름으로 updating take를 만들고 목록은 시간 순이며 잠시 뒤 ready가 된다", async () => {
+    const api = new MockApiClient();
+    api.recutDelayMs = 0;
+    const before = await api.takes.list("s1");
+    const gap = { startMs: before[0]!.endMs + 5_000, endMs: before[1]!.startMs - 5_000 };
+    const created = await api.takes.create("s1", gap);
+    expect(created).toMatchObject({ sessionId: "s1", index: 7, name: "Take 8", ...gap, version: 1, audioStatus: "updating", peaks: null, commentCount: 0 });
+    const list = await api.takes.list("s1");
+    expect(list.map((t) => t.id).slice(0, 3)).toEqual([before[0]!.id, created.id, before[1]!.id]);
+    expect((await api.sessions.get("s1")).takeCount).toBe(before.length + 1);
+    await new Promise((r) => setTimeout(r, 5));
+    const after = (await api.takes.list("s1")).find((t) => t.id === created.id)!;
+    expect(after.audioStatus).toBe("ready");
+    expect(after.peaks).toHaveLength(128);
+  });
+  it("겹치면 400 take_overlap, 분석 중이면 409 session_not_ready, failed 세션엔 만들 수 있다", async () => {
+    const api = new MockApiClient();
+    const [a] = await api.takes.list("s1");
+    await expect(api.takes.create("s1", { startMs: a!.startMs + 1000, endMs: a!.endMs + 1000 })).rejects.toMatchObject({ status: 400, code: "take_overlap" });
+    await expect(api.takes.create("p1", { startMs: 0, endMs: 10_000 })).rejects.toMatchObject({ status: 409, code: "session_not_ready" });
+    await expect(api.takes.create("f1", { startMs: 0, endMs: 10_000 })).resolves.toMatchObject({ index: 0, name: "Take 1" });
+  });
+  it("분석을 다시 돌려도 수동 take는 남고 생성 take는 그 뒤 index를 받는다", async () => {
+    const api = new MockApiClient({ analysisDelayMs: 0 });
+    const manual = await api.takes.create("f1", { startMs: 0, endMs: 30_000 });
+    await api.sessions.retryAnalysis("f1");
+    await new Promise((r) => setTimeout(r, 5));
+    const s = await api.sessions.get("f1");
+    expect(s.status).toBe("ready");
+    const list = await api.takes.list("f1");
+    expect(list[0]!.id).toBe(manual.id);
+    expect(list.length).toBeGreaterThan(1);
+    expect(list.slice(1).every((t) => t.index > manual.index && t.startMs >= manual.endMs)).toBe(true);
+    expect(s.takeCount).toBe(list.length);
+  });
+});

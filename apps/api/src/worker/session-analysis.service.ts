@@ -6,7 +6,7 @@ import { Logger } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
 import { defaultTakeName, PEAK_BUCKETS, type TakeCandidate } from "@bandapp/types";
-import { mergeCandidates, padCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
+import { carveAround, mergeCandidates, padCandidates, planChunks, type Chunk } from "../analysis/chunking.js";
 import { DEFAULT_GEMINI_MODEL, GeminiService } from "../analysis/gemini.service.js";
 import { BillingChargeService } from "../billing/billing-charge.service.js";
 import { DB } from "../db/db.constants.js";
@@ -30,6 +30,13 @@ class StaleSessionError extends Error {
     super(`session ${sessionId} is no longer analyzing (handled by another delivery), skipping ready update`);
     this.name = "StaleSessionError";
   }
+}
+
+/** 분석이 남겨 두는 수동 take의 위치 */
+interface ManualTake {
+  index: number;
+  startMs: number;
+  endMs: number;
 }
 
 export class SessionAnalysisService {
@@ -72,7 +79,7 @@ export class SessionAnalysisService {
     // 이 실행이 직접 예약했을 때만 실패 시 환불한다 — 예약 자체가 throw했다면 환불할 게 없다.
     let reservedForRefund = false;
     try {
-      await this.resetTakes(session.bandId, sessionId);
+      const manualTakes = await this.resetTakes(session.bandId, sessionId);
 
       const original = join(workDir, "original.m4a");
       await this.storage.downloadToFile(recording.objectKey, original);
@@ -99,14 +106,18 @@ export class SessionAnalysisService {
         candidates.push(...(await this.analyzeChunk(original, chunk, workDir)));
       }
       // 경계는 앞뒤 5초 여유를 둔다 — 카운트인과 마지막 울림까지 take에 담기게 (2026-10-02)
-      const merged = padCandidates(mergeCandidates(candidates), durationMs);
+      // 수동 take 구간은 Gemini 후보에서 도려낸다 — 사용자가 직접 만든 take가 분석 결과와 겹치지 않게 (2026-10-08)
+      const merged = carveAround(padCandidates(mergeCandidates(candidates), durationMs), manualTakes);
+      // index는 남아 있는 수동 take 뒤부터 — (session_id, index) unique
+      const indexBase = manualTakes.reduce((m, t) => Math.max(m, t.index + 1), 0);
       // Gemini가 끝난 뒤에 디코드한다 — 분석이 실패하면 디코드 비용을 쓰지 않는다 (스펙 결정 7)
       const hires = await this.extractPeaks(sessionId, original);
       // 사이드카는 take 컷보다 먼저 올린다 — 컷이 실패해도 파형은 남는다. 실패해도 세션은 ready (2026-09-11 스펙 결정 5)
       const sidecarKey = hires ? await this.uploadPeaks(session.bandId, sessionId, hires, workDir) : null;
 
       const rows: (typeof takes.$inferInsert)[] = [];
-      for (const [index, candidate] of merged.entries()) {
+      for (const [i, candidate] of merged.entries()) {
+        const index = indexBase + i;
         const takeId = randomUUID();
         const key = takeKey(session.bandId, sessionId, takeId);
         const output = join(workDir, `take-${index}.m4a`);
@@ -126,6 +137,7 @@ export class SessionAnalysisService {
           confidence: candidate.confidence,
           objectKey: key,
           peaks: hires ? slicePeaks(hires, PEAKS_PER_SEC, candidate.startMs, candidate.endMs, PEAK_BUCKETS) : null,
+          manual: false,
         });
       }
 
@@ -138,7 +150,7 @@ export class SessionAnalysisService {
           .update(sessions)
           .set({
             status: "ready",
-            takeCount: rows.length,
+            takeCount: manualTakes.length + rows.length,
             durationMs,
             analysisError: null,
             analysisModel: model,
@@ -170,13 +182,18 @@ export class SessionAnalysisService {
    * 재시도 멱등성 (스펙 결정 9): 이전 실행이 남긴 take 행과 R2 객체를 지운다.
    * 이전 실행이 트랜잭션 커밋 전에 죽었다면 take 객체가 R2에는 올라갔는데 DB 행은 없는 상태로
    * 남을 수 있다 — DB 행뿐 아니라 take 접두어 전체를 나열해 고아 객체까지 함께 지운다.
+   * 수동 take(2026-10-08)는 행도 객체도 남기고 돌려준다 — 후보 도려내기와 index 배정에 쓴다.
    */
-  private async resetTakes(bandId: string, sessionId: string): Promise<void> {
+  private async resetTakes(bandId: string, sessionId: string): Promise<ManualTake[]> {
     const existing = await this.db.query.takes.findMany({ where: eq(takes.sessionId, sessionId) });
+    const manual = existing.filter((t) => t.manual);
+    const generated = existing.filter((t) => !t.manual);
+    const keep = new Set(manual.map((t) => t.objectKey));
     const orphanKeys = await this.storage.listKeys(takesPrefix(bandId, sessionId));
-    const keys = [...new Set([...existing.map((t) => t.objectKey), ...orphanKeys])];
+    const keys = [...new Set([...generated.map((t) => t.objectKey), ...orphanKeys])].filter((k) => !keep.has(k));
     if (keys.length > 0) await this.storage.deleteObjects(keys);
-    if (existing.length > 0) await this.db.delete(takes).where(eq(takes.sessionId, sessionId));
+    if (generated.length > 0) await this.db.delete(takes).where(and(eq(takes.sessionId, sessionId), eq(takes.manual, false)));
+    return manual.map((t) => ({ index: t.index, startMs: t.startMs, endMs: t.endMs }));
   }
 
   private async analyzeChunk(original: string, chunk: Chunk, workDir: string): Promise<TakeCandidate[]> {

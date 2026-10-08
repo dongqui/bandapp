@@ -59,7 +59,9 @@ unset TOKEN AUTH
 
 echo "== build"
 # Fargate 기본 아키텍처(x86_64)에 맞춘다. ARM64(Graviton)로 바꾸려면 태스크 정의와 함께 linux/arm64로.
-docker build --platform linux/amd64 -f apps/api/Dockerfile.prod -t "$REPO:$TAG" .
+# provenance/sbom 증명 매니페스트를 끄면 ECR에 태그 없는 부속 매니페스트가 생기지 않아
+# 수명 주기 정책(untagged 1일 만료)과 충돌할 여지가 없다.
+docker build --platform linux/amd64 --provenance=false --sbom=false -f apps/api/Dockerfile.prod -t "$REPO:$TAG" .
 
 echo "== push"
 docker tag "$REPO:$TAG" "$REGISTRY/$REPO:$TAG"

@@ -1,44 +1,25 @@
-import { useEffect, useRef } from "react";
-import { Animated, Easing, View } from "react-native";
-import { seededUnit } from "@/lib/seed";
+import { View } from "react-native";
+import { barHeight } from "@/lib/peaks";
 import { useTheme } from "@/theme";
+import { fitLevels } from "./liveWaveformLevels";
 
-function Bar({ index, height }: { index: number; height: number }) {
+/** 바 34개 × 200ms 틱 = 최근 6.8초 (2026-10-12 스펙 결정 1). */
+export const LIVE_BARS = 34;
+
+/**
+ * 녹음 중 라이브 파형. 상태는 RecordingScreen이 들고 여기선 levels(0~1, 오래된 것 → 최근)를 그리기만 한다.
+ * levels가 비어 있으면 모든 바가 최소 높이라 PREPARING·미터링 미지원에서 가짜 움직임이 없다.
+ */
+export function LiveWaveform({ levels, bars = LIVE_BARS, height = 72 }: { levels: number[]; bars?: number; height?: number }) {
   const { colors } = useTheme();
-  const scale = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const duration = (0.4 + seededUnit(index * 3.1) * 0.5) * 1000;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, { toValue: 0.2, duration, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 1, duration, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ]),
-    );
-    const delay = setTimeout(() => loop.start(), seededUnit(index * 5.7) * 500);
-    return () => {
-      clearTimeout(delay);
-      loop.stop();
-    };
-  }, [index, scale]);
-  const barHeight = Math.round(14 + seededUnit(index * 7.3 + 2) * 56);
-  return (
-    <Animated.View
-      style={{
-        width: 3,
-        borderRadius: 1.5,
-        backgroundColor: colors.textSecondary,
-        height: (barHeight / 72) * height,
-        transform: [{ scaleY: scale }],
-      }}
-    />
-  );
-}
-
-export function LiveWaveform({ bars = 34, height = 72 }: { bars?: number; height?: number }) {
+  const minPx = Math.round(height * 0.12);
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 3, height }}>
-      {Array.from({ length: bars }, (_, i) => (
-        <Bar key={i} index={i} height={height} />
+      {fitLevels(levels, bars).map((level, i) => (
+        <View
+          key={i}
+          style={{ width: 3, borderRadius: 1.5, backgroundColor: colors.textSecondary, height: barHeight(level, height, minPx) }}
+        />
       ))}
     </View>
   );

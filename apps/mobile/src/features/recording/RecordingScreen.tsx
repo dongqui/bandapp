@@ -2,13 +2,15 @@ import { AudioModule, RecordingPresets, setAudioModeAsync, useAudioRecorder, use
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { View } from "react-native";
+import { dbToUnit, pushLevel } from "@/lib/metering";
 import { fmtClock, toLocalIso } from "@/lib/time";
-import { radius, useTheme } from "@/theme";
-import { AppText, Chip, LiveWaveform, MonoLabel, PressableOpacity, Screen, StatusDot, useToast } from "@/ui";
+import { useTheme } from "@/theme";
+import { AppText, LIVE_BARS, LiveWaveform, MonoLabel, PressableOpacity, Screen, StatusDot, useToast } from "@/ui";
 
 export function RecordingScreen() {
-  // HIGH_QUALITY = .m4a, AAC, 44.1kHz, 2ch, 128kbps — 스펙 결정 1과 일치한다
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // HIGH_QUALITY = .m4a, AAC, 44.1kHz, 2ch, 128kbps — 2026-09-04 스펙 결정 1과 일치한다.
+  // isMeteringEnabled는 라이브 파형용(2026-10-12 스펙). 프리셋 기본값은 false라 명시해야 state.metering이 채워진다.
+  const recorder = useAudioRecorder({ ...RecordingPresets.HIGH_QUALITY, isMeteringEnabled: true });
   const state = useAudioRecorderState(recorder, 200);
   const router = useRouter();
   const toast = useToast();
@@ -16,6 +18,16 @@ export function RecordingScreen() {
   const [ready, setReady] = useState(false);
   const startedAtRef = useRef<Date | null>(null);
   const stoppingRef = useRef(false);
+  const [levels, setLevels] = useState<number[]>([]);
+
+  // useAudioRecorderState가 200ms마다 리렌더를 일으키므로 그 틱에서 레벨을 쌓는다 (별도 타이머 없음).
+  // 의존성을 durationMillis로 둔 이유: metering 값이 같아도 틱마다 한 칸씩 흘러가야 한다.
+  // ready 전(PREPARING)에는 쌓지 않아 평평한 플레이스홀더로 남긴다.
+  useEffect(() => {
+    if (!ready) return;
+    setLevels((prev) => pushLevel(prev, dbToUnit(state.metering), LIVE_BARS));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, state.durationMillis]);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,13 +95,7 @@ export function RecordingScreen() {
           </MonoLabel>
         </View>
         <AppText variant="monoTimer">{fmtClock(seconds)}</AppText>
-        <LiveWaveform />
-        <Chip
-          label="+ MARK"
-          mono
-          style={{ borderRadius: radius.chipLg + 4, paddingVertical: 10, paddingHorizontal: 22, marginTop: 6 }}
-          onPress={() => toast.show(`Marked at ${fmtClock(seconds)}`)}
-        />
+        <LiveWaveform levels={levels} />
       </View>
       <View style={{ alignItems: "center", gap: 10, paddingBottom: 60 }}>
         <PressableOpacity

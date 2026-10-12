@@ -27,6 +27,8 @@ const ITEM_COLUMNS = {
   type: notifications.type,
   readAt: notifications.readAt,
   createdAt: notifications.createdAt,
+  // 커서용 — created_at은 µs 정밀도라 JS Date(ms)로는 같은 값을 되살릴 수 없다
+  createdAtExact: sql<string>`to_char(${notifications.createdAt} at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
   actorId: notifications.actorId,
   actorName: users.displayName,
   sessionId: sessions.id,
@@ -49,6 +51,7 @@ interface ItemRow {
   type: NotificationType;
   readAt: Date | null;
   createdAt: Date;
+  createdAtExact: string;
   actorId: string | null;
   actorName: string | null;
   sessionId: string;
@@ -200,7 +203,10 @@ export class NotificationsService {
     await this.db.delete(notifications).where(and(eq(notifications.userId, userId), lt(notifications.createdAt, sql`now() - interval '${sql.raw(String(RETENTION_DAYS))} days'`)));
     const after = cursor ? decodeCursor(cursor) : null;
     const scope = and(eq(notifications.userId, userId), eq(notifications.bandId, bandId));
-    const where = after ? and(scope, or(lt(notifications.createdAt, after.createdAt), and(eq(notifications.createdAt, after.createdAt), lt(notifications.id, after.id)))) : scope;
+    // 커서의 시각은 µs 문자열 그대로 timestamptz로 캐스팅해 비교한다 (Date로 바꾸면 µs가 잘려 행이 건너뛰어진다)
+    const olderThan = (createdAt: string, id: string) =>
+      or(sql`${notifications.createdAt} < ${createdAt}::timestamptz`, and(sql`${notifications.createdAt} = ${createdAt}::timestamptz`, lt(notifications.id, id)));
+    const where = after ? and(scope, olderThan(after.createdAt, after.id)) : scope;
     const rows = await this.db
       .select(ITEM_COLUMNS)
       .from(notifications)
@@ -220,12 +226,12 @@ export class NotificationsService {
       const [r] = await this.db
         .select({ n: sql<number>`count(*)::int` })
         .from(notifications)
-        .where(and(scope, or(lt(notifications.createdAt, last.createdAt), and(eq(notifications.createdAt, last.createdAt), lt(notifications.id, last.id)))));
+        .where(and(scope, olderThan(last.createdAtExact, last.id)));
       remaining = r?.n ?? 0;
     }
     return {
       items: page.map((row) => toItem(row)),
-      nextCursor: hasMore && last ? encodeCursor(last.createdAt, last.id) : null,
+      nextCursor: hasMore && last ? encodeCursor(last.createdAtExact, last.id) : null,
       remaining,
       unreadCount: await this.countUnread(bandId, userId),
     };
@@ -258,7 +264,7 @@ export class NotificationsService {
     await this.memberships.assertMember(bandId, userId);
     await this.db
       .update(notifications)
-      .set({ readAt: new Date() })
+      .set({ readAt: sql`now()` })
       .where(and(eq(notifications.userId, userId), eq(notifications.bandId, bandId), isNull(notifications.readAt)));
   }
 

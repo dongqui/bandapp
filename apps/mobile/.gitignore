@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase 설정 파일 (콘솔에서 받는다)
+google-services.json
+GoogleService-Info.plist

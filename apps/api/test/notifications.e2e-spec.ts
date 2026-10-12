@@ -105,17 +105,17 @@ describe("notifications API", () => {
 
   describe("읽음·페이지", () => {
     async function seed(n: number) {
-      // 같은 트랜잭션 insert처럼 created_at이 겹치는 상황도 섞는다
-      const now = new Date();
+      // 모든 행이 같은 created_at을 가진다 — 페이지 경계마다 동률이 갈려서 id 타이브레이크가 검증된다
+      const at = new Date();
       await db.insert(notifications).values(
-        Array.from({ length: n }, (_, i) => ({
+        Array.from({ length: n }, () => ({
           userId: owner.userId,
           bandId,
           type: "comment" as const,
           actorId: minsu.userId,
           sessionId,
           takeId,
-          createdAt: new Date(now.getTime() - Math.floor(i / 2) * 1000),
+          createdAt: at,
         })),
       );
     }

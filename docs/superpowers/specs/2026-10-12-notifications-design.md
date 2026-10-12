@@ -16,7 +16,7 @@ Claude Design "Rehersal app"에 2026-10-12 추가된 알림 화면을 구현하�
 1. **수신자당 1행(fan-out on write).** 읽음·수신 여부·종류가 사람마다 달라서다. 밴드는 3~6명 규모라 행 수 부담이 없다. 사건 1행 + 사람별 상태(fan-out on read)는 설정을 나중에 켰을 때 과거 사건이 소급 노출되어 디자인("off면 기록 안 함")과 어긋난다.
 2. **설정이 off면 인박스 행도 만들지 않는다** (디자인 프로토타입 `nfBlock` 그대로). 나중에 켜도 과거 알림은 없다.
 3. **session_ready 수신자에 업로더 본인 포함.** 처리 중 앱을 닫아도 푸시로 안다. 본인에게는 "Your recording is ready"로 렌더한다. 같은 `sessionReady` 토글을 따른다.
-4. **인박스·배지는 현재 밴드 기준.** 디자인 시트 헤더에 밴드명이 있고 설정도 밴드별이다. 푸시는 다른 밴드 것일 수 있으므로 열 때 현재 밴드를 먼저 바꾼다.
+4. **인박스·배지는 현재 밴드 기준.** 디자인 시트 헤더에 밴드명이 있고 설정도 밴드별이다. 푸시는 다른 밴드 것일 수 있으므로 열 때 접근 확인을 거친 뒤 현재 밴드를 바꾼다(죽은 알림이 밴드를 바꾸지 않도록).
 5. **알림 생성은 이벤트 지점에서 즉시** (코멘트 생성 직후, 세션 ready 커밋 직후). 아웃박스·큐는 두지 않되 "수신자 계산 + 행 생성"과 "발송"을 분리된 메서드로 두어 나중에 옮길 수 있게 한다.
 6. **푸시 SDK는 `@react-native-firebase/messaging` + 서버 `firebase-admin`.** Expo Push Service는 쓰지 않는다. iOS는 Firebase 콘솔에 APNs 키를 올려 FCM이 중계한다.
 7. **푸시 문구는 서버가 만든다.** 사용자 언어를 모르므로 기기 토큰에 `locale`을 저장해 en/ko 템플릿을 고른다. 인박스 문구는 클라이언트 i18n이 만든다(구조화된 응답).
@@ -281,7 +281,7 @@ interface PendingTarget {
 - 상태: 현재 밴드 `unreadCount`, 시트 열림 여부, `pendingTarget`.
 - 갱신: 밴드 변경, 앱 포그라운드 복귀(`AppState` active), 포그라운드 푸시 수신, `api.subscribe` 통지. 주기 폴링은 없다.
 - 첫 권한 요청(결정 10): `permission() === "ask"`이고 밴드가 1개 이상이며 Sessions 화면이 처음 마운트됐을 때 `request()`. 물었다는 사실은 `expo-secure-store`에 플래그로 남겨(AsyncStorage 미도입) 다시 묻지 않는다. 허용되면 `syncToken`.
-- `open(target)`: `setCurrentBand(target.bandId)` → `notificationId`가 있으면 `markRead` → 이동. 세션형은 `/session/:sessionId`, 코멘트형은 `/session/:sessionId/take/:takeId?at=<sec>`. 403이면 토스트 `notifications.gone`("더 이상 볼 수 없는 알림이에요").
+- `open(target)`: 멤버십 확인(`bands`에 없으면 토스트) → `api.sessions.get(sessionId)`로 접근 확인(403/404/오류면 토스트 `notifications.gone`("더 이상 볼 수 없는 알림이에요"), 밴드는 바꾸지 않음) → 다르면 `setCurrentBand(target.bandId)` → `notificationId`가 있으면 `markRead`(best-effort, 실패해도 이동) → 이동. 세션형은 `/session/:sessionId`, 코멘트형은 `/session/:sessionId/take/:takeId?at=<sec>`.
 - 콜드 스타트: 인증 복원·밴드 로딩 전에 푸시가 들어오면 `pendingTarget`에 두고 `BandGate` 통과 뒤 소비.
 
 ### UI
@@ -290,7 +290,7 @@ interface PendingTarget {
 - `NotificationSheet`: 헤더(Notifications · 밴드명 · Mark all read(미읽음 있을 때) · 톱니), TODAY / EARLIER 그룹(`groupByDay.ts` 순수 함수, 기기 로컬 기준 오늘), 항목(이니셜 아바타 · 제목 · 상대시간 · 본문 · 메타 · 미읽음 점; 읽은 항목은 `#C6CAD1` 400, 미읽음은 `#F2F3F5` 600), "Show older (n)", 끝에 "Notifications from the last 30 days"(더 없고 6개 넘게 봤을 때), 빈 상태("Nothing yet / New sessions and comments in {band} show up here."). 문구는 `notificationText.ts` 순수 함수(en/ko). 메타는 코멘트형 `{SESSION NAME} · {mm:ss}`, 세션형 `{AUG 27} · {2H 14M}`.
 - 톱니 → 시트 닫고 `/notifications?from=sheet`. 설정 화면의 뒤로가기는 `from=sheet`면 "Back" + 돌아가서 시트 다시 열기, 아니면 "Me".
 - `app/notifications.tsx` → `NotificationSettingsScreen`: OS 상태 카드(`ask` → "Turn on notifications" = `request()`, `denied` → "Open Settings" = `Linking.openSettings()`, `unavailable`은 `denied`와 같은 카드에 문구만 "이 빌드에서는 알림을 쓸 수 없어요"), 밴드 드롭다운 + 밴드 시트(각 밴드 요약: "Sessions · all comments" / "Sessions · replies to me" / "Sessions only" / "Comments only" / "Replies to me only" / "Off"), 토글 2개, scope 라디오(코멘트 on일 때만). `ask`/`denied`이면 아래 영역 0.35 투명도 + 터치 차단. `unavailable`은 카드만 보이고 컨트롤은 그대로 쓸 수 있다 — 토글이 인박스 행도 거르기 때문이다(결정 2, 14). 토글마다 즉시 PUT, 실패하면 되돌리고 토스트. 포그라운드 복귀 때 `permission()`을 다시 읽어 iOS 설정에서 돌아온 경우를 반영한다.
-- Me 화면에 SETTINGS 섹션 + "Notifications" 행. 값 요약 `meNfValue.ts` 순수 함수: 허용 아니거나 모든 밴드 off → "Off", 모든 밴드에 하나라도 on → "On", 아니면 "{n} of {m} bands".
+- Me 화면에 SETTINGS 섹션 + "Notifications" 행. 값 요약 `meNfValue.ts` 순수 함수: `ask`/`denied`이거나 모든 밴드 off → "Off", 모든 밴드에 하나라도 on → "On", 아니면 "{n} of {m} bands" (`unavailable`은 설정값만으로 계산 — 결정 14).
 - `TakePlayerScreen`: 마운트 시 `comments.markRead(target)` 호출(원본은 세션 타깃). `?at=` 쿼리가 있으면 로드 뒤 그 시점으로 `seekTo`. 코멘트의 `unread`는 받기만 하고 표시하지 않는다.
 - 로그아웃·탈퇴: `signOut`/`deleteAccount` 안에서 `removePushToken`을 먼저(실패해도 진행) 보내고 세션을 지운다. 로그인 성공 뒤 `syncToken`.
 

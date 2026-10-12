@@ -12,6 +12,6 @@ export function createTestDb(): Db {
 
 export async function truncateAll(db: Db): Promise<void> {
   await db.execute(
-    sql`TRUNCATE support_requests, analysis_charges, extra_purchases, billing_events, comments, takes, recordings, sessions, band_invites, band_members, bands, billing_pools, auth_sessions, user_identities, users CASCADE`,
+    sql`TRUNCATE notifications, notification_settings, push_tokens, comment_read_marks, support_requests, analysis_charges, extra_purchases, billing_events, comments, takes, recordings, sessions, band_invites, band_members, bands, billing_pools, auth_sessions, user_identities, users CASCADE`,
   );
 }

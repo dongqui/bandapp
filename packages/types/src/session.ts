@@ -15,6 +15,8 @@ export interface Session {
   takeCount: number;
   /** 세션 내 전체 코멘트 수 (목록 meta 표시용) */
   commentCount: number;
+  /** 세션의 모든 take + 원본 녹음에서 내가 안 읽은 코멘트 수 */
+  unreadCommentCount: number;
   /** 원본 녹음 전체 피크 (길이 PEAK_BUCKETS). ready가 아니거나 옛 데이터면 null */
   peaks: number[] | null;
 }

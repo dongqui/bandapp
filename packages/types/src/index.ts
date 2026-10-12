@@ -4,6 +4,7 @@ export * from "./band";
 export * from "./billing";
 export * from "./health";
 export * from "./invite";
+export * from "./notification";
 export * from "./peaks";
 export * from "./session";
 export * from "./support";

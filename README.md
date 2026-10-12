@@ -69,4 +69,4 @@ flowchart LR
 
 서버: 알림 — 코멘트·세션 완료 인박스(밴드별 설정, 30일), FCM 푸시(`FIREBASE_SERVICE_ACCOUNT_JSON` 없으면 로그만)
 
-앱: 알림 — 하단 Alerts 탭(현재 밴드 인박스), Me › Notifications 설정(밴드별). FCM 푸시는 `GOOGLE_SERVICES_JSON/PLIST`가 있을 때만 빌드에 포함되므로 설정 후 dev client 재빌드가 필요하다
+앱: 알림 — 하단 Alerts 탭(현재 밴드 인박스), Me › Notifications 설정(밴드별). FCM 푸시는 `GOOGLE_SERVICES_JSON/PLIST`가 있을 때만 빌드에 포함되므로 설정 후 dev client 재빌드가 필요하다. 두 파일이 없으면 iOS/Android 모두 Firebase를 아예 빼고 빌드한다(`apps/mobile/react-native.config.js`가 오토링크를 끈다) — 인박스·설정은 동작하고 푸시만 빠진다

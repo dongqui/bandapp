@@ -16,7 +16,7 @@ import type { Db } from "../db/db.module.js";
 import { recordings, sessions } from "../db/schema.js";
 import { MembershipsService } from "../memberships/memberships.service.js";
 import { StorageService } from "../storage/storage.service.js";
-import { SESSION_WITH_COUNTS, originalKey, titleFor, toSession, type SessionRow } from "./session-mapper.js";
+import { sessionColumns, originalKey, titleFor, toSession, type SessionRow } from "./session-mapper.js";
 
 export const PART_SIZE = 10 * 1024 * 1024;
 export const MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
@@ -74,14 +74,14 @@ export class SessionsService {
       partSize: PART_SIZE,
       partCount,
     });
-    const session = await this.getRow(inserted.id);
+    const session = await this.getRow(inserted.id, userId);
     return { session: toSession(session), upload: { partSize: PART_SIZE, partCount } };
   }
 
   async list(bandId: string, userId: string): Promise<Session[]> {
     await this.memberships.assertMember(bandId, userId);
     const rows = await this.db
-      .select(SESSION_WITH_COUNTS)
+      .select(sessionColumns(userId))
       .from(sessions)
       .where(eq(sessions.bandId, bandId))
       .orderBy(desc(sessions.startedAt));
@@ -94,7 +94,7 @@ export class SessionsService {
 
   /** 세션 스코프 엔드포인트의 공통 진입점 — 없으면 404, 밴드 멤버가 아니면 403. takes/comments도 쓴다. */
   async loadForMember(id: string, userId: string): Promise<SessionRow> {
-    const row = await this.getRow(id);
+    const row = await this.getRow(id, userId);
     await this.memberships.assertMember(row.bandId, userId);
     return row;
   }
@@ -140,7 +140,7 @@ export class SessionsService {
       await tx.update(sessions).set({ status: "analyzing", updatedAt: new Date() }).where(eq(sessions.id, id));
     });
     await this.enqueue(id);
-    return toSession(await this.getRow(id));
+    return toSession(await this.getRow(id, userId));
   }
 
   async retry(id: string, userId: string): Promise<Session> {
@@ -153,7 +153,7 @@ export class SessionsService {
       .set({ status: "analyzing", analysisError: null, updatedAt: new Date() })
       .where(eq(sessions.id, id));
     await this.enqueue(id);
-    return toSession(await this.getRow(id));
+    return toSession(await this.getRow(id, userId));
   }
 
   async audioUrl(id: string, userId: string): Promise<AudioUrl> {
@@ -192,8 +192,8 @@ export class SessionsService {
     }
   }
 
-  private async getRow(id: string): Promise<SessionRow> {
-    const [row] = await this.db.select(SESSION_WITH_COUNTS).from(sessions).where(eq(sessions.id, id));
+  private async getRow(id: string, userId: string): Promise<SessionRow> {
+    const [row] = await this.db.select(sessionColumns(userId)).from(sessions).where(eq(sessions.id, id));
     if (!row) throw new NotFoundException("세션을 찾을 수 없어요.");
     return row;
   }

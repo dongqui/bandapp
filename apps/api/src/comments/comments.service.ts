@@ -1,10 +1,10 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { Provider } from "@nestjs/common";
-import { and, asc, eq, isNull, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import type { CreateCommentInput, TakeComment, UpdateCommentInput } from "@bandapp/types";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
-import { comments, users } from "../db/schema.js";
+import { commentReadMarks, comments, users } from "../db/schema.js";
 import { SessionsService } from "../sessions/sessions.service.js";
 import { TakesService } from "../takes/takes.service.js";
 
@@ -43,7 +43,13 @@ type CommentRow = {
   updatedAt: Date | null;
 };
 
-function toComment(row: CommentRow): TakeComment {
+/** 내 코멘트는 항상 읽음. 마크가 없으면 남의 코멘트는 전부 안 읽음 */
+function isUnread(row: Pick<CommentRow, "authorId" | "createdAt">, userId: string, readAt: Date | null): boolean {
+  if (row.authorId === userId) return false;
+  return readAt === null || row.createdAt > readAt;
+}
+
+function toComment(row: CommentRow, unread: boolean): TakeComment {
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -55,6 +61,7 @@ function toComment(row: CommentRow): TakeComment {
     text: row.text,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt?.toISOString() ?? null,
+    unread,
   };
 }
 
@@ -88,14 +95,31 @@ export class CommentsService {
     return { sessionId, takeId: null, lengthMs: session.durationMs };
   }
 
-  async list(scope: CommentScope): Promise<TakeComment[]> {
-    const rows = await this.db
-      .select(COMMENT_COLUMNS)
-      .from(comments)
-      .innerJoin(users, eq(users.id, comments.authorId))
-      .where(inScope(scope))
-      .orderBy(asc(comments.atMs), asc(comments.createdAt));
-    return rows.map(toComment);
+  async list(scope: CommentScope, userId: string): Promise<TakeComment[]> {
+    const [rows, readAt] = await Promise.all([
+      this.db.select(COMMENT_COLUMNS).from(comments).innerJoin(users, eq(users.id, comments.authorId)).where(inScope(scope)).orderBy(asc(comments.atMs), asc(comments.createdAt)),
+      this.readMarkOf(scope, userId),
+    ]);
+    return rows.map((row) => toComment(row, isUnread(row, userId, readAt)));
+  }
+
+  /** 대상(take 또는 원본 녹음)의 코멘트를 "지금까지 봤다"고 기록한다 (2026-10-12 스펙 결정 13). 두 번 불러도 read_at만 갱신 */
+  async markRead(scope: CommentScope, userId: string): Promise<void> {
+    await this.db
+      .insert(commentReadMarks)
+      .values({ userId, sessionId: scope.sessionId, takeId: scope.takeId })
+      .onConflictDoUpdate({
+        target: [commentReadMarks.userId, commentReadMarks.sessionId, commentReadMarks.takeId],
+        set: { readAt: sql`now()` },
+      });
+  }
+
+  private async readMarkOf(scope: CommentScope, userId: string): Promise<Date | null> {
+    const [mark] = await this.db
+      .select({ readAt: commentReadMarks.readAt })
+      .from(commentReadMarks)
+      .where(and(eq(commentReadMarks.userId, userId), eq(commentReadMarks.sessionId, scope.sessionId), scope.takeId ? eq(commentReadMarks.takeId, scope.takeId) : isNull(commentReadMarks.takeId)));
+    return mark?.readAt ?? null;
   }
 
   async create(scope: CommentScope, userId: string, input: CreateCommentInput): Promise<TakeComment> {
@@ -147,7 +171,8 @@ export class CommentsService {
   private async getOne(id: string): Promise<TakeComment> {
     const [row] = await this.db.select(COMMENT_COLUMNS).from(comments).innerJoin(users, eq(users.id, comments.authorId)).where(eq(comments.id, id));
     if (!row) throw new Error("comment vanished");
-    return toComment(row);
+    // 방금 쓰거나 고친 내 코멘트라 unread일 수 없다
+    return toComment(row, false);
   }
 }
 

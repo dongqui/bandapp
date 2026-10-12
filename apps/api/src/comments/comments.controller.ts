@@ -21,7 +21,7 @@ export class CommentsController {
   @Get("takes/:id/comments")
   async listForTake(@CurrentUserId() userId: string, @Param("id") id: string): Promise<TakeComment[]> {
     requireUuidParam(id, "id");
-    return this.comments.list(await this.comments.scopeForTake(id, userId));
+    return this.comments.list(await this.comments.scopeForTake(id, userId), userId);
   }
 
   @Post("takes/:id/comments")
@@ -35,7 +35,7 @@ export class CommentsController {
   @Get("sessions/:id/comments")
   async listForSession(@CurrentUserId() userId: string, @Param("id") id: string): Promise<TakeComment[]> {
     requireUuidParam(id, "id");
-    return this.comments.list(await this.comments.scopeForSession(id, userId));
+    return this.comments.list(await this.comments.scopeForSession(id, userId), userId);
   }
 
   @Post("sessions/:id/comments")
@@ -43,6 +43,21 @@ export class CommentsController {
     requireUuidParam(id, "id");
     const scope = await this.comments.scopeForSession(id, userId);
     return this.comments.create(scope, userId, parseCreate(body));
+  }
+
+  /** 테이크 화면을 열 때 — 이 대상의 코멘트를 읽음 처리 (2026-10-12 스펙) */
+  @Post("takes/:id/comments/read")
+  @HttpCode(204)
+  async readForTake(@CurrentUserId() userId: string, @Param("id") id: string): Promise<void> {
+    requireUuidParam(id, "id");
+    await this.comments.markRead(await this.comments.scopeForTake(id, userId), userId);
+  }
+
+  @Post("sessions/:id/comments/read")
+  @HttpCode(204)
+  async readForSession(@CurrentUserId() userId: string, @Param("id") id: string): Promise<void> {
+    requireUuidParam(id, "id");
+    await this.comments.markRead(await this.comments.scopeForSession(id, userId), userId);
   }
 
   @Patch("comments/:id")

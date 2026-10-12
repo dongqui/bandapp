@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { checkTakeRange, defaultTakeName, neighborsAt, neighborsOf, type AudioUrl, type CreateTakeInput, type Take, type TakeAudioStatus, type TakeCandidateType, type TakeRangeError, type UpdateTakeInput } from "@bandapp/types";
 import { AnalysisProducer } from "../analysis/analysis.producer.js";
+import { unreadTakeCommentCount } from "../comments/comment-unread.js";
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { comments, sessions, takes } from "../db/schema.js";
@@ -11,23 +12,26 @@ import { takeKey, type SessionRow } from "../sessions/session-mapper.js";
 import { PRESIGN_EXPIRES_SEC, SessionsService } from "../sessions/sessions.service.js";
 import { StorageService } from "../storage/storage.service.js";
 
-export const TAKE_WITH_COUNT = {
-  id: takes.id,
-  sessionId: takes.sessionId,
-  index: takes.index,
-  name: takes.name,
-  startMs: takes.startMs,
-  endMs: takes.endMs,
-  type: takes.type,
-  objectKey: takes.objectKey,
-  peaks: takes.peaks,
-  version: takes.version,
-  audioStatus: takes.audioStatus,
-  // ${takes.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
-  // comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
-  // 답글은 세지 않는다 — "N comments"는 스레드 수다 (스레드 스펙 결정 5).
-  commentCount: sql<number>`(select count(*)::int from comments c where c.take_id = "takes"."id" and c.parent_id is null)`,
-};
+export function takeColumns(userId: string) {
+  return {
+    id: takes.id,
+    sessionId: takes.sessionId,
+    index: takes.index,
+    name: takes.name,
+    startMs: takes.startMs,
+    endMs: takes.endMs,
+    type: takes.type,
+    objectKey: takes.objectKey,
+    peaks: takes.peaks,
+    version: takes.version,
+    audioStatus: takes.audioStatus,
+    // ${takes.id}는 단일 테이블 select에서 테이블 접두어 없이 "id"로 렌더링돼 서브쿼리 안의
+    // comments.id와 충돌한다 — 상관 서브쿼리이므로 테이블명을 직접 명시해 모호성을 없앤다.
+    // 답글은 세지 않는다 — "N comments"는 스레드 수다 (스레드 스펙 결정 5).
+    commentCount: sql<number>`(select count(*)::int from comments c where c.take_id = "takes"."id" and c.parent_id is null)`,
+    unreadCommentCount: unreadTakeCommentCount(userId),
+  };
+}
 
 export interface TakeRow {
   id: string;
@@ -42,6 +46,7 @@ export interface TakeRow {
   version: number;
   audioStatus: TakeAudioStatus;
   commentCount: number;
+  unreadCommentCount: number;
 }
 
 export function toTake(row: TakeRow): Take {
@@ -55,6 +60,7 @@ export function toTake(row: TakeRow): Take {
     endMs: row.endMs,
     type: row.type,
     commentCount: row.commentCount,
+    unreadCommentCount: row.unreadCommentCount,
     peaks: row.peaks ?? null,
     version: row.version,
     audioStatus: row.audioStatus,
@@ -89,7 +95,7 @@ export class TakesService {
   async list(sessionId: string, userId: string): Promise<Take[]> {
     await this.sessions.loadForMember(sessionId, userId);
     // 시간 순 — 수동 take는 index가 제일 크면서 시간상 중간에 들어간다 (2026-10-08)
-    const rows = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.sessionId, sessionId)).orderBy(asc(takes.startMs), asc(takes.index));
+    const rows = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.sessionId, sessionId)).orderBy(asc(takes.startMs), asc(takes.index));
     return rows.map(toTake);
   }
 
@@ -131,7 +137,7 @@ export class TakesService {
         .where(eq(sessions.id, sessionId));
     });
     await this.enqueueRecutOrFail(takeId, version);
-    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    const [row] = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.id, takeId));
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
     return toTake(row);
   }
@@ -151,7 +157,7 @@ export class TakesService {
 
   /** take → 세션 순으로 검증한다 (sessions.loadForMember가 멤버십을 확인한다). 없으면 404, 멤버가 아니면 403. */
   async loadForMember(takeId: string, userId: string): Promise<TakeRow> {
-    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    const [row] = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.id, takeId));
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
     await this.sessions.loadForMember(row.sessionId, userId);
     return row;
@@ -166,7 +172,7 @@ export class TakesService {
   }
 
   private async loadWithSession(takeId: string, userId: string): Promise<{ take: TakeRow; session: SessionRow }> {
-    const [take] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    const [take] = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.id, takeId));
     if (!take) throw new NotFoundException("Take를 찾을 수 없어요.");
     const session = await this.sessions.loadForMember(take.sessionId, userId);
     return { take, session };
@@ -198,7 +204,7 @@ export class TakesService {
     });
 
     await this.enqueueRecutOrFail(takeId, nextVersion);
-    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    const [row] = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.id, takeId));
     // 트랜잭션과 재조회 사이에 다른 멤버가 지웠을 수 있다 — non-null assertion 대신 명시적으로 404
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
     return toTake(row);
@@ -211,7 +217,7 @@ export class TakesService {
   async rename(takeId: string, userId: string, name: string | null): Promise<Take> {
     const take = await this.loadForMember(takeId, userId);
     await this.db.update(takes).set({ name: name ?? defaultTakeName(take.index) }).where(eq(takes.id, takeId));
-    const [row] = await this.db.select(TAKE_WITH_COUNT).from(takes).where(eq(takes.id, takeId));
+    const [row] = await this.db.select(takeColumns(userId)).from(takes).where(eq(takes.id, takeId));
     // 갱신과 재조회 사이에 다른 멤버가 지웠을 수 있다
     if (!row) throw new NotFoundException("Take를 찾을 수 없어요.");
     return toTake(row);

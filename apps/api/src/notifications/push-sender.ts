@@ -53,6 +53,11 @@ export class FirebasePushSender implements PushSender {
       apns: { payload: { aps: { sound: "default" } } },
       android: { priority: "high" },
     });
+    // 전 토큰이 invalid-argument면 토큰이 아니라 페이로드(크기 초과, 예약된/비문자열 data 키)가 문제다 — 행을 지우지 않는다
+    if (res.responses.every((r) => !r.success && r.error?.code === "messaging/invalid-argument")) {
+      this.logger.error(`push payload rejected for all ${tokens.length} token(s), keeping them: ${res.responses[0]?.error?.message ?? "invalid-argument"}`);
+      return { invalidTokens: [] };
+    }
     const invalidTokens: string[] = [];
     res.responses.forEach((r, i) => {
       if (r.success) return;

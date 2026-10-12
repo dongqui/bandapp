@@ -28,6 +28,16 @@ describe("FirebasePushSender", () => {
     expect(calls[0]).toMatchObject({ tokens: ["ok", "gone", "flaky", "bad"], notification: { title: "t", body: "b" }, data: { type: "comment" } });
   });
 
+  it("전부 invalid-argument면 페이로드 문제로 보고 아무 토큰도 돌려주지 않는다", async () => {
+    const { messaging } = fakeMessaging([
+      { success: false, code: "messaging/invalid-argument" },
+      { success: false, code: "messaging/invalid-argument" },
+      { success: false, code: "messaging/invalid-argument" },
+    ]);
+    const res = await new FirebasePushSender(messaging).send(["a", "b", "c"], message);
+    expect(res.invalidTokens).toEqual([]);
+  });
+
   it("토큰이 없으면 호출하지 않는다", async () => {
     const { messaging, calls } = fakeMessaging([]);
     expect(await new FirebasePushSender(messaging).send([], message)).toEqual({ invalidTokens: [] });

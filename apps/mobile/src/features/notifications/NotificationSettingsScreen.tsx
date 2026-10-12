@@ -84,7 +84,8 @@ export function NotificationSettingsScreen() {
     router.back();
     if (from === "sheet") setSheetOpen(true);
   };
-  const ok = permission === "allowed";
+  // ask/denied만 막는다 — unavailable(Firebase 없는 빌드)에서도 토글은 인박스 행을 거르므로 쓸 수 있어야 한다 (결정 14)
+  const ok = permission === "allowed" || permission === "unavailable";
 
   return (
     <Screen>

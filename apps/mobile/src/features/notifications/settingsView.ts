@@ -11,10 +11,10 @@ export function settingsSummary(s: UpdateNotificationSettingsInput): SummaryKey 
   return "off";
 }
 
-/** Me 행 값 (디자인 meNfValue): 권한 없거나 전부 off → off, 전부 on → on, 아니면 n of m */
+/** Me 행 값 (디자인 meNfValue): ask/denied 또는 전부 off → off, 전부 on → on, 아니면 n of m. unavailable(Firebase 없는 빌드)은 설정이 인박스 행도 거르므로 설정 그대로 (결정 14) */
 export function meNfValue(permission: PushPermission, settings: NotificationSettings[]): { kind: "off" } | { kind: "on" } | { kind: "partial"; on: number; total: number } {
   const on = settings.filter((s) => s.sessionReady || s.comments).length;
-  if (permission !== "allowed" || on === 0) return { kind: "off" };
+  if (permission === "ask" || permission === "denied" || on === 0) return { kind: "off" };
   if (on === settings.length) return { kind: "on" };
   return { kind: "partial", on, total: settings.length };
 }

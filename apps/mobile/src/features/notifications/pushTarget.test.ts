@@ -11,6 +11,7 @@ describe("parsePushData", () => {
   });
   it("필수 키가 빠지면 null, atMs가 숫자가 아니면 at 없이", () => {
     expect(parsePushData(undefined)).toBeNull();
+    expect(parsePushData({ bandId: "b", sessionId: "s", type: "foo" })).toBeNull();
     expect(parsePushData({ sessionId: "s", type: "comment" })).toBeNull();
     expect(parsePushData({ bandId: "b", sessionId: "s", type: "comment", atMs: "x" })).toMatchObject({ atSec: null });
   });

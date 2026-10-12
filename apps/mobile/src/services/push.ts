@@ -46,7 +46,13 @@ export const push = {
     if (Platform.OS === "android") {
       if (await androidGranted()) return "allowed";
       // Android는 "안 물어봄"과 "거부"를 구분해 주지 않는다 — 우리가 물었는지로 가른다
-      return (await secureStorage.get("pushAsked")) ? "denied" : "ask";
+      try {
+        return (await secureStorage.get("pushAsked")) ? "denied" : "ask";
+      } catch (err) {
+        // 저장소를 읽지 못하면 아직 안 물어본 것으로 본다
+        console.warn("pushAsked read failed", err);
+        return "ask";
+      }
     }
     const status = await f.m.hasPermission(f.inst);
     const S = f.m.AuthorizationStatus;
@@ -58,14 +64,24 @@ export const push = {
   async request(): Promise<PushPermission> {
     const f = fb();
     if (!f) return "unavailable";
-    await secureStorage.set("pushAsked", "1");
-    if (Platform.OS === "android") {
-      if (Platform.Version < 33) return "allowed";
-      const r = await PermissionsAndroid.request(POST_NOTIFICATIONS);
-      return r === PermissionsAndroid.RESULTS.GRANTED ? "allowed" : "denied";
+    try {
+      let result: PushPermission;
+      if (Platform.OS === "android") {
+        if (Platform.Version < 33) return "allowed"; // 다이얼로그가 없다 — 플래그도 필요 없다
+        const r = await PermissionsAndroid.request(POST_NOTIFICATIONS);
+        result = r === PermissionsAndroid.RESULTS.GRANTED ? "allowed" : "denied";
+      } else {
+        const status = await f.m.requestPermission(f.inst);
+        result = status === f.m.AuthorizationStatus.AUTHORIZED || status === f.m.AuthorizationStatus.PROVISIONAL ? "allowed" : "denied";
+      }
+      // 다이얼로그가 실제로 끝난 뒤에만 "물어봤음"을 남긴다 (Android의 ask/denied 구분 근거)
+      await secureStorage.set("pushAsked", "1").catch((err) => console.warn("pushAsked save failed", err));
+      return result;
+    } catch (err) {
+      // 네이티브 오류로 다이얼로그가 뜨지 못했다 — 플래그를 남기지 않고 "ask"로 두어 설정 카드가 다시 "켜기"를 보여준다
+      console.warn("push permission request failed", err);
+      return "ask";
     }
-    const status = await f.m.requestPermission(f.inst);
-    return status === f.m.AuthorizationStatus.AUTHORIZED || status === f.m.AuthorizationStatus.PROVISIONAL ? "allowed" : "denied";
   },
 
   async getToken(): Promise<string | null> {

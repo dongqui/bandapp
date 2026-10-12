@@ -26,6 +26,7 @@ Claude Design "Rehersal app"에 2026-10-12 추가된 알림 화면을 구현하�
 11. **포그라운드에서는 배너 없이 배지·인박스만 갱신한다.** 디자인의 `showPush` 배너는 OS 배너를 흉내 낸 것이다. iOS는 앱이 켜져 있으면 기본적으로 배너를 띄우지 않고, 인앱 배너는 추가 작업(notifee 등)이라 범위에서 뺀다.
 12. **앱 아이콘 배지 숫자는 넣지 않는다.** 밴드가 여럿일 때 의미가 애매하고 디자인에도 없다.
 13. **코멘트 "읽음"의 단위는 대상(테이크 또는 원본 녹음)별 "여기까지 봤다" 시각 1개.** 테이크/원본 화면을 열 때 now()로 갱신한다. 코멘트별 읽음 행은 두지 않는다.
+14. **`unavailable`(Firebase 없는 빌드)에서도 설정 화면은 쓸 수 있다.** 토글이 인박스 행도 거르므로(결정 2) 푸시를 못 받는 빌드에서도 의미가 있다. 막는 것은 `ask`/`denied`뿐이고, Me 행 값도 `unavailable`이면 설정 그대로 보여 준다.
 
 ## 데이터
 
@@ -288,7 +289,7 @@ interface PendingTarget {
 - `TabBar`: `TabKey`에 `"alerts"` 추가, 4칸. 벨 아이콘 + 배지(`9+`). Alerts는 라우트가 아니라 **시트 토글** — `TabsLayout`이 `NotificationSheet`를 `NewSessionSheet`처럼 올린다. 시트가 열려 있으면 Alerts 탭이 활성 색, 다른 탭은 비활성.
 - `NotificationSheet`: 헤더(Notifications · 밴드명 · Mark all read(미읽음 있을 때) · 톱니), TODAY / EARLIER 그룹(`groupByDay.ts` 순수 함수, 기기 로컬 기준 오늘), 항목(이니셜 아바타 · 제목 · 상대시간 · 본문 · 메타 · 미읽음 점; 읽은 항목은 `#C6CAD1` 400, 미읽음은 `#F2F3F5` 600), "Show older (n)", 끝에 "Notifications from the last 30 days"(더 없고 6개 넘게 봤을 때), 빈 상태("Nothing yet / New sessions and comments in {band} show up here."). 문구는 `notificationText.ts` 순수 함수(en/ko). 메타는 코멘트형 `{SESSION NAME} · {mm:ss}`, 세션형 `{AUG 27} · {2H 14M}`.
 - 톱니 → 시트 닫고 `/notifications?from=sheet`. 설정 화면의 뒤로가기는 `from=sheet`면 "Back" + 돌아가서 시트 다시 열기, 아니면 "Me".
-- `app/notifications.tsx` → `NotificationSettingsScreen`: OS 상태 카드(`ask` → "Turn on notifications" = `request()`, `denied` → "Open Settings" = `Linking.openSettings()`, `unavailable`은 `denied`와 같은 카드에 문구만 "이 빌드에서는 알림을 쓸 수 없어요"), 밴드 드롭다운 + 밴드 시트(각 밴드 요약: "Sessions · all comments" / "Sessions · replies to me" / "Sessions only" / "Comments only" / "Replies to me only" / "Off"), 토글 2개, scope 라디오(코멘트 on일 때만). 허용 상태가 아니면 아래 영역 0.35 투명도 + 터치 차단. 토글마다 즉시 PUT, 실패하면 되돌리고 토스트. 포그라운드 복귀 때 `permission()`을 다시 읽어 iOS 설정에서 돌아온 경우를 반영한다.
+- `app/notifications.tsx` → `NotificationSettingsScreen`: OS 상태 카드(`ask` → "Turn on notifications" = `request()`, `denied` → "Open Settings" = `Linking.openSettings()`, `unavailable`은 `denied`와 같은 카드에 문구만 "이 빌드에서는 알림을 쓸 수 없어요"), 밴드 드롭다운 + 밴드 시트(각 밴드 요약: "Sessions · all comments" / "Sessions · replies to me" / "Sessions only" / "Comments only" / "Replies to me only" / "Off"), 토글 2개, scope 라디오(코멘트 on일 때만). `ask`/`denied`이면 아래 영역 0.35 투명도 + 터치 차단. `unavailable`은 카드만 보이고 컨트롤은 그대로 쓸 수 있다 — 토글이 인박스 행도 거르기 때문이다(결정 2, 14). 토글마다 즉시 PUT, 실패하면 되돌리고 토스트. 포그라운드 복귀 때 `permission()`을 다시 읽어 iOS 설정에서 돌아온 경우를 반영한다.
 - Me 화면에 SETTINGS 섹션 + "Notifications" 행. 값 요약 `meNfValue.ts` 순수 함수: 허용 아니거나 모든 밴드 off → "Off", 모든 밴드에 하나라도 on → "On", 아니면 "{n} of {m} bands".
 - `TakePlayerScreen`: 마운트 시 `comments.markRead(target)` 호출(원본은 세션 타깃). `?at=` 쿼리가 있으면 로드 뒤 그 시점으로 `seekTo`. 코멘트의 `unread`는 받기만 하고 표시하지 않는다.
 - 로그아웃·탈퇴: `signOut`/`deleteAccount` 안에서 `removePushToken`을 먼저(실패해도 진행) 보내고 세션을 지운다. 로그인 성공 뒤 `syncToken`.

@@ -18,12 +18,13 @@ export function targetOf(item: NotificationItem, bandId: string): PendingTarget 
   return { notificationId: item.id, bandId, sessionId: item.session.id, takeId: item.take?.id ?? "orig", atSec: item.comment?.atSec ?? null };
 }
 
-/** FCM data는 전부 문자열. 필수 키가 빠지면 null — 모르는 푸시는 무시한다 */
+/** FCM data는 전부 문자열. 필수 키가 빠지거나 type이 session_ready/comment/reply가 아니면 null — 모르는 푸시는 무시한다 */
 export function parsePushData(data: Record<string, unknown> | undefined | null): PendingTarget | null {
   if (!data) return null;
   const str = (k: string) => (typeof data[k] === "string" && (data[k] as string).length > 0 ? (data[k] as string) : null);
   const bandId = str("bandId"), sessionId = str("sessionId"), type = str("type");
   if (!bandId || !sessionId || !type) return null;
+  if (type !== "session_ready" && type !== "comment" && type !== "reply") return null;
   if (type === "session_ready") return { notificationId: str("notificationId"), bandId, sessionId, takeId: null, atSec: null };
   const atMs = str("atMs");
   return { notificationId: str("notificationId"), bandId, sessionId, takeId: str("takeId") ?? "orig", atSec: atMs !== null && Number.isFinite(Number(atMs)) ? Number(atMs) / 1000 : null };

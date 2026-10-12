@@ -44,7 +44,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
   const refreshPermission = useCallback(async () => setPermission(await push.permission()), []);
   useEffect(() => {
-    void refreshPermission();
+    refreshPermission().catch((e) => console.warn("refresh permission failed", e));
   }, [refreshPermission]);
 
   const refresh = useCallback(() => {
@@ -63,7 +63,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     const sub = AppState.addEventListener("change", (s) => {
       if (s === "active") {
         refresh();
-        void refreshPermission();
+        refreshPermission().catch((e) => console.warn("refresh permission failed", e));
       }
     });
     const offMsg = push.onForegroundMessage(refresh);
@@ -96,7 +96,7 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (askedThisRun.current || !authed || loading || bands.length === 0 || permission !== "ask") return;
     askedThisRun.current = true;
-    void push.request().then(setPermission);
+    push.request().then(setPermission).catch((e) => console.warn("push request failed", e));
   }, [authed, loading, bands.length, permission]);
 
   const requestPermission = useCallback(async () => {
@@ -113,16 +113,18 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
         toast.show(t("notifications.gone"));
         return;
       }
-      if (band?.id !== target.bandId) setCurrentBand(target.bandId);
       try {
-        if (target.notificationId) await api.notifications.markRead(target.notificationId);
-        // 세션 접근 가능 여부를 먼저 확인 — 쫓겨났거나 지워졌으면 403/404
+        // 접근 확인이 먼저 — 죽은 알림이 현재 밴드를 바꾸면 안 된다 (쫓겨났거나 지워졌으면 403/404)
         await api.sessions.get(target.sessionId);
-        router.push(routeFor(target));
       } catch (err) {
         if (!(err instanceof ApiError)) console.warn("notification open failed", err);
         toast.show(t("notifications.gone"));
+        return;
       }
+      if (band?.id !== target.bandId) setCurrentBand(target.bandId);
+      // 읽음 처리는 best-effort — 실패해도 이동을 막지 않고 기다리지도 않는다
+      if (target.notificationId) api.notifications.markRead(target.notificationId).catch(() => undefined);
+      router.push(routeFor(target));
     },
     [api, band?.id, bands, router, setCurrentBand, t, toast],
   );

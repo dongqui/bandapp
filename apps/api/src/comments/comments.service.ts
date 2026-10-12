@@ -5,6 +5,7 @@ import type { CreateCommentInput, TakeComment, UpdateCommentInput } from "@banda
 import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { commentReadMarks, comments, users } from "../db/schema.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { SessionsService } from "../sessions/sessions.service.js";
 import { TakesService } from "../takes/takes.service.js";
 
@@ -81,6 +82,7 @@ export class CommentsService {
     private readonly db: Db,
     private readonly takes: TakesService,
     private readonly sessions: SessionsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** 없으면 404, 멤버가 아니면 403 (takes.loadForMember) */
@@ -144,7 +146,10 @@ export class CommentsService {
       .values({ sessionId: scope.sessionId, takeId: scope.takeId, authorId: userId, parentId, atMs, text })
       .returning({ id: comments.id });
     if (!inserted) throw new Error("failed to insert comment");
-    return this.getOne(inserted.id);
+    const created = await this.getOne(inserted.id);
+    // 알림은 보조 — 실패해도 코멘트는 저장됐다 (서비스 안에서 삼킨다)
+    await this.notifications.onCommentCreated(created);
+    return created;
   }
 
   async update(id: string, userId: string, input: UpdateCommentInput): Promise<TakeComment> {
@@ -178,6 +183,7 @@ export class CommentsService {
 
 export const commentsServiceProvider: Provider = {
   provide: CommentsService,
-  useFactory: (db: Db, takes: TakesService, sessions: SessionsService) => new CommentsService(db, takes, sessions),
-  inject: [DB, TakesService, SessionsService],
+  useFactory: (db: Db, takes: TakesService, sessions: SessionsService, notifications: NotificationsService) =>
+    new CommentsService(db, takes, sessions, notifications),
+  inject: [DB, TakesService, SessionsService, NotificationsService],
 };

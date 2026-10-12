@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   optionalInteger,
+  requireBoolean,
   requireInteger,
   requireIsoDate,
   requireNumber,
@@ -50,6 +51,14 @@ describe("requireOneOf", () => {
     expect(() => requireOneOf({ s: "x" }, "s", ["recording", "import"] as const)).toThrow(
       BadRequestException,
     );
+  });
+});
+
+describe("requireBoolean", () => {
+  it("true/false만 받는다", () => {
+    expect(requireBoolean({ a: true }, "a")).toBe(true);
+    expect(requireBoolean({ a: false }, "a")).toBe(false);
+    for (const v of ["true", 1, null, undefined]) expect(() => requireBoolean({ a: v }, "a")).toThrow(BadRequestException);
   });
 });
 

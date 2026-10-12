@@ -15,7 +15,7 @@ import { TakeDeleteDialog } from "./TakeDeleteDialog";
 import { TakeMoreButton } from "./TakeMoreButton";
 import { TakeRenameSheet } from "./TakeRenameSheet";
 import { groupThreads, type CommentThread as Thread } from "./threads";
-import { useAudioUrl } from "./useAudioUrl";
+import { useAudioSource } from "./useAudioUrl";
 import { useComments } from "./useComments";
 import { usePlayback } from "./usePlayback";
 import { useSession } from "./useSession";
@@ -37,7 +37,7 @@ function quote(text: string): string {
 }
 
 export function TakePlayerScreen() {
-  const { id, takeId } = useLocalSearchParams<{ id: string; takeId: string }>();
+  const { id, takeId, at } = useLocalSearchParams<{ id: string; takeId: string; at?: string }>();
   const { data: session } = useSession(id);
   const { data: takes, reload: reloadTakes } = useTakes(id);
   const router = useRouter();
@@ -62,7 +62,7 @@ export function TakePlayerScreen() {
   // 원본 녹음도 같은 목록·입력을 쓴다 — 대상만 다르다 (2026-09-09 스펙 결정 4, 8)
   const target: CommentTarget | undefined = !session || !take ? undefined : isOriginal ? { sessionId: session.id } : { takeId: take.id };
   const { data: comments, reload } = useComments(target);
-  const url = useAudioUrl(isOriginal ? "session" : "take", isOriginal ? session?.id : take?.id);
+  const { url, resolved: urlResolved } = useAudioSource(isOriginal ? "session" : "take", isOriginal ? session?.id : take?.id);
   const playback = usePlayback(take?.durationSec ?? 0, url);
 
   const threads = useMemo(() => groupThreads(comments ?? []), [comments]);
@@ -174,6 +174,28 @@ export function TakePlayerScreen() {
     shownErrorRef.current = playback.error;
     toast.show("Couldn’t play this audio");
   }, [playback.error, toast]);
+
+  // 이 대상의 코멘트를 "지금까지 봤다"로 기록 (2026-10-12 스펙 결정 13). 대상이 바뀔 때 한 번 —
+  // markRead 뒤의 emit으로 코멘트 목록이 다시 로드되어도 targetKey는 그대로라 다시 돌지 않는다.
+  const targetKey = target ? ("takeId" in target ? `take:${target.takeId}` : `session:${target.sessionId}`) : null;
+  useEffect(() => {
+    if (!target) return;
+    api.comments.markRead(target).catch((e) => console.warn("markRead failed", e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetKey, api]);
+
+  // 알림에서 들어온 시점으로 한 번만 이동 — take 길이와 오디오 URL 조회, 플레이어 로드가 끝난 뒤.
+  // Mock은 url이 없어 시뮬레이션(loaded=true)이고, 실서버는 URL이 오기 전까지 시뮬레이션 경로라
+  // urlResolved를 기다리지 않으면 시뮬레이션에 seek하고 끝나 버린다. 네이티브는 로드 전 seekTo가
+  // 무시될 수 있어 loaded도 기다린다.
+  const seeked = useRef(false);
+  useEffect(() => {
+    const sec = at ? Number(at) : NaN;
+    if (seeked.current || !take || !urlResolved || !playback.loaded || !Number.isFinite(sec)) return;
+    seeked.current = true;
+    playback.seekTo(Math.max(0, sec - 5)); // 코멘트 탭과 같은 5초 전 (디자인 pos)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at, take, urlResolved, playback.loaded]);
 
   if (!session || !take) return <Screen>{null}</Screen>;
   const sub = `${session.title} · ${isOriginal ? fmtDuration(take.durationSec) : fmtClock(take.durationSec)}`;

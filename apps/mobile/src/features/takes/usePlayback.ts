@@ -18,6 +18,8 @@ export function usePlayback(durationSec: number, url: string | null) {
   return {
     positionSec: status.currentTime,
     playing: status.playing,
+    // 플레이어가 소스를 로드했는지 — 로드 전 seekTo는 무시될 수 있어 딥링크 이동이 이 신호를 기다린다
+    loaded: status.isLoaded,
     // 로드·디코딩 실패는 화면이 토스트로 알린다 — 안 그러면 재생 버튼이 먹통인 이유를 알 수 없다
     error: status.error ?? null,
     toggle: () => {
@@ -64,5 +66,5 @@ function useSimulatedPlayback(durationSec: number, enabled: boolean) {
     setPositionSec(Math.max(0, Math.min(durationSec, sec)));
     if (autoplay) setPlaying(true);
   };
-  return { positionSec, playing, toggle, seekTo, error: null };
+  return { positionSec, playing, toggle, seekTo, error: null, loaded: true };
 }

@@ -66,3 +66,5 @@ flowchart LR
 | **take 편집** 핸들을 끌거나 시간을 입력해 경계를 고친다. 수동 take 추가. | **take 피드백** 시간 위치가 붙은 코멘트와 답글.                     |
 | <img src="docs/screenshots/band.webp" width="280">                       | <img src="docs/screenshots/plan.webp" width="280">                  |
 | **밴드** 멤버와 파트, 초대, 소유권 이전.                                 | **플랜·사용량** 월 분석 시간과 추가 시간. 여러 밴드가 한 풀을 쓴다. |
+
+서버: 알림 — 코멘트·세션 완료 인박스(밴드별 설정, 30일), FCM 푸시(`FIREBASE_SERVICE_ACCOUNT_JSON` 없으면 로그만)

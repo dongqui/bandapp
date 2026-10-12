@@ -1,112 +1,68 @@
-# bandapp
+# Take N
 
-밴드 합주 녹음을 자동으로 정리해 주는 앱. PRD와 설계 문서는 `docs/` 참고.
+밴드 합주를 녹음하려면 곡이 시작하고 끝날 때마다 녹음을 껐다 켜야 하고, 그게 귀찮아서 한 번에 녹음해 두면 나중에 연주 구간을 찾기 어렵다.
+
+Take N은 합주 전체를 녹음해서 올리면 연주 구간(take)만 잘라서 정리해 주는 앱이다. 곡 단위로 잘린 take에 멤버들이 코멘트를 남기며 피드백을 주고받는다.
+
+- Android, iOS 지원
+- 스토어 심사 준비 중
+- 2026년 8월부터 개발
+- 1인 개발
+
+## 기술
+
+- 앱: React-native(Expo), TypeScript
+- 서버: NestJS, PostgreSQL (Neon), Drizzle ORM, SQS, Gemini, ffmpeg.
+- 인프라: AWS ECS Fargate, ALB, SQS, SSM Parameter Store, CDK (TypeScript), Cloudflare R2
+- 개발 환경: Turborepo 모노레포, Docker Compose + LocalStack, Vitest
 
 ## 구조
 
+```mermaid
+flowchart LR
+  App["앱<br/>Expo · React Native"]
+  subgraph AWS["AWS · ECS Fargate (CDK)"]
+    API["API · NestJS"]
+    SQS["SQS"]
+    Worker["Worker<br>ffmpeg · 오디오 분석/수정"]
+  end
+  DB[("PostgreSQL · Neon")]
+  R2[("Cloudflare R2<br/>원본 · take · peaks")]
+  Gemini["Gemini"]
+
+  App -- "HTTPS · JWT" --> API
+  App -- "presigned 업로드 · 재생" --> R2
+  API --> DB
+  API -- "분석 · 재컷 잡" --> SQS --> Worker
+  Worker <--> R2
+  Worker -- "청크별 structured output" --> Gemini
+  Worker --> DB
+```
+
+분석 순서: R2 다운로드 → ffmpeg 20분 청크(앞뒤 30초 겹침) → 청크별 Gemini 분석 → 겹침 병합 → take 절단 → 피크 추출(초당 50개, `peaks.bin`) → R2·DB 반영
+
+---
+
+### 폴더 구조
+
 - `apps/mobile` — Expo(React Native) 앱
-- `apps/api` — NestJS API
-- `apps/audio-worker` — Python 분석 워커 (JS 워크스페이스 밖, 자체 pyproject)
+- `apps/api` — NestJS API와 분석 워커 (`api.main.ts` / `worker.main.ts`, 같은 이미지)
+- `apps/audio-worker` — Python 분석 워커 뼈대 (JS 워크스페이스 밖, 자체 pyproject). 검출기 전처리 자리
 - `packages/types` — mobile ↔ api 공유 타입 (유일한 공유 지점)
 - `packages/api-client` — API 클라이언트
 - `packages/config` — 공유 tsconfig/prettier 프리셋
 - `poc/` — Phase 0 오디오 세그멘테이션 실험 하네스 (독립)
-- `infra/` — 인프라 정의 자리
+- `infra/` — AWS CDK 스택과 ECR 푸시 스크립트
 
-## 시작하기
+## 주요 기능
 
-Node >=22, pnpm 10 필요.
-
-```bash
-pnpm install
-pnpm build      # turbo run build
-pnpm lint
-pnpm test
-```
-
-audio-worker는 `apps/audio-worker/`에서 별도 설치:
-
-```bash
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -e ".[dev]"
-```
-
-## 로컬 개발 환경
-
-```bash
-cp .env.example .env   # 최초 1회
-docker compose up --build -d
-```
-
-- API: http://localhost:3000 (health: `GET /health`)
-- 분석 파이프라인: 세션 생성(`POST /bands/:bandId/sessions`) → presigned multipart 업로드 → `POST /sessions/:id/upload/complete` → SQS → worker(R2 다운로드 → ffmpeg 청크 → Gemini → 피크 추출(원본 1회 디코드) → 피크 사이드카(peaks.bin) R2 업로드 → take 절단 → R2 업로드 → DB). `.env`에 `GEMINI_API_KEY`, `R2_*`, `DEV_LOGIN_SECRET`이 필요하다.
-- 업로드 재개: 앱이 녹음/가져오기 파일을 `documentDirectory/uploads/`로 옮기고 create 직후 `pending.json`에 레코드를 남긴다. 끊긴 업로드는 세션 목록의 uploading 행("Tap to continue uploading")에서 `GET /sessions/:id/upload`로 남은 파트만 올린다. complete가 끝나면 파일·레코드를 지우고, 앱 시작 시 레코드 없는 파일을 정리하며 이때 7일(R2 멀티파트 업로드 만료 규칙과 같은 값) 지난 레코드도 파일과 함께 정리한다.
-- 서버 전 구간 검증(Windows): PowerShell에서는 `$env:UPLOAD_FILE="poc/data/raw_sessions/IMG_2811.m4a"; $env:API_URL="http://localhost:3001"; $env:DEV_LOGIN_SECRET="<.env 값>"; pnpm --filter @bandapp/api upload-session` (API_URL은 호스트에 노출된 포트, `API_PORT`로 바뀌며 이 머신에서는 3001). bash라면 `UPLOAD_FILE=poc/data/raw_sessions/IMG_2811.m4a API_URL=http://localhost:3001 DEV_LOGIN_SECRET=<.env 값> pnpm --filter @bandapp/api upload-session`. → 업로드 진행률, 분석 대기, take 목록, 첫 take ffprobe 길이가 순서대로 찍힌다. 워커 로그는 `docker compose logs -f worker`.
-- Dockerfile에 ffmpeg이 추가됐고 큐 visibility timeout이 바뀌었으니 기존 체크아웃은 `docker compose up --build -V`로 재빌드하고 localstack 볼륨도 새로 만든다 (`docker compose down -v` 후 up).
-- 큐: LocalStack SQS (`recording-analysis`, `recording-analysis-python`, `recording-analysis-dlq`)
-- 종료: `docker compose down`
-- 의존성 추가/변경 후에는 `docker compose up --build -V`로 anonymous node_modules 볼륨을 재생성해야 반영된다. (auth/bands/invites 도입으로 drizzle-orm, pg, jose, @nestjs/throttler가 새로 추가됐으니 기존 체크아웃은 반드시 `-V`로 재빌드할 것)
-
-### 녹음 업로드·분석 (모바일)
-
-- 가져오기·녹음 모두 m4a만 다룬다. 업로드는 앱이 R2에 직접 하고(presigned multipart), 완료되면 워커가 분석한다.
-- 새 네이티브 모듈(expo-audio, expo-document-picker, expo-file-system)이 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
-- 서버 없이 UI만 볼 때는 `EXPO_PUBLIC_API_URL`을 비워 Mock으로 띄운다. Mock은 업로드 진행률만 흉내 내고 재생은 시뮬레이션이다.
-- 웹 프리뷰(`pnpm --filter mobile dev`)에서 의미 있는 건 가져오기뿐이다. 녹음은 브라우저에서 webm이 나와 서버가 받는 m4a와 맞지 않으니 네이티브(dev build)에서만 쓴다.
-- USB로 꽂은 안드로이드 폰(dev client)에서 테스트할 때는 `pnpm --filter mobile phone` 한 줄이면 된다 — adb reverse(8081·3001) + Metro(dev-client) + 앱 자동 실행. 재빌드는 네이티브 모듈이나 app.json이 바뀔 때만 필요하다 (Windows 절차: `docs/superpowers/specs/2026-09-03-google-signin-setup-record.md`).
-- 피드백은 take와 원본 녹음 둘 다에 남길 수 있고, 본인 코멘트는 `···`로 수정·삭제한다 (`PATCH/DELETE /comments/:id`, `GET/POST /sessions/:id/comments`). `0006` 마이그레이션이 `comments.session_id`를 더하고 `take_id`를 nullable로 바꾼다 — 기존 체크아웃은 `db:migrate`(컨테이너는 기동 시 자동).
-- take 경계는 타임라인에서 start/end 핸들로 편집한다. 저장하면 `PATCH /takes/:id`(경계 변경 → 재컷 잡)가 돌아 재컷·peaks·durationSec을 재계산하고, take 삭제는 `DELETE /takes/:id`, 이름 변경은 `PATCH /takes/:id/name`(비우면 기본 이름 "Take n").
-- 배포 순서: 워커를 API보다 먼저(또는 같이) 배포한다. API가 큐에 보내는 `{ type: "recut" }` 메시지를 옛 워커가 못 읽으면 예외로 3회 재전달 후 DLQ로 빠지고, take는 `updating`에 멈춘다.
-
-### 팀 관리·i18n (모바일)
-
-- 밴드 탭에서 파트 변경(프리셋 + 직접 입력), owner의 팀원 내보내기·소유권 이전, 이름 변경, 나가기, 삭제가 된다. 서버 API는 `PATCH /bands/:id`, `POST /bands/:id/transfer`, `DELETE /bands/:id`(soft delete).
-- 문구는 `apps/mobile/src/i18n`의 ko/en 리소스에서 온다. 기기 언어가 ko면 한국어, 아니면 영어. 아직 이 화면만 리소스를 쓴다 (나머지 화면은 백로그).
-- `expo-localization`이 새로 들어갔으니 dev build를 다시 만들어야 한다: `pnpm --filter mobile ios` (맥).
-
-### DB 마이그레이션
-
-`api` 컨테이너는 기동 시 자동으로 `pnpm --filter @bandapp/api db:migrate`를 실행해 최신 스키마를 적용한다(drizzle migrate는 멱등이라 반복 실행해도 안전하다). 컨테이너를 띄우지 않고 호스트에서 직접 적용하려면:
-
-```bash
-pnpm --filter @bandapp/api db:migrate   # localhost:5432 대상
-```
-
-`0005` 마이그레이션이 `band_part` enum을 text로 바꾸고 `bands.deleted_at`을 더한다. 기존 `part = 'other'` 행은 NULL이 된다.
-
-## 결제 (RevenueCat)
-
-인앱 구독/소모성 결제는 RevenueCat으로 처리한다.
-
-**규칙 요약**: 오너만 구독할 수 있고, 구독은 오너 개인 풀(월 시간)로 쌓인다. 오너가 자기 밴드를 풀에 연결해서 쓴다. 무료는 밴드당 3h, 평생 1회. 추가 시간(소모성)은 구매한 밴드의 소유다. 오너를 양도하면 해당 밴드의 풀 연결이 해제된다.
-
-**환경변수**
-
-- 서버: `REVENUECAT_API_KEY`(시크릿 REST 키), `REVENUECAT_WEBHOOK_SECRET`(RevenueCat이 `Authorization` 헤더에 `Bearer <secret>` 형태로 보내는 값)
-- 모바일: `EXPO_PUBLIC_RC_IOS_KEY`, `EXPO_PUBLIC_RC_ANDROID_KEY`
-- 모바일(선택): `EXPO_PUBLIC_TERMS_URL`, `EXPO_PUBLIC_PRIVACY_URL`, `EXPO_PUBLIC_BILLING_HELP_URL`
-
-**스토어 상품**
-
-- `rehearsal.band.monthly` — 월 20h, 자동 갱신 구독
-- `rehearsal.plus.monthly` — 월 40h, 자동 갱신 구독
-- 위 두 구독은 같은 구독 그룹 `analysis`에 둔다.
-- `rehearsal.extra.3h` — 소모성, 구매한 밴드에 +3h
-- Android는 base plan 때문에 상품 ID가 `<productId>:<basePlanId>`로 올 수 있고, 앱은 이를 허용한다.
-
-**RevenueCat 설정**
-
-- entitlement: `band`, `plus`
-- offering `default`에 위 3개 패키지를 등록
-- app user id는 우리 `users.id` (앱이 `Purchases.logIn`으로 설정)
-- 추가 시간 구매 전에 subscriber attribute `band_id`를 설정해서, 웹훅이 어느 밴드에 시간을 넣을지 알 수 있게 한다.
-
-**웹훅**
-
-- `POST /webhooks/revenuecat`, Authorization 값은 `Bearer <REVENUECAT_WEBHOOK_SECRET>`
-  - RevenueCat 대시보드의 웹훅 "Authorization header value" 칸에는 정확히 `Bearer <REVENUECAT_WEBHOOK_SECRET>`을 넣는다 (`Bearer ` 접두사 포함, 앞뒤 공백 없이). 시크릿만 넣으면 모든 웹훅이 401로 거절된다.
-- TRANSFER 이벤트는 `transferred_from`/`transferred_to`의 사용자도 모두 다시 동기화한다.
-- 이벤트 id로 중복을 제거하고, 어떤 이벤트든 받으면 REST(`GET /v1/subscribers/{id}`)로 전체 상태를 다시 읽는다.
-- 로컬에서는 웹훅이 도달하지 못하므로, 앱의 "Check status"(= `POST /billing/sync`)로 상태를 직접 당겨온다.
-
-**주의**: `react-native-purchases`가 추가됐으므로 dev client를 다시 빌드해야 한다 (`pnpm --filter mobile android` / `ios`).
+|                                                                          |                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| <img src="docs/screenshots/record.webp" width="280">                     | <img src="docs/screenshots/sessions.webp" width="280">              |
+| **녹음** 합주를 그대로 녹음한다. 멈추면 바로 업로드와 분석이 이어진다.   | **세션 목록** 분석이 끝나면 take 수, 길이, 코멘트 수가 보인다.      |
+| <img src="docs/screenshots/session-takes.webp" width="280">              | <img src="docs/screenshots/timeline.webp" width="280">              |
+| **세션 상세** AI가 잘라낸 take 목록. 파형은 실제 오디오 피크.            | **타임라인** 원본 전체 위에서 take 위치를 보고, 팬·줌·재생.         |
+| <img src="docs/screenshots/take-edit.webp" width="280">                  | <img src="docs/screenshots/take-feedback.webp" width="280">         |
+| **take 편집** 핸들을 끌거나 시간을 입력해 경계를 고친다. 수동 take 추가. | **take 피드백** 시간 위치가 붙은 코멘트와 답글.                     |
+| <img src="docs/screenshots/band.webp" width="280">                       | <img src="docs/screenshots/plan.webp" width="280">                  |
+| **밴드** 멤버와 파트, 초대, 소유권 이전.                                 | **플랜·사용량** 월 분석 시간과 추가 시간. 여러 밴드가 한 풀을 쓴다. |

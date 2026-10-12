@@ -136,11 +136,13 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   useEffect(() => {
-    if (!pending.current || !authed || loading) return;
+    // bands.length > 0도 요구한다: CurrentBandProvider가 로그인 직후 한 커밋 동안 빈 bands/loading=false를 노출할 수 있어
+    // 그 틈에 소비하면 멤버가 아닌 것으로 오판한다. 푸시는 항상 밴드를 가리키므로 밴드가 없으면 기다리는 게 맞다
+    if (!pending.current || !authed || loading || bands.length === 0) return;
     const target = pending.current;
     pending.current = null;
     void open(target);
-  }, [authed, loading, open, pendingTick]);
+  }, [authed, loading, bands.length, open, pendingTick]);
 
   /** 로그아웃·탈퇴 직전에 AuthProvider가 부른다 (pushTokenHandle) */
   useEffect(() => {

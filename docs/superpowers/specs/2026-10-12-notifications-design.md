@@ -95,7 +95,7 @@ interface NotificationItem {
   type: NotificationType;
   /** null = 탈퇴한 멤버 */
   actor: { id: string; name: string | null } | null;
-  session: { id: string; title: string; name: string | null; takeCount: number; durationSec: number };
+  session: { id: string; title: string; name: string | null; startedAt: string; takeCount: number; durationSec: number };
   /** 원본 녹음 코멘트·session_ready면 null */
   take: { id: string; index: number; name: string } | null;
   /** session_ready면 null */
@@ -153,11 +153,12 @@ interface PushMessage {
   data: Record<string, string>; // notificationId, bandId, sessionId, type, takeId?, atMs?
 }
 interface PushSender {
-  send(tokens: PushTokenRow[], build: (locale: string) => PushMessage): Promise<{ invalidTokens: string[] }>;
+  /** 수신자 1명의 토큰 묶음에 메시지 1개. 서비스가 locale별로 묶어 호출한다 */
+  send(tokens: string[], message: PushMessage): Promise<{ invalidTokens: string[] }>;
 }
 ```
 
-- `FirebasePushSender`: `firebase-admin` `messaging().sendEachForMulticast`. 토큰을 locale별로 묶어 문구를 한 번씩 만든다. `FIREBASE_SERVICE_ACCOUNT_JSON`(서비스 계정 JSON을 한 줄로, Apple 키와 같은 방식)이 있을 때만 provider가 이걸 고른다.
+- `FirebasePushSender`: `firebase-admin` `messaging().sendEachForMulticast`. 서비스가 수신자·locale별로 문구를 만들어 넘긴다. `FIREBASE_SERVICE_ACCOUNT_JSON`(서비스 계정 JSON을 한 줄로, Apple 키와 같은 방식)이 있을 때만 provider가 이걸 고른다.
 - `LogPushSender`: 환경변수가 없으면 이것. 수신 토큰 수·제목·본문을 `logger.log`로 남긴다. Firebase 없이도 전체 흐름이 도는 이유.
 - 문구는 `push-text.ts` 순수 함수. en/ko 두 템플릿, 인박스 문구(모바일 `notificationText.ts`)와 같은 규칙:
 

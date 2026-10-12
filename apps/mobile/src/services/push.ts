@@ -26,6 +26,10 @@ function fb(): Loaded | null {
   return loaded;
 }
 
+// 콜드 스타트 알림은 앱 생애 동안 한 번만 전달한다 — 효과 재마운트/StrictMode 이중 호출로
+// getInitialNotification이 다시 같은 알림을 돌려줘도 두 번 이동하지 않게 모듈 수준에서 막는다.
+let initialDelivered = false;
+
 const POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS" as const;
 
 async function androidGranted(): Promise<boolean> {
@@ -80,18 +84,30 @@ export const push = {
     return f ? f.m.onTokenRefresh(f.inst, cb) : () => undefined;
   },
 
-  /** 백그라운드/종료 상태에서 푸시를 눌러 열었을 때. 콜드 스타트 건은 구독 직후 한 번 전달된다 */
+  /** 백그라운드/종료 상태에서 푸시를 눌러 열었을 때. 콜드 스타트 건은 앱 생애 동안 한 번만 전달된다 */
   onOpened(cb: (t: PendingTarget) => void): () => void {
     const f = fb();
     if (!f) return () => undefined;
+    const deliver = (t: PendingTarget) => {
+      try {
+        cb(t);
+      } catch (err) {
+        console.warn("push onOpened handler failed", err);
+      }
+    };
     let cancelled = false;
-    void f.m.getInitialNotification(f.inst).then((msg) => {
-      const t = parsePushData(msg?.data);
-      if (t && !cancelled) cb(t);
-    });
+    void f.m
+      .getInitialNotification(f.inst)
+      .then((msg) => {
+        const t = parsePushData(msg?.data);
+        if (!t || cancelled || initialDelivered) return;
+        initialDelivered = true;
+        deliver(t);
+      })
+      .catch((err) => console.warn("fcm getInitialNotification failed", err));
     const off = f.m.onNotificationOpenedApp(f.inst, (msg) => {
       const t = parsePushData(msg.data);
-      if (t) cb(t);
+      if (t) deliver(t);
     });
     return () => {
       cancelled = true;

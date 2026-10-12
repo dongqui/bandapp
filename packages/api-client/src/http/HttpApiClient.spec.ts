@@ -329,3 +329,47 @@ describe("HttpApiClient", () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("notifications", () => {
+  it("list/unreadCount/markRead/markAllRead/settings/tokens hit the spec paths", async () => {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const tokens = memoryTokens({ accessToken: "a1" });
+    const fetchFn = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      expect((init?.headers as Record<string, string>).authorization).toBe("Bearer a1");
+      calls.push({ method: init?.method ?? "GET", path: String(url).replace("https://api.test", ""), body: init?.body ? JSON.parse(init.body as string) : undefined });
+      const noContent = init?.method === "DELETE" || (init?.method === "PUT" && String(url).includes("push-tokens"));
+      return noContent ? new Response(null, { status: 204 }) : json(200, { items: [], nextCursor: null, remaining: 0, unreadCount: 0, count: 3 });
+    });
+    const client = new HttpApiClient({ baseUrl: "https://api.test", tokens, fetchFn });
+    const listener = vi.fn();
+    client.subscribe(listener);
+    await client.notifications.list("b1");
+    await client.notifications.list("b1", "abc");
+    expect(await client.notifications.unreadCount("b1")).toBe(3);
+    await client.notifications.markRead("n1");
+    await client.notifications.markAllRead("b1");
+    await client.notifications.settings();
+    await client.notifications.updateSettings("b1", { sessionReady: true, comments: false, commentScope: "all" });
+    await client.notifications.registerPushToken({ token: "tok", platform: "android", locale: "en" });
+    await client.notifications.removePushToken("tok");
+    await client.comments.markRead({ takeId: "t1" });
+    await client.comments.markRead({ sessionId: "s1" });
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "GET /bands/b1/notifications",
+      "GET /bands/b1/notifications?cursor=abc",
+      "GET /bands/b1/notifications/unread-count",
+      "POST /notifications/n1/read",
+      "POST /bands/b1/notifications/read-all",
+      "GET /me/notification-settings",
+      "PUT /bands/b1/notification-settings",
+      "PUT /me/push-tokens",
+      "DELETE /me/push-tokens/tok",
+      "POST /takes/t1/comments/read",
+      "POST /sessions/s1/comments/read",
+    ]);
+    expect(calls[6]!.body).toEqual({ sessionReady: true, comments: false, commentScope: "all" });
+    expect(calls[7]!.body).toEqual({ token: "tok", platform: "android", locale: "en" });
+    // markRead, markAllRead, updateSettings, comments.markRead ×2 → emit
+    expect(listener).toHaveBeenCalledTimes(5);
+  });
+});

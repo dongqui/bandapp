@@ -341,3 +341,62 @@ describe("MockApiClient", () => {
     expect((await api.bands.billing("b1")).state).toBe("free");
   });
 });
+
+describe("notifications (mock)", () => {
+  it("seeded inbox: 2 unread today, older read, page size 6 with remaining", async () => {
+    const api = new MockApiClient();
+    const page = await api.notifications.list(BAND);
+    expect(page.items).toHaveLength(6);
+    expect(page.unreadCount).toBe(2);
+    expect(page.remaining).toBe(5);
+    expect(page.nextCursor).not.toBeNull();
+    expect(page.items[0]).toMatchObject({ type: "comment", actor: { name: "Minsu" }, take: { name: "Take 1" }, comment: { atSec: 133 }, readAt: null });
+    const rest = await api.notifications.list(BAND, page.nextCursor!);
+    expect(rest.items).toHaveLength(5);
+    expect(rest.nextCursor).toBeNull();
+    expect(rest.remaining).toBe(0);
+    expect(await api.notifications.list("b2")).toMatchObject({ items: [], unreadCount: 0 });
+  });
+
+  it("markRead / markAllRead update unreadCount and emit", async () => {
+    const api = new MockApiClient();
+    const listener = vi.fn();
+    api.subscribe(listener);
+    const first = (await api.notifications.list(BAND)).items[0]!;
+    await api.notifications.markRead(first.id);
+    expect(await api.notifications.unreadCount(BAND)).toBe(1);
+    await api.notifications.markAllRead(BAND);
+    expect(await api.notifications.unreadCount(BAND)).toBe(0);
+    expect((await api.notifications.list(BAND)).items.every((i) => i.readAt !== null)).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("settings default to all-on per band and round-trip", async () => {
+    const api = new MockApiClient();
+    expect(await api.notifications.settings()).toEqual([
+      { bandId: "b1", sessionReady: true, comments: true, commentScope: "all" },
+      { bandId: "b2", sessionReady: true, comments: true, commentScope: "all" },
+    ]);
+    await api.notifications.updateSettings("b2", { sessionReady: false, comments: true, commentScope: "mine" });
+    expect((await api.notifications.settings())[1]).toEqual({ bandId: "b2", sessionReady: false, comments: true, commentScope: "mine" });
+  });
+
+  it("push tokens register/remove without error", async () => {
+    const api = new MockApiClient();
+    await api.notifications.registerPushToken({ token: "t", platform: "ios", locale: "ko-KR" });
+    await api.notifications.removePushToken("t");
+  });
+
+  it("comments.markRead clears unread for that target and the take's unreadCommentCount", async () => {
+    const api = new MockApiClient();
+    const before = await api.comments.list({ takeId: "s1-t0" });
+    expect(before.some((c) => c.unread)).toBe(true);
+    expect((await api.takes.list("s1"))[0]!.unreadCommentCount).toBeGreaterThan(0);
+    await api.comments.markRead({ takeId: "s1-t0" });
+    expect((await api.comments.list({ takeId: "s1-t0" })).every((c) => !c.unread)).toBe(true);
+    expect((await api.takes.list("s1"))[0]!.unreadCommentCount).toBe(0);
+    // 내 코멘트는 처음부터 unread가 아니다
+    const mine = await api.comments.create({ takeId: "s1-t1" }, { atSec: 3, text: "me" });
+    expect(mine.unread).toBe(false);
+  });
+});

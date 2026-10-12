@@ -15,12 +15,16 @@ import type {
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
+  NotificationPage,
+  NotificationSettings,
+  RegisterPushTokenInput,
   Session,
   SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
   UpdateMeInput,
+  UpdateNotificationSettingsInput,
   UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
@@ -364,5 +368,31 @@ export class HttpApiClient implements RehearsalApiClient {
       await this.request<void>("DELETE", `/comments/${id}`);
       this.emit();
     },
+    markRead: async (target: CommentTarget): Promise<void> => {
+      await this.request<void>("POST", `${commentsPath(target)}/read`);
+      this.emit(); // unreadCommentCount가 바뀐다
+    },
+  };
+
+  notifications = {
+    list: (bandId: string, cursor?: string): Promise<NotificationPage> =>
+      this.request<NotificationPage>("GET", `/bands/${bandId}/notifications${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+    unreadCount: async (bandId: string): Promise<number> => (await this.request<{ count: number }>("GET", `/bands/${bandId}/notifications/unread-count`)).count,
+    markRead: async (id: string): Promise<void> => {
+      await this.request<void>("POST", `/notifications/${id}/read`);
+      this.emit();
+    },
+    markAllRead: async (bandId: string): Promise<void> => {
+      await this.request<void>("POST", `/bands/${bandId}/notifications/read-all`);
+      this.emit();
+    },
+    settings: (): Promise<NotificationSettings[]> => this.request<NotificationSettings[]>("GET", "/me/notification-settings"),
+    updateSettings: async (bandId: string, input: UpdateNotificationSettingsInput): Promise<NotificationSettings> => {
+      const s = await this.request<NotificationSettings>("PUT", `/bands/${bandId}/notification-settings`, input);
+      this.emit();
+      return s;
+    },
+    registerPushToken: (input: RegisterPushTokenInput): Promise<void> => this.request<void>("PUT", "/me/push-tokens", input),
+    removePushToken: (token: string): Promise<void> => this.request<void>("DELETE", `/me/push-tokens/${encodeURIComponent(token)}`),
   };
 }

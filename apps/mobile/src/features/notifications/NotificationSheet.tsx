@@ -31,12 +31,15 @@ export function NotificationSheet({ visible, onClose, onOpenSettings }: { visibl
   // 세대 번호: 시트가 닫히거나 밴드가 바뀌거나 언마운트되면 올려서, 늦게 도착한 응답이 상태를 덮어쓰지 못하게 한다
   const generation = useRef(0);
   const loadingMore = useRef(false);
+  const markingAll = useRef(false);
+  // band 객체는 API 변경 통지마다 새 참조가 되므로, 효과 의존성에는 id만 쓴다 (헤더 이름만 band에서 읽음)
+  const bandId = band?.id ?? "";
 
   const load = useCallback(
     async (next?: string) => {
-      if (!band) return;
+      if (!bandId) return;
       const mine = generation.current;
-      const page = await api.notifications.list(band.id, next);
+      const page = await api.notifications.list(bandId, next);
       if (mine !== generation.current) return;
       setItems((prev) => (next ? [...prev, ...page.items] : page.items));
       setCursor(page.nextCursor);
@@ -44,7 +47,7 @@ export function NotificationSheet({ visible, onClose, onOpenSettings }: { visibl
       setUnread(page.unreadCount);
       setLoaded(true);
     },
-    [api, band],
+    [api, bandId],
   );
 
   // 열릴 때마다 첫 페이지부터 다시 읽는다. 이전 밴드의 항목이 잠깐 비치지 않도록 먼저 비운다
@@ -73,14 +76,23 @@ export function NotificationSheet({ visible, onClose, onOpenSettings }: { visibl
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = useMemo(() => new Date(), [items]);
   const groups = useMemo(() => groupByDay(items.map((i) => notificationView(i, meId, now)), now), [items, meId, now]);
-  const bandId = band?.id ?? "";
 
   const markAllRead = async () => {
-    await api.notifications.markAllRead(bandId);
-    const at = new Date().toISOString();
-    setItems((prev) => prev.map((i) => (i.readAt ? i : { ...i, readAt: at })));
-    setUnread(0);
-    refresh();
+    if (markingAll.current) return;
+    markingAll.current = true;
+    const mine = generation.current;
+    try {
+      await api.notifications.markAllRead(bandId);
+      // 그 사이 시트가 닫히거나 밴드가 바뀌었으면 로컬 목록은 건드리지 않는다 (다음 열기에서 다시 읽음)
+      if (mine === generation.current) {
+        const at = new Date().toISOString();
+        setItems((prev) => prev.map((i) => (i.readAt ? i : { ...i, readAt: at })));
+        setUnread(0);
+      }
+      refresh();
+    } finally {
+      markingAll.current = false;
+    }
   };
 
   return (

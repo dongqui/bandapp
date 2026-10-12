@@ -84,10 +84,10 @@ export class NotificationsController {
     await this.tokens.upsert(userId, parsePushToken(body));
   }
 
-  /** 로그아웃·탈퇴 직전. 내 토큰이 아니어도 204 */
+  /** 로그아웃·탈퇴 직전. 내 토큰만 지우고, 아니어도 204 */
   @Delete("me/push-tokens/:token")
   @HttpCode(204)
-  async removeToken(@Param("token") token: string): Promise<void> {
-    await this.tokens.remove(token);
+  async removeToken(@CurrentUserId() userId: string, @Param("token") token: string): Promise<void> {
+    await this.tokens.remove(token, userId);
   }
 }

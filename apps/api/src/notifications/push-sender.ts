@@ -40,7 +40,14 @@ export class FirebasePushSender implements PushSender {
 
   /** 서비스 계정 JSON(한 줄) → admin app. Apple 키처럼 환경변수 하나로 끝낸다 */
   static fromServiceAccountJson(json: string): FirebasePushSender {
-    const app = initializeApp({ credential: cert(JSON.parse(json)) });
+    let account: unknown;
+    try {
+      account = JSON.parse(json);
+    } catch {
+      // 부팅 때 바로 실패시킨다 (SyntaxError 원문에는 값 조각이 섞일 수 있어 감춘다)
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON");
+    }
+    const app = initializeApp({ credential: cert(account as Parameters<typeof cert>[0]) });
     return new FirebasePushSender(getMessaging(app));
   }
 

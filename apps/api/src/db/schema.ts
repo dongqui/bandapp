@@ -328,7 +328,7 @@ export const notifications = pgTable(
       .notNull()
       .references(() => bands.id, { onDelete: "cascade" }),
     type: notificationType("type").notNull(),
-    // 업로더·코멘트 작성자. 탈퇴하면 null → "탈퇴한 멤버"
+    // 행위자. 탈퇴(soft delete)한 사용자는 조회 시 null로 매핑 → "탈퇴한 멤버"
     actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
     sessionId: uuid("session_id")
       .notNull()

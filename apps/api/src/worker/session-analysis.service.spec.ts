@@ -460,6 +460,7 @@ describe("SessionAnalysisService.run", () => {
       await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0, h.hook).run("s");
       expect(state.updates.at(-1)).toMatchObject({ status: "ready" });
       expect(state.updates.some((u) => u.status === "failed")).toBe(false);
+      expect(h.calls).toEqual(["s"]);
     });
   });
 });

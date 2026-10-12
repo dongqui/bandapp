@@ -29,7 +29,10 @@ export class FakeRevenueCat extends RevenueCatClient {
 export class FakePushSender implements PushSender {
   sent: Array<{ tokens: string[]; message: PushMessage }> = [];
   invalid: string[] = [];
+  /** true면 send가 거부된다 — FCM 장애 시 호출자가 영향받지 않는지 검증용 */
+  throwOnSend = false;
   async send(tokens: string[], message: PushMessage) {
+    if (this.throwOnSend) throw new Error("fcm down");
     this.sent.push({ tokens, message });
     return { invalidTokens: tokens.filter((t) => this.invalid.includes(t)) };
   }

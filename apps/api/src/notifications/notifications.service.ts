@@ -19,8 +19,11 @@ import { fanout, type NotificationEvent } from "./fanout.js";
 import { PUSH_SENDER, type PushSender } from "./push-sender.js";
 import { pushText } from "./push-text.js";
 import { PushTokensService } from "./push-tokens.service.js";
+import { withTimeout } from "./with-timeout.js";
 
 const RETENTION_DAYS = 30;
+/** FCM 호출 하나가 매달려도 코멘트 POST/워커가 무한히 붙잡히지 않게 하는 상한 */
+const PUSH_SEND_TIMEOUT_MS = 5000;
 
 const ITEM_COLUMNS = {
   id: notifications.id,
@@ -31,6 +34,7 @@ const ITEM_COLUMNS = {
   createdAtExact: sql<string>`to_char(${notifications.createdAt} at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
   actorId: notifications.actorId,
   actorName: users.displayName,
+  actorDeletedAt: users.deletedAt,
   sessionId: sessions.id,
   sessionTitle: sessions.title,
   sessionName: sessions.name,
@@ -54,6 +58,7 @@ interface ItemRow {
   createdAtExact: string;
   actorId: string | null;
   actorName: string | null;
+  actorDeletedAt: Date | null;
   sessionId: string;
   sessionTitle: string;
   sessionName: string | null;
@@ -72,7 +77,8 @@ function toItem(row: ItemRow): NotificationItem {
   return {
     id: row.id,
     type: row.type,
-    actor: row.actorId ? { id: row.actorId, name: row.actorName ?? null } : null,
+    // 탈퇴(soft delete)한 사용자는 행이 남아 있으므로 actor_id가 있어도 null로 돌려준다
+    actor: row.actorId && row.actorDeletedAt === null ? { id: row.actorId, name: row.actorName ?? null } : null,
     session: {
       id: row.sessionId,
       title: row.sessionTitle,
@@ -117,8 +123,13 @@ export class NotificationsService {
 
   async onSessionReady(sessionId: string): Promise<void> {
     try {
-      const [session] = await this.db.select({ bandId: sessions.bandId, createdBy: sessions.createdBy }).from(sessions).where(eq(sessions.id, sessionId));
-      if (!session) return;
+      const [session] = await this.db
+        .select({ bandId: sessions.bandId, createdBy: sessions.createdBy, bandDeletedAt: bands.deletedAt })
+        .from(sessions)
+        .innerJoin(bands, eq(bands.id, sessions.bandId))
+        .where(eq(sessions.id, sessionId));
+      // 삭제된 밴드에는 알리지 않는다
+      if (!session || session.bandDeletedAt !== null) return;
       await this.dispatch({ kind: "session_ready", bandId: session.bandId, sessionId, actorId: session.createdBy });
     } catch (err) {
       this.logger.error(`session ${sessionId}: notification failed: ${String(err)}`);
@@ -156,13 +167,16 @@ export class NotificationsService {
   private async sendPush(event: NotificationEvent, created: Array<{ id: string; userId: string; type: NotificationType }>): Promise<void> {
     const tokenRows = await this.tokens.forUsers(created.map((c) => c.userId));
     if (tokenRows.length === 0) return;
-    const [actor] = await this.db.select({ name: users.displayName }).from(users).where(eq(users.id, event.actorId));
+    const [actor] = await this.db.select({ name: users.displayName, deletedAt: users.deletedAt }).from(users).where(eq(users.id, event.actorId));
     const [session] = await this.db.select({ title: sessions.title, name: sessions.name, takeCount: sessions.takeCount }).from(sessions).where(eq(sessions.id, event.sessionId));
     if (!session) return;
     const takeId = event.kind === "comment" ? event.takeId : null;
     const take = takeId ? (await this.db.select({ name: takes.name }).from(takes).where(eq(takes.id, takeId)))[0] : undefined;
     const comment = event.kind === "comment" ? (await this.db.select({ text: comments.text, atMs: comments.atMs }).from(comments).where(eq(comments.id, event.commentId)))[0] : undefined;
-    const invalid: string[] = [];
+    const actorName = actor && actor.deletedAt === null ? (actor.name ?? "") : null;
+    // 전송 단위 = (수신자, locale). 모두 동시에 보내고 전체가 끝날 때까지만 기다린다 (e2e 결정성).
+    // FCM 호출 하나가 매달려도 코멘트 POST/워커가 붙잡히지 않도록 호출마다 시간 상한을 둔다.
+    const sends: Array<Promise<string[]>> = [];
     for (const n of created) {
       const mine = tokenRows.filter((t) => t.userId === n.userId);
       if (mine.length === 0) continue;
@@ -176,22 +190,27 @@ export class NotificationsService {
       for (const [locale, tokens] of byLocale) {
         const text = pushText(locale, {
           type: n.type,
-          actorName: actor ? (actor.name ?? "") : null,
+          actorName,
           isSelf: n.userId === event.actorId,
           sessionLabel: session.name ?? session.title,
           takeCount: session.takeCount,
           takeName: take?.name ?? null,
           commentText: comment?.text ?? null,
         });
-        // 한 수신자의 전송 실패가 다른 수신자 발송과 호출자를 막지 않게 개별로 잡는다
-        try {
-          const res = await this.push.send(tokens, { ...text, data });
-          invalid.push(...res.invalidTokens);
-        } catch (err) {
-          this.logger.warn(`push to user ${n.userId} failed: ${String(err)}`);
-        }
+        sends.push(
+          withTimeout(this.push.send(tokens, { ...text, data }), PUSH_SEND_TIMEOUT_MS, "push send").then(
+            (res) => res.invalidTokens,
+            (err: unknown) => {
+              // 한 수신자의 전송 실패·시간 초과가 다른 수신자 발송과 호출자를 막지 않는다
+              this.logger.warn(`push to user ${n.userId} failed: ${String(err)}`);
+              return [];
+            },
+          ),
+        );
       }
     }
+    const results = await Promise.allSettled(sends);
+    const invalid = results.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
     if (invalid.length > 0) await this.tokens.removeMany(invalid);
   }
 

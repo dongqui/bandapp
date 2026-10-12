@@ -4,6 +4,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bandMembers, notifications, pushTokens, sessions, takes } from "../src/db/schema.js";
 import { FakePushSender, FakeStorage, createTestApp, loginAs, providerUser } from "./app-util.js";
+import { NotificationsService } from "../src/notifications/notifications.service.js";
 import { createTestDb, truncateAll } from "./db-util.js";
 
 describe("notifications API", () => {
@@ -100,6 +101,59 @@ describe("notifications API", () => {
       await request(server()).delete(`/comments/${c.body.id}`).set(auth(minsu.accessToken)).expect(204);
       const inbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(owner.accessToken)).expect(200);
       expect(inbox.body.items).toEqual([]);
+    });
+
+    it("탈퇴(soft delete)한 작성자의 알림은 actor가 null로 나온다", async () => {
+      const jihoon = await memberOf("jihoon", "Jihoon");
+      await request(server()).post(`/takes/${takeId}/comments`).set(auth(jihoon.accessToken)).send({ atSec: 7, text: "bye" }).expect(201);
+      let inbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(owner.accessToken)).expect(200);
+      expect(inbox.body.items[0].actor).toEqual({ id: jihoon.userId, name: "Jihoon" });
+      await request(server()).delete("/me").set(auth(jihoon.accessToken)).expect(204);
+      inbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(owner.accessToken)).expect(200);
+      // 알림 행은 수신자(owner) 것이라 남고, 작성자만 비식별화된다
+      expect(inbox.body.items).toHaveLength(1);
+      expect(inbox.body.items[0]).toMatchObject({ type: "comment", actor: null, comment: { text: "bye" } });
+    });
+
+    it("푸시 전송이 실패해도 코멘트 POST는 201이고 알림 행이 남는다", async () => {
+      await request(server()).put("/me/push-tokens").set(auth(owner.accessToken)).send({ token: "owner-dev", platform: "ios", locale: "en" }).expect(204);
+      push.throwOnSend = true;
+      await request(server()).post(`/takes/${takeId}/comments`).set(auth(minsu.accessToken)).send({ atSec: 3, text: "still ok" }).expect(201);
+      const inbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(owner.accessToken)).expect(200);
+      expect(inbox.body.items).toHaveLength(1);
+      expect(inbox.body.unreadCount).toBe(1);
+    });
+  });
+
+  describe("세션 준비 완료", () => {
+    it("session_ready 행이 설정을 따르고, 푸시는 수신자 locale별 문구로 간다", async () => {
+      const jihoon = await memberOf("jihoon", "Jihoon");
+      await request(server()).put(`/bands/${bandId}/notification-settings`).set(auth(jihoon.accessToken)).send({ sessionReady: false, comments: true, commentScope: "all" }).expect(200);
+      await request(server()).put("/me/push-tokens").set(auth(owner.accessToken)).send({ token: "owner-dev", platform: "ios", locale: "en" }).expect(204);
+      await request(server()).put("/me/push-tokens").set(auth(minsu.accessToken)).send({ token: "minsu-dev", platform: "android", locale: "ko-KR" }).expect(204);
+
+      await app.get(NotificationsService).onSessionReady(sessionId);
+
+      for (const who of [owner, minsu]) {
+        const inbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(who.accessToken)).expect(200);
+        expect(inbox.body.items).toHaveLength(1);
+        expect(inbox.body.items[0]).toMatchObject({ type: "session_ready", take: null, comment: null, session: { id: sessionId, takeCount: 1 } });
+      }
+      const jihoonInbox = await request(server()).get(`/bands/${bandId}/notifications`).set(auth(jihoon.accessToken)).expect(200);
+      expect(jihoonInbox.body.items).toEqual([]);
+
+      const en = push.sent.find((s) => s.tokens.includes("owner-dev"))!;
+      expect(en.message.title).toBe("Your recording is ready");
+      expect(en.message.body).toBe("Full set run-through · 1 take found");
+      const ko = push.sent.find((s) => s.tokens.includes("minsu-dev"))!;
+      expect(ko.message.title).toBe("Dongjin님의 녹음이 준비됐어요");
+      expect(ko.message.body).toBe("Full set run-through · 테이크 1개");
+      for (const m of [en.message, ko.message]) {
+        expect(m.data).toEqual({ notificationId: expect.any(String), bandId, sessionId, type: "session_ready" });
+        expect(m.data).not.toHaveProperty("takeId");
+        expect(m.data).not.toHaveProperty("atMs");
+      }
+      expect(push.sent).toHaveLength(2);
     });
   });
 
@@ -202,6 +256,8 @@ describe("notifications API", () => {
       rows = await db.select().from(pushTokens);
       expect(rows[0]!.userId).toBe(minsu.userId);
       await request(server()).delete("/me/push-tokens/tok-1").set(auth(owner.accessToken)).expect(204); // 내 토큰이 아니어도 204
+      // 남의 토큰은 지워지지 않는다
+      expect(await db.select().from(pushTokens)).toEqual([expect.objectContaining({ token: "tok-1", userId: minsu.userId })]);
       await request(server()).delete("/me/push-tokens/tok-1").set(auth(minsu.accessToken)).expect(204);
       expect(await db.select().from(pushTokens)).toEqual([]);
     });

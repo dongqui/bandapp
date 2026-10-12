@@ -90,3 +90,4 @@ export function pushLevel(levels: number[], unit: number, size: number): number[
 
 - `-60 dB` 바닥은 추정값이다. 합주실에서 녹음해 보고 연주 중 바가 항상 꽉 차면 `METER_FLOOR_DB`를 낮추고(-70 등), 조용할 때 바닥이 떠 있으면 올린다.
 - Android `maxAmplitude`는 읽을 때마다 리셋되는 최대값이라 iOS `averagePower`보다 값이 크게 나올 수 있다. 두 플랫폼이 눈에 띄게 다르면 플랫폼별 바닥값을 둔다. 지금은 하나로 간다.
+- **기기 미확인 (2026-10-12).** 구현 후 웹 프리뷰(레이아웃·MARK 제거)만 확인했다. Android dev client에서 PREPARING 평평 → REC 중 흘러가는 바 → 조용하면 평평을 확인하고, 바가 늘 꽉 차면 `METER_FLOOR_DB`를 조정한 뒤 이 줄을 지운다. iOS도 미확인.

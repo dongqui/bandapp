@@ -37,6 +37,7 @@
     "@nestjs/throttler": "^6.5.0",
     "drizzle-kit": "^0.31.10",
     "drizzle-orm": "^0.45.2",
+    "firebase-admin": "^14.5.0",
     "jose": "^6.2.10",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",

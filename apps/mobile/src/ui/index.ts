@@ -17,3 +17,4 @@ export * from "./TabBar";
 export * from "./StaticWaveform";
 export * from "./LiveWaveform";
 export * from "./PlayerWaveform";
+export * from "./Toggle";

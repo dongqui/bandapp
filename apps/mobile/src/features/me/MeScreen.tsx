@@ -11,6 +11,9 @@ import { useCurrentBand } from "@/features/band/useCurrentBand";
 import { RenameSheet } from "@/features/band/RenameSheet";
 import { monthDay } from "@/features/billing/billingView";
 import { useBandBilling } from "@/features/billing/useBandBilling";
+import { useNotifications } from "@/features/notifications/NotificationsProvider";
+import { meNfValue } from "@/features/notifications/settingsView";
+import { useNotificationSettings } from "@/features/notifications/useNotificationSettings";
 import { apiErrorMessage } from "@/i18n/apiErrorMessage";
 import { purchases, type StorePrice } from "@/services/purchases";
 import { font, radius, space, useTheme } from "@/theme";
@@ -40,6 +43,10 @@ export function MeScreen() {
   const { colors } = useTheme();
   const [sheet, setSheet] = useState<Sheet>(null);
   const [busy, setBusy] = useState(false);
+  const { permission } = useNotifications();
+  const { data: nfSettings } = useNotificationSettings();
+  const nf = meNfValue(permission, nfSettings ?? []);
+  const nfValue = nf.kind === "on" ? t("me.nfOn") : nf.kind === "off" ? t("me.nfOff") : t("me.nfPartial", { on: nf.on, total: nf.total });
 
   const name = user?.displayName ?? "";
   const photoUri = user?.profileImageUrl ?? null;
@@ -221,6 +228,9 @@ export function MeScreen() {
           {card.cta ? <CardRow title={card.cta.label} accent onPress={card.cta.go} /> : null}
         </View>
 
+        <MonoLabel style={{ paddingTop: 32, paddingBottom: 4, letterSpacing: 1.6 }}>{t("me.settings")}</MonoLabel>
+        <ListRow title={t("me.notifications")} value={nfValue} chevron onPress={() => router.push("/notifications")} />
+
         <MonoLabel style={{ paddingTop: 32, paddingBottom: 4, letterSpacing: 1.6 }}>{t("me.support")}</MonoLabel>
         <ListRow title={t("me.contact")} chevron onPress={() => router.push("/contact")} />
         <ListRow title={t("me.signOut")} muted divider onPress={onSignOut} />
@@ -277,8 +287,8 @@ function CardRow({ title, value, accent = false, onPress }: { title: string; val
 }
 
 /** SUPPORT 아래 행 — Contact us(›, 아래 구분선), Sign out(회색, 아래 구분선), Delete account(빨강) */
-function ListRow({ title, chevron = false, muted = false, divider = false, color: colorOverride, onPress }: {
-  title: string; chevron?: boolean; muted?: boolean; divider?: boolean; color?: string; onPress: () => void;
+function ListRow({ title, value, chevron = false, muted = false, divider = false, color: colorOverride, onPress }: {
+  title: string; value?: string; chevron?: boolean; muted?: boolean; divider?: boolean; color?: string; onPress: () => void;
 }) {
   const { colors } = useTheme();
   const color = colorOverride ?? (muted ? colors.textMuted : colors.text);
@@ -296,7 +306,10 @@ function ListRow({ title, chevron = false, muted = false, divider = false, color
       }}
     >
       <AppText style={{ fontSize: 15, color }}>{title}</AppText>
-      {chevron ? <AppText style={{ fontSize: 18, lineHeight: 18, color: colors.borderHover }}>›</AppText> : null}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {value ? <AppText style={{ fontSize: 14, color: colors.textMuted }}>{value}</AppText> : null}
+        {chevron ? <AppText style={{ fontSize: 18, lineHeight: 18, color: colors.borderHover }}>›</AppText> : null}
+      </View>
     </PressableOpacity>
   );
 }

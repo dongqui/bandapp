@@ -425,6 +425,7 @@ export class MockApiClient implements RehearsalApiClient {
         durationSec: Math.round((input.durationMs ?? 0) / 1000),
         takeCount: 0,
         commentCount: 0,
+        unreadCommentCount: 0,
         peaks: null,
       };
       this.state.sessions.unshift(s);
@@ -507,6 +508,7 @@ export class MockApiClient implements RehearsalApiClient {
         endMs: input.endMs,
         type: "PERFORMANCE",
         commentCount: 0,
+        unreadCommentCount: 0,
         peaks: null,
         version: 1,
         audioStatus: "updating",
@@ -609,6 +611,7 @@ export class MockApiClient implements RehearsalApiClient {
         text,
         createdAt: new Date().toISOString(),
         updatedAt: null,
+        unread: false,
       };
       list.push(c);
       // 답글은 commentCount에 세지 않는다

@@ -39,7 +39,7 @@ export function generateTakes(sessionId: string, count: number): Take[] {
     const durationSec = 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150);
     const startMs = cursorMs;
     cursorMs += durationSec * 1000 + 45_000;
-    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: fakePeaks(seed * 7 + i), version: 1, audioStatus: "ready" as const };
+    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, unreadCommentCount: 0, peaks: fakePeaks(seed * 7 + i), version: 1, audioStatus: "ready" as const };
   });
 }
 
@@ -60,6 +60,7 @@ const session = (
   durationSec,
   takeCount,
   commentCount: 0,
+  unreadCommentCount: 0,
   peaks: status === "ready" ? fakePeaks(seedOf(id)) : null,
 });
 
@@ -170,6 +171,7 @@ export function createSeedState(): MockState {
         text: r.text,
         createdAt: new Date(base).toISOString(),
         updatedAt: r.edited ? new Date(base + 5 * 60_000).toISOString() : null,
+        unread: false,
       });
       (r.replies ?? []).forEach((rep, i) => {
         list.push({
@@ -183,6 +185,7 @@ export function createSeedState(): MockState {
           text: rep.text,
           createdAt: new Date(base + (i + 1) * 60_000).toISOString(),
           updatedAt: null,
+          unread: false,
         });
       });
     }

@@ -14,6 +14,7 @@ import { ApiProvider } from "@/api";
 import { AuthProvider, useAuth } from "@/features/auth/AuthProvider";
 import { bandGate, gate } from "@/features/auth/authGate";
 import { CurrentBandProvider, useCurrentBandContext } from "@/features/band/CurrentBandProvider";
+import { NotificationsProvider } from "@/features/notifications/NotificationsProvider";
 import { pendingUploads } from "@/features/upload/pendingUploads";
 import { purchases } from "@/services/purchases";
 import { ThemeProvider, color } from "@/theme";
@@ -71,13 +72,15 @@ export default function RootLayout() {
           <AuthProvider>
             <AuthGate>
               <ToastProvider>
-                <StatusBar style="light" />
-                <Stack
-                  screenOptions={{
-                    headerShown: false,
-                    contentStyle: { backgroundColor: color.bg },
-                  }}
-                />
+                <NotificationsProvider>
+                  <StatusBar style="light" />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: color.bg },
+                    }}
+                  />
+                </NotificationsProvider>
               </ToastProvider>
             </AuthGate>
           </AuthProvider>

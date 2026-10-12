@@ -2,6 +2,7 @@ import { ApiError } from "@bandapp/api-client";
 import type { LoginResponse, User } from "@bandapp/types";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useApi } from "@/api";
+import { pushTokenHandle } from "@/features/notifications/pushTokenHandle";
 import { purchases } from "@/services/purchases";
 import { sessionEvents } from "@/services/session-events";
 import { tokenStorage } from "@/services/token-storage";
@@ -114,12 +115,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut(): Promise<void> {
+    await pushTokenHandle.current(); // 토큰을 먼저 지운다 — 세션이 사라지면 못 지운다
     await api.auth.logout(); // 서버 세션 revoke + 로컬 토큰 삭제 (기획서 17장)
     await purchases.logOut().catch(() => {});
     setState({ status: "guest" });
   }
 
   async function deleteAccount(): Promise<void> {
+    await pushTokenHandle.current();
     await api.auth.deleteAccount();
     await purchases.logOut().catch(() => {});
     setState({ status: "guest" });

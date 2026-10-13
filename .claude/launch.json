@@ -9,6 +9,12 @@
         "process.env.EXPO_PUBLIC_API_URL='';process.env.CI='1';require('child_process').spawn('pnpm',['--filter','mobile','dev'],{stdio:'inherit',shell:true}).on('exit',c=>process.exit(c??0))"
       ],
       "port": 8081
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@bandapp/landing", "dev"],
+      "port": 4321
     }
   ]
 }

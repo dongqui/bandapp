@@ -1,0 +1,14 @@
+{
+  "name": "@bandapp/landing",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 4321",
+    "build": "vite build",
+    "preview": "vite preview --port 4321"
+  },
+  "devDependencies": {
+    "vite": "^7.1.0"
+  }
+}

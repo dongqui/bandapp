@@ -9,6 +9,7 @@ import { AppleTokenService } from "../src/auth/apple-token.service.js";
 import { GoogleAuthService } from "../src/auth/google-auth.service.js";
 import type { VerifiedProviderToken } from "../src/auth/provider-token.js";
 import { RevenueCatClient, type RcSubscriber } from "../src/billing/revenuecat.client.js";
+import { PUSH_SENDER, type PushMessage, type PushSender } from "../src/notifications/push-sender.js";
 import { StorageService } from "../src/storage/storage.service.js";
 
 /** RevenueCat REST를 흉내 낸다 — 사용자별 구독자 상태를 테스트가 직접 넣는다. */
@@ -21,6 +22,19 @@ export class FakeRevenueCat extends RevenueCatClient {
       throw new Error("revenuecat down");
     }
     return this.subscribers.get(appUserId) ?? { subscriptions: {}, non_subscriptions: {} };
+  }
+}
+
+/** 보낸 푸시를 기록만 한다. invalid에 넣은 토큰은 서버가 지워야 한다 */
+export class FakePushSender implements PushSender {
+  sent: Array<{ tokens: string[]; message: PushMessage }> = [];
+  invalid: string[] = [];
+  /** true면 send가 거부된다 — FCM 장애 시 호출자가 영향받지 않는지 검증용 */
+  throwOnSend = false;
+  async send(tokens: string[], message: PushMessage) {
+    if (this.throwOnSend) throw new Error("fcm down");
+    this.sent.push({ tokens, message });
+    return { invalidTokens: tokens.filter((t) => this.invalid.includes(t)) };
   }
 }
 
@@ -133,6 +147,7 @@ export async function createTestApp(overrides?: {
   storage?: StorageService;
   producer?: FakeProducer;
   revenueCat?: FakeRevenueCat;
+  pushSender?: FakePushSender;
 }):Promise<INestApplication> {
   const builder = Test.createTestingModule({ imports: [AppModule] })
     .overrideProvider(GoogleAuthService)
@@ -149,7 +164,10 @@ export async function createTestApp(overrides?: {
     .useValue(overrides?.producer ?? new FakeProducer())
     // 항상 오버라이드 — 테스트가 실제 RevenueCat API를 치지 않도록
     .overrideProvider(RevenueCatClient)
-    .useValue(overrides?.revenueCat ?? new FakeRevenueCat());
+    .useValue(overrides?.revenueCat ?? new FakeRevenueCat())
+    // 항상 오버라이드 — 테스트가 Firebase로 푸시를 보내지 않도록
+    .overrideProvider(PUSH_SENDER)
+    .useValue(overrides?.pushSender ?? new FakePushSender());
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication();
   await app.init();

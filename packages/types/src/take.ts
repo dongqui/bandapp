@@ -15,6 +15,8 @@ export interface Take {
   endMs: number;
   type: TakeCandidateType;
   commentCount: number;
+  /** 내가 안 읽은 코멘트 수 (답글 포함, 내 코멘트 제외) */
+  unreadCommentCount: number;
   /** 원본 타임라인의 startMs~endMs 구간 피크 (길이 PEAK_BUCKETS). 워커가 못 만들었거나 옛 데이터면 null */
   peaks: number[] | null;
   /** PATCH 낙관적 잠금용. 경계를 바꿀 때마다 +1 (2026-09-11 스펙 B 결정 4) */
@@ -51,6 +53,8 @@ export interface TakeComment {
   createdAt: string;
   /** 본문을 수정한 적 있으면 채워진다 → 클라이언트가 "edited"를 그린다 */
   updatedAt: string | null;
+  /** 내 read mark 이후에 다른 사람이 쓴 코멘트 (2026-10-12 스펙 결정 13). 내 코멘트는 항상 false */
+  unread: boolean;
 }
 
 /** 코멘트가 붙는 대상 — take 또는 원본 녹음(세션) */

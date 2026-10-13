@@ -13,6 +13,7 @@ const c = (id: string, atSec: number, createdAt: string, parentId: string | null
   text: id,
   createdAt,
   updatedAt: null,
+  unread: false,
 });
 
 describe("groupThreads", () => {

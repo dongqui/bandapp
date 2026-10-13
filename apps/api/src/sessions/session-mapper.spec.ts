@@ -20,6 +20,7 @@ describe("toSession", () => {
       durationMs: 2716601,
       takeCount: 3,
       commentCount: 2,
+      unreadCommentCount: 0,
       peaks: null,
       peaksKey: null,
       updatedAt: new Date("2026-09-04T10:00:00Z"),
@@ -33,12 +34,13 @@ describe("toSession", () => {
       durationSec: 2717,
       takeCount: 3,
       commentCount: 2,
+      unreadCommentCount: 0,
       peaks: null,
     });
     expect("name" in session).toBe(false);
   });
   it("reports 0 seconds while duration is unknown", () => {
-    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, peaks: null, updatedAt: new Date() }).durationSec).toBe(0);
+    expect(toSession({ id: "s", bandId: "b", title: "t", name: "N", status: "uploading", startedAt: new Date(), durationMs: null, takeCount: 0, commentCount: 0, unreadCommentCount: 0, peaks: null, updatedAt: new Date() }).durationSec).toBe(0);
   });
   it("passes an existing peaks array through unchanged", () => {
     const peaks = Array.from({ length: 128 }, (_, i) => i * 2);
@@ -52,6 +54,7 @@ describe("toSession", () => {
       durationMs: 1000,
       takeCount: 1,
       commentCount: 0,
+      unreadCommentCount: 0,
       peaks,
       updatedAt: new Date("2026-09-04T10:00:00Z"),
     });
@@ -74,7 +77,7 @@ describe("peaksKey", () => {
 
 describe("toSession peaksKey", () => {
   it("peaksKey는 wire Session에 노출되지 않는다", () => {
-    const session = toSession({ id: "s", bandId: "b", title: "t", name: null, status: "ready", startedAt: new Date(), durationMs: 1000, takeCount: 0, commentCount: 0, peaks: null, peaksKey: "bands/b/sessions/s/peaks.bin", updatedAt: new Date() });
+    const session = toSession({ id: "s", bandId: "b", title: "t", name: null, status: "ready", startedAt: new Date(), durationMs: 1000, takeCount: 0, commentCount: 0, unreadCommentCount: 0, peaks: null, peaksKey: "bands/b/sessions/s/peaks.bin", updatedAt: new Date() });
     expect(session).not.toHaveProperty("peaksKey");
   });
 });

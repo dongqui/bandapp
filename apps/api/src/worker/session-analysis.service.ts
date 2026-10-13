@@ -13,6 +13,7 @@ import { DB } from "../db/db.constants.js";
 import type { Db } from "../db/db.module.js";
 import { recordings, sessions, takes } from "../db/schema.js";
 import { peaksKey, takeKey, takesPrefix } from "../sessions/session-mapper.js";
+import { NotificationsService } from "../notifications/notifications.service.js";
 import { StorageService } from "../storage/storage.service.js";
 import { ExecFfmpegRunner, type FfmpegRunner } from "./ffmpeg.js";
 import { PEAKS_PER_SEC, encodePeaksFile, slicePeaks } from "./peaks.js";
@@ -32,6 +33,12 @@ class StaleSessionError extends Error {
   }
 }
 
+/** ready 커밋 뒤 호출되는 훅 — NotificationsService가 구조적으로 만족한다. 워커 테스트는 기록기를 꽂는다 */
+export interface SessionReadyHook {
+  onSessionReady(sessionId: string): Promise<void>;
+}
+const NOOP_READY_HOOK: SessionReadyHook = { onSessionReady: async () => undefined };
+
 /** 분석이 남겨 두는 수동 take의 위치 */
 interface ManualTake {
   index: number;
@@ -50,6 +57,7 @@ export class SessionAnalysisService {
     private readonly charges: BillingChargeService,
     private readonly tmpRoot: string = tmpdir(),
     private readonly retryDelayMs: number = 2000,
+    private readonly readyHook: SessionReadyHook = NOOP_READY_HOOK,
   ) {}
 
   /**
@@ -164,6 +172,8 @@ export class SessionAnalysisService {
         // ready와 charged를 한 트랜잭션에 묶는다 — 밖에서 commit이 실패하면 ready 세션을 환불하거나 예약이 영원히 남는다.
         await this.charges.commit(sessionId, tx);
       });
+      // 알림은 커밋 뒤, 보조 작업 — 실패해도 세션은 ready다 (2026-10-12 스펙 결정 5)
+      await this.readyHook.onSessionReady(sessionId).catch((err) => this.logger.warn(`session ${sessionId}: ready notification failed: ${String(err)}`));
       this.logger.log(`session ${sessionId}: ${rows.length} takes from ${chunks.length} chunks, peaks ${hires ? hires.length : "none"}, sidecar ${sidecarKey ? "uploaded" : "none"}`);
     } catch (err) {
       if (err instanceof StaleSessionError) {
@@ -264,7 +274,7 @@ export class SessionAnalysisService {
 
 export const sessionAnalysisServiceProvider: Provider = {
   provide: SessionAnalysisService,
-  useFactory: (db: Db, storage: StorageService, gemini: GeminiService, charges: BillingChargeService) =>
-    new SessionAnalysisService(db, storage, gemini, new ExecFfmpegRunner(), charges),
-  inject: [DB, StorageService, GeminiService, BillingChargeService],
+  useFactory: (db: Db, storage: StorageService, gemini: GeminiService, charges: BillingChargeService, notifications: NotificationsService) =>
+    new SessionAnalysisService(db, storage, gemini, new ExecFfmpegRunner(), charges, tmpdir(), 2000, notifications),
+  inject: [DB, StorageService, GeminiService, BillingChargeService, NotificationsService],
 };

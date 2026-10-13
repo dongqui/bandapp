@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { Session, SessionStatus } from "@bandapp/types";
+import { unreadSessionCommentCount } from "../comments/comment-unread.js";
 import { sessions } from "../db/schema.js";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -21,6 +22,7 @@ export interface SessionRow {
   durationMs: number | null;
   takeCount: number;
   commentCount: number;
+  unreadCommentCount: number;
   peaks: number[] | null;
   /** peaks.bin R2 키 — wire Session에는 노출하지 않는다 (엔드포인트가 404로 알린다) */
   peaksKey: string | null;
@@ -37,30 +39,34 @@ export function toSession(row: SessionRow): Session {
     durationSec: Math.round((row.durationMs ?? 0) / 1000),
     takeCount: row.takeCount,
     commentCount: row.commentCount,
+    unreadCommentCount: row.unreadCommentCount,
     peaks: row.peaks ?? null,
   };
   if (row.name !== null) session.name = row.name;
   return session;
 }
 
-/** 세션 목록·단건 조회가 공유하는 select 컬럼. commentCount는 session_id로 직접 집계한다 (take 코멘트·원본 녹음 코멘트 모두 포함). */
-export const SESSION_WITH_COUNTS = {
-  id: sessions.id,
-  bandId: sessions.bandId,
-  title: sessions.title,
-  name: sessions.name,
-  status: sessions.status,
-  startedAt: sessions.startedAt,
-  durationMs: sessions.durationMs,
-  takeCount: sessions.takeCount,
-  peaks: sessions.peaks,
-  peaksKey: sessions.peaksKey,
-  // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
-  updatedAt: sessions.updatedAt,
-  // 상관 서브쿼리이므로 "sessions"."id"를 테이블명까지 명시해 comments.id와의 모호성을 없앤다.
-  // 답글은 세지 않는다 (스레드 스펙 결정 5). 원본 녹음 코멘트도 session_id로 함께 센다 (2026-09-09 스펙 결정 6).
-  commentCount: sql<number>`(select count(*)::int from comments c where c.session_id = "sessions"."id" and c.parent_id is null)`,
-};
+/** 세션 목록·단건 조회가 공유하는 select 컬럼. commentCount는 session_id로 직접 집계한다 (take 코멘트·원본 녹음 코멘트 모두 포함). unreadCommentCount는 호출자 기준이라 함수다 */
+export function sessionColumns(userId: string) {
+  return {
+    id: sessions.id,
+    bandId: sessions.bandId,
+    title: sessions.title,
+    name: sessions.name,
+    status: sessions.status,
+    startedAt: sessions.startedAt,
+    durationMs: sessions.durationMs,
+    takeCount: sessions.takeCount,
+    peaks: sessions.peaks,
+    peaksKey: sessions.peaksKey,
+    // retry()가 analyzing 정체 판단에 쓴다 — wire Session에는 노출하지 않는다 (toSession에서 사용 안 함).
+    updatedAt: sessions.updatedAt,
+    // 상관 서브쿼리이므로 "sessions"."id"를 테이블명까지 명시해 comments.id와의 모호성을 없앤다.
+    // 답글은 세지 않는다 (스레드 스펙 결정 5). 원본 녹음 코멘트도 session_id로 함께 센다 (2026-09-09 스펙 결정 6).
+    commentCount: sql<number>`(select count(*)::int from comments c where c.session_id = "sessions"."id" and c.parent_id is null)`,
+    unreadCommentCount: unreadSessionCommentCount(userId),
+  };
+}
 
 export function originalKey(bandId: string, sessionId: string): string {
   return `bands/${bandId}/sessions/${sessionId}/original.m4a`;

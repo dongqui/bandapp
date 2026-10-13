@@ -88,6 +88,12 @@ export function optionalInteger(body: unknown, name: string, range: Range = {}):
   return requireInteger(body, name, range);
 }
 
+export function requireBoolean(body: unknown, name: string): boolean {
+  const value = field(body, name);
+  if (typeof value !== "boolean") throw new BadRequestException(`${name} must be a boolean`);
+  return value;
+}
+
 export function requireOneOf<const T extends readonly string[]>(
   body: unknown,
   name: string,

@@ -47,6 +47,7 @@ describe("comments API", () => {
       text: "Rushing here",
       createdAt: expect.any(String),
       updatedAt: null,
+      unread: false,
     });
     await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 5, text: "Count-in" }).expect(201);
     const res = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
@@ -225,6 +226,72 @@ describe("comments API", () => {
       expect(orig.body).toEqual([]);
       const session = await request(app.getHttpServer()).get(`/sessions/${sessionId}`).set(auth(owner.accessToken)).expect(200);
       expect(session.body.commentCount).toBe(0);
+    });
+  });
+
+  describe("읽음 (2026-10-12)", () => {
+    async function memberOf(id: string, name: string) {
+      const other = await createTestApp({ google: providerUser(id, name), storage: new FakeStorage() });
+      const login = await loginAs(other);
+      await other.close();
+      await db.insert(bandMembers).values({ bandId, userId: login.userId, role: "member" });
+      return login;
+    }
+
+    it("다른 사람 코멘트는 읽기 전엔 unread, 읽으면 false, 그 뒤 새 코멘트(답글 포함)는 다시 unread", async () => {
+      const minsoo = await memberOf("member-1", "Minsoo");
+      const first = await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(minsoo.accessToken)).send({ atSec: 10, text: "first" }).expect(201);
+      let list = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(list.body[0]).toMatchObject({ text: "first", unread: true });
+      let takesRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
+      expect(takesRes.body[0].unreadCommentCount).toBe(1);
+      let sessionRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}`).set(auth(owner.accessToken)).expect(200);
+      expect(sessionRes.body.unreadCommentCount).toBe(1);
+
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments/read`).set(auth(owner.accessToken)).expect(204);
+      list = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(list.body[0].unread).toBe(false);
+      takesRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
+      expect(takesRes.body[0].unreadCommentCount).toBe(0);
+
+      // 읽은 뒤 답글 + 새 코멘트 → 둘 다 unread (답글도 센다)
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(minsoo.accessToken)).send({ parentId: first.body.id, text: "reply" }).expect(201);
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(minsoo.accessToken)).send({ atSec: 20, text: "second" }).expect(201);
+      list = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(list.body.map((c: { text: string; unread: boolean }) => [c.text, c.unread])).toEqual([["first", false], ["reply", true], ["second", true]]);
+      sessionRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}`).set(auth(owner.accessToken)).expect(200);
+      expect(sessionRes.body.unreadCommentCount).toBe(2);
+    });
+
+    it("내 코멘트는 unread가 아니고, 작성자 쪽 unreadCommentCount에도 안 센다", async () => {
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).send({ atSec: 1, text: "mine" }).expect(201);
+      const list = await request(app.getHttpServer()).get(`/takes/${takeId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(list.body[0].unread).toBe(false);
+      const takesRes = await request(app.getHttpServer()).get(`/sessions/${sessionId}/takes`).set(auth(owner.accessToken)).expect(200);
+      expect(takesRes.body[0].unreadCommentCount).toBe(0);
+    });
+
+    it("원본 녹음 코멘트는 세션 read로 읽고, take mark와 섞이지 않는다", async () => {
+      const minsoo = await memberOf("member-2", "Minsoo");
+      await request(app.getHttpServer()).post(`/sessions/${sessionId}/comments`).set(auth(minsoo.accessToken)).send({ atSec: 5, text: "orig" }).expect(201);
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments`).set(auth(minsoo.accessToken)).send({ atSec: 5, text: "take" }).expect(201);
+      // take만 읽음
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments/read`).set(auth(owner.accessToken)).expect(204);
+      let orig = await request(app.getHttpServer()).get(`/sessions/${sessionId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(orig.body[0].unread).toBe(true);
+      await request(app.getHttpServer()).post(`/sessions/${sessionId}/comments/read`).set(auth(owner.accessToken)).expect(204);
+      orig = await request(app.getHttpServer()).get(`/sessions/${sessionId}/comments`).set(auth(owner.accessToken)).expect(200);
+      expect(orig.body[0].unread).toBe(false);
+      // 두 번 읽어도 204 (upsert)
+      await request(app.getHttpServer()).post(`/sessions/${sessionId}/comments/read`).set(auth(owner.accessToken)).expect(204);
+    });
+
+    it("비멤버의 read는 403, 없는 take는 404", async () => {
+      const stranger = await createTestApp({ google: providerUser("stranger"), storage: new FakeStorage() });
+      const s = await loginAs(stranger);
+      await stranger.close();
+      await request(app.getHttpServer()).post(`/takes/${takeId}/comments/read`).set(auth(s.accessToken)).expect(403);
+      await request(app.getHttpServer()).post(`/takes/00000000-0000-0000-0000-000000000000/comments/read`).set(auth(owner.accessToken)).expect(404);
     });
   });
 });

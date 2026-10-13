@@ -2,6 +2,7 @@ import {
   type AnyPgColumn,
   bigint,
   boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -12,6 +13,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -290,4 +292,81 @@ export const comments = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }),
   },
   (t) => [index("comments_take_at_idx").on(t.takeId, t.atMs), index("comments_session_at_idx").on(t.sessionId, t.atMs)],
+);
+
+// 알림 (2026-10-12 스펙)
+export const notificationType = pgEnum("notification_type", ["session_ready", "comment", "reply"]);
+export const notificationCommentScope = pgEnum("notification_comment_scope", ["all", "mine"]);
+export const pushPlatform = pgEnum("push_platform", ["ios", "android"]);
+
+// 밴드별 알림 설정. 행이 없으면 기본값(전부 on, scope all). FK를 band_members에 걸어 밴드를 나가면 설정도 사라진다 (스펙 데이터 절)
+export const notificationSettings = pgTable(
+  "notification_settings",
+  {
+    userId: uuid("user_id").notNull(),
+    bandId: uuid("band_id").notNull(),
+    sessionReady: boolean("session_ready").notNull().default(true),
+    comments: boolean("comments").notNull().default(true),
+    commentScope: notificationCommentScope("comment_scope").notNull().default("all"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.bandId] }),
+    foreignKey({ columns: [t.bandId, t.userId], foreignColumns: [bandMembers.bandId, bandMembers.userId], name: "notification_settings_member_fk" }).onDelete("cascade"),
+  ],
+);
+
+// 인박스 — 수신자 1명당 1행 (스펙 결정 1). 제목·본문은 저장하지 않고 조회 때 join으로 만든다 (결정 8)
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bandId: uuid("band_id")
+      .notNull()
+      .references(() => bands.id, { onDelete: "cascade" }),
+    type: notificationType("type").notNull(),
+    // 행위자. 탈퇴(soft delete)한 사용자는 조회 시 null로 매핑 → "탈퇴한 멤버"
+    actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    takeId: uuid("take_id").references(() => takes.id, { onDelete: "cascade" }),
+    commentId: uuid("comment_id").references(() => comments.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("notifications_user_band_created_idx").on(t.userId, t.bandId, t.createdAt.desc(), t.id.desc())],
+);
+
+// FCM 기기 토큰. 같은 토큰으로 다른 계정이 로그인하면 user_id가 덮어써진다
+export const pushTokens = pgTable("push_tokens", {
+  token: text("token").primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  platform: pushPlatform("platform").notNull(),
+  // 기기 언어 태그. 푸시 문구는 서버가 만들어야 해서 여기서 템플릿을 고른다 (스펙 결정 7)
+  locale: text("locale").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// 코멘트 읽음 — 대상(take 또는 원본 녹음)별 "여기까지 봤다" 시각 1행 (스펙 결정 13). take_id null = 원본 녹음
+export const commentReadMarks = pgTable(
+  "comment_read_marks",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    takeId: uuid("take_id").references(() => takes.id, { onDelete: "cascade" }),
+    readAt: timestamp("read_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  // take_id가 null일 수 있어 PK 대신 NULLS NOT DISTINCT 유니크 (PG 15+)
+  (t) => [unique("comment_read_marks_target_uq").on(t.userId, t.sessionId, t.takeId).nullsNotDistinct()],
 );

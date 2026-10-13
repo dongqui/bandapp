@@ -4,6 +4,7 @@ const KEYS = {
   refreshToken: "auth.refreshToken",
   pendingInviteToken: "invite.pendingToken",
   lastBandId: "band.lastId",
+  pushAsked: "push.asked",
 } as const;
 
 export type SecureKey = keyof typeof KEYS;

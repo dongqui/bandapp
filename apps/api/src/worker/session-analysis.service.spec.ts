@@ -422,4 +422,45 @@ describe("SessionAnalysisService.run", () => {
     expect(sc.calls.commit).toEqual([]);
     expect(sc.calls.refund).toEqual([]);
   });
+
+  describe("session ready 알림 (2026-10-12)", () => {
+    const gemini = { analyzeFile: async () => [] } as unknown as GeminiService;
+    function hook(fail = false) {
+      const calls: string[] = [];
+      return { calls, hook: { onSessionReady: async (id: string) => { calls.push(id); if (fail) throw new Error("boom"); } } };
+    }
+
+    it("ready 커밋 뒤 onSessionReady를 한 번 부른다", async () => {
+      const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+      const { storage } = fakeStorage();
+      const { ffmpeg } = fakeFfmpeg(90 * MIN + 500);
+      const { charges } = fakeCharges();
+      const h = hook();
+      await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0, h.hook).run("s");
+      expect(state.updates.at(-1)).toMatchObject({ status: "ready" });
+      expect(h.calls).toEqual(["s"]);
+    });
+
+    it("다른 워커가 먼저 끝냈으면(StaleSessionError) 부르지 않는다", async () => {
+      const { db } = fakeDb({ id: "s", bandId: "b", status: "analyzing" }, undefined, { staleOnReady: true });
+      const { storage } = fakeStorage();
+      const { ffmpeg } = fakeFfmpeg(90 * MIN + 500);
+      const { charges } = fakeCharges();
+      const h = hook();
+      await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0, h.hook).run("s");
+      expect(h.calls).toEqual([]);
+    });
+
+    it("훅이 던져도 세션은 ready로 남고 failed로 바뀌지 않는다", async () => {
+      const { db, state } = fakeDb({ id: "s", bandId: "b", status: "analyzing" });
+      const { storage } = fakeStorage();
+      const { ffmpeg } = fakeFfmpeg(90 * MIN + 500);
+      const { charges } = fakeCharges();
+      const h = hook(true);
+      await new SessionAnalysisService(db, storage, gemini, ffmpeg, charges, tmp, 0, h.hook).run("s");
+      expect(state.updates.at(-1)).toMatchObject({ status: "ready" });
+      expect(state.updates.some((u) => u.status === "failed")).toBe(false);
+      expect(h.calls).toEqual(["s"]);
+    });
+  });
 });

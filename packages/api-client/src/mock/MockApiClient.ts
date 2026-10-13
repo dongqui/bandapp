@@ -13,22 +13,26 @@ import type {
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
+  NotificationItem,
+  NotificationPage,
+  NotificationSettings,
   Session,
   SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
   UpdateMeInput,
+  UpdateNotificationSettingsInput,
   UploadPartUrl,
   UploadStatus,
   User,
 } from "@bandapp/types";
-import { checkTakeRange, defaultTakeName, DISPLAY_NAME_MAX, neighborsAt, neighborsOf, SUPPORT_BODY_MAX, SUPPORT_TOPICS, TAKE_NAME_MAX, type CreateTakeInput, type UpdateTakeInput } from "@bandapp/types";
+import { checkTakeRange, DEFAULT_NOTIFICATION_SETTINGS, defaultTakeName, DISPLAY_NAME_MAX, neighborsAt, NOTIFICATIONS_PAGE_SIZE, neighborsOf, SUPPORT_BODY_MAX, SUPPORT_TOPICS, TAKE_NAME_MAX, type CreateTakeInput, type UpdateTakeInput } from "@bandapp/types";
 import type { ProfilePhotoUpload, RehearsalApiClient, UploadProgress, UploadSource } from "../client";
 import { ApiError } from "../errors";
 import { UploadRecordingError } from "../upload";
 import { seededUnit } from "./rand";
-import { commentKey, createSeedState, fakePeaks, generateTakes, type MockState } from "./seed";
+import { commentKey, createSeedState, fakePeaks, generateTakes, type MockNotification, type MockState } from "./seed";
 
 const MOCK_USER: User = { id: "u-mock", displayName: "Dongjin", profileImageUrl: null, email: "dongjin@gmail.com" };
 /** 서버 billing/plans.ts와 같은 값 */
@@ -411,8 +415,12 @@ export class MockApiClient implements RehearsalApiClient {
 
   sessions = {
     list: async (bandId: string): Promise<Session[]> =>
-      this.state.sessions.filter((s) => s.bandId === bandId).slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt)),
-    get: async (id: string): Promise<Session> => ({ ...this.mustSession(id) }),
+      this.state.sessions
+        .filter((s) => s.bandId === bandId)
+        .slice()
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        .map((s) => this.withSessionUnread(s)),
+    get: async (id: string): Promise<Session> => this.withSessionUnread(this.mustSession(id)),
     create: async (bandId: string, input: CreateSessionInput): Promise<CreateSessionResult> => {
       const startedAt = new Date(input.startedAt);
       const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -425,6 +433,7 @@ export class MockApiClient implements RehearsalApiClient {
         durationSec: Math.round((input.durationMs ?? 0) / 1000),
         takeCount: 0,
         commentCount: 0,
+        unreadCommentCount: 0,
         peaks: null,
       };
       this.state.sessions.unshift(s);
@@ -448,14 +457,14 @@ export class MockApiClient implements RehearsalApiClient {
       if (s.durationSec === 0) s.durationSec = 2717;
       this.scheduleAnalysis(s.id);
       this.emit();
-      return { ...s };
+      return this.withSessionUnread(s);
     },
     retryAnalysis: async (id: string): Promise<Session> => {
       const s = this.mustSession(id); // failed·waiting_for_time 모두 같은 흐름으로 다시 탄다
       s.status = "analyzing";
       this.scheduleAnalysis(s.id);
       this.emit();
-      return { ...s };
+      return this.withSessionUnread(s);
     },
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
     peaksUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
@@ -487,7 +496,7 @@ export class MockApiClient implements RehearsalApiClient {
       (this.state.takes[sessionId] ?? [])
         .slice()
         .sort((a, b) => a.startMs - b.startMs || a.index - b.index)
-        .map((t) => ({ ...t })),
+        .map((t) => this.withUnread(t)),
     audioUrl: async (): Promise<AudioUrl> => ({ url: "", expiresAt: week() }),
     create: async (sessionId: string, input: CreateTakeInput): Promise<Take> => {
       const session = this.state.sessions.find((x) => x.id === sessionId);
@@ -507,6 +516,7 @@ export class MockApiClient implements RehearsalApiClient {
         endMs: input.endMs,
         type: "PERFORMANCE",
         commentCount: 0,
+        unreadCommentCount: 0,
         peaks: null,
         version: 1,
         audioStatus: "updating",
@@ -521,7 +531,7 @@ export class MockApiClient implements RehearsalApiClient {
         this.emit();
       }, this.recutDelayMs);
       this.emit();
-      return { ...take };
+      return this.withUnread(take);
     },
     update: async (takeId: string, input: UpdateTakeInput): Promise<Take> => {
       const take = this.findTake(takeId);
@@ -548,7 +558,7 @@ export class MockApiClient implements RehearsalApiClient {
         this.emit();
       }, this.recutDelayMs);
       this.emit();
-      return { ...take };
+      return this.withUnread(take);
     },
     rename: async (takeId: string, name: string | null): Promise<Take> => {
       const take = this.findTake(takeId);
@@ -557,7 +567,7 @@ export class MockApiClient implements RehearsalApiClient {
       if (trimmed.length > TAKE_NAME_MAX) throw new ApiError(400, `name must be at most ${TAKE_NAME_MAX} characters`);
       take.name = trimmed.length === 0 ? defaultTakeName(take.index) : trimmed;
       this.emit();
-      return { ...take };
+      return this.withUnread(take);
     },
     remove: async (takeId: string): Promise<void> => {
       const take = this.findTake(takeId);
@@ -575,8 +585,13 @@ export class MockApiClient implements RehearsalApiClient {
   };
 
   comments = {
-    list: async (target: CommentTarget): Promise<TakeComment[]> =>
-      (this.state.comments[commentKey(target)] ?? []).slice().sort((a, b) => a.atSec - b.atSec),
+    list: async (target: CommentTarget): Promise<TakeComment[]> => {
+      const mark = this.state.readMarks[commentKey(target)];
+      return (this.state.comments[commentKey(target)] ?? [])
+        .slice()
+        .sort((a, b) => a.atSec - b.atSec)
+        .map((c) => ({ ...c, unread: this.isUnread(c, mark) }));
+    },
     create: async (target: CommentTarget, input: CreateCommentInput): Promise<TakeComment> => {
       const key = commentKey(target);
       const list = (this.state.comments[key] ??= []);
@@ -609,6 +624,7 @@ export class MockApiClient implements RehearsalApiClient {
         text,
         createdAt: new Date().toISOString(),
         updatedAt: null,
+        unread: false,
       };
       list.push(c);
       // 답글은 commentCount에 세지 않는다
@@ -631,7 +647,84 @@ export class MockApiClient implements RehearsalApiClient {
       if (comment.parentId === null) this.bumpCounts(comment.takeId ? this.findTake(comment.takeId) : undefined, comment.sessionId, -1);
       this.emit();
     },
+    markRead: async (target: CommentTarget): Promise<void> => {
+      this.state.readMarks[commentKey(target)] = new Date().toISOString();
+      this.emit();
+    },
   };
+
+  notifications = {
+    list: async (bandId: string, cursor?: string): Promise<NotificationPage> => {
+      const all = this.state.notifications.filter((n) => n.bandId === bandId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const start = cursor ? Number(cursor) : 0; // mock 커서 = 오프셋
+      const page = all.slice(start, start + NOTIFICATIONS_PAGE_SIZE);
+      const next = start + page.length;
+      return {
+        items: page.map((n) => this.expand(n)),
+        nextCursor: next < all.length ? String(next) : null,
+        remaining: Math.max(0, all.length - next),
+        unreadCount: all.filter((n) => n.readAt === null).length,
+      };
+    },
+    unreadCount: async (bandId: string): Promise<number> => this.state.notifications.filter((n) => n.bandId === bandId && n.readAt === null).length,
+    markRead: async (id: string): Promise<void> => {
+      const n = this.state.notifications.find((x) => x.id === id);
+      if (!n) throw new ApiError(404, "알림을 찾을 수 없어요.");
+      n.readAt ??= new Date().toISOString();
+      this.emit();
+    },
+    markAllRead: async (bandId: string): Promise<void> => {
+      const now = new Date().toISOString();
+      for (const n of this.state.notifications) if (n.bandId === bandId && n.readAt === null) n.readAt = now;
+      this.emit();
+    },
+    settings: async (): Promise<NotificationSettings[]> => this.state.bands.map((b) => this.settingsOf(b.id)),
+    updateSettings: async (bandId: string, input: UpdateNotificationSettingsInput): Promise<NotificationSettings> => {
+      this.mustBand(bandId);
+      if (typeof input.sessionReady !== "boolean" || typeof input.comments !== "boolean" || !["all", "mine"].includes(input.commentScope)) throw new ApiError(400, "invalid settings");
+      this.state.notificationSettings[bandId] = { ...input };
+      this.emit();
+      return this.settingsOf(bandId);
+    },
+    registerPushToken: async (): Promise<void> => undefined,
+    removePushToken: async (): Promise<void> => undefined,
+  };
+
+  /** 서버 규칙과 같게: 내 코멘트 제외, mark 이후 것만 (2026-10-12 스펙 결정 13) */
+  private isUnread(c: TakeComment, mark: string | undefined): boolean {
+    return c.authorId !== MOCK_USER.id && (!mark || c.createdAt > mark);
+  }
+  private unreadIn(target: CommentTarget): number {
+    const mark = this.state.readMarks[commentKey(target)];
+    return (this.state.comments[commentKey(target)] ?? []).filter((c) => this.isUnread(c, mark)).length;
+  }
+  private withUnread(take: Take): Take {
+    return { ...take, unreadCommentCount: this.unreadIn({ takeId: take.id }) };
+  }
+  private sessionUnread(session: Session): number {
+    return (this.state.takes[session.id] ?? []).reduce((n, t) => n + this.unreadIn({ takeId: t.id }), this.unreadIn({ sessionId: session.id }));
+  }
+  private withSessionUnread(session: Session): Session {
+    return { ...session, unreadCommentCount: this.sessionUnread(session) };
+  }
+  private settingsOf(bandId: string): NotificationSettings {
+    return { bandId, ...(this.state.notificationSettings[bandId] ?? DEFAULT_NOTIFICATION_SETTINGS) };
+  }
+  private expand(n: MockNotification): NotificationItem {
+    const session = this.mustSession(n.sessionId);
+    const take = n.takeId ? this.findTake(n.takeId) : undefined;
+    const actor = (this.state.members[n.bandId] ?? []).find((m) => m.id === n.actorId);
+    return {
+      id: n.id,
+      type: n.type,
+      actor: actor ? { id: actor.id, name: actor.name } : null,
+      session: { id: session.id, title: session.title, name: session.name ?? null, startedAt: session.startedAt, takeCount: session.takeCount, durationSec: session.durationSec },
+      take: take ? { id: take.id, index: take.index, name: take.name } : null,
+      comment: n.comment,
+      readAt: n.readAt,
+      createdAt: n.createdAt,
+    };
+  }
 
   /** 서버 TakesService.assertEditable과 같다 — 분석 중(analyzing)·업로드 중만 막는다 (2026-10-08) */
   private assertTakesEditable(session: Session, verb: string): void {

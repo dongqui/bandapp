@@ -1,14 +1,15 @@
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
-import { useTheme } from "@/theme";
+import { font, useTheme } from "@/theme";
 import { AppText } from "./AppText";
 import { Avatar } from "./Avatar";
 import { PressableOpacity } from "./PressableOpacity";
 
-export type TabKey = "sessions" | "band" | "me";
+export type TabKey = "sessions" | "band" | "alerts" | "me";
 
-// 디자인(2026-10-06): 플로팅 필 3탭 + 오른쪽 녹음 버튼. backdrop blur는 RN 기본 뷰로 못 만들어
+// 디자인(2026-10-06): 플로팅 필 4탭 + 오른쪽 녹음 버튼. backdrop blur는 RN 기본 뷰로 못 만들어
 // 반투명 배경만 쓴다. 활성 탭 배경/글자색은 디자인 상수 그대로.
 const PILL_BG = "rgba(26,28,33,0.94)";
 const PILL_BORDER = "rgba(255,255,255,0.07)";
@@ -18,16 +19,20 @@ const RING = "rgba(255,255,255,0.85)";
 
 export function TabBar({
   active,
+  alerts,
   me,
   onPressTab,
   onPressRecord,
 }: {
   active: TabKey;
+  /** Alerts 탭 아이콘 배지 */
+  alerts: { unread: number };
   /** Me 탭 아이콘: 사진이 있으면 사진, 없으면 이니셜 */
   me: { initial: string; photoUri: string | null };
   onPressTab: (tab: TabKey) => void;
   onPressRecord: () => void;
 }) {
+  const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const fg = (tab: TabKey) => (active === tab ? colors.text : INACTIVE_FG);
@@ -94,6 +99,26 @@ export function TabBar({
               strokeLinecap="round"
             />
           </Svg>,
+        )}
+        {cell(
+          "alerts",
+          t("notifications.tab"),
+          <View style={{ position: "relative", width: 22, height: 20, alignItems: "center", justifyContent: "center" }}>
+            <Svg width={20} height={20} viewBox="0 0 20 20" fill="none">
+              <Path d="M4.8 14.5V9a5.2 5.2 0 0 1 10.4 0v5.5l1.4 1.5H3.4z" stroke={fg("alerts")} strokeWidth={1.7} strokeLinejoin="round" strokeLinecap="round" />
+              <Path d="M8.2 18.2a1.9 1.9 0 0 0 3.6 0" stroke={fg("alerts")} strokeWidth={1.7} strokeLinecap="round" />
+            </Svg>
+            {alerts.unread > 0 ? (
+              <View
+                style={{
+                  position: "absolute", top: -5, left: 13, minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8,
+                  backgroundColor: colors.accent, borderWidth: 2, borderColor: "#1A1C21", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                <AppText style={{ fontFamily: font.monoSemiBold, fontSize: 9, color: "#0B0C0E", lineHeight: 11 }}>{alerts.unread > 9 ? "9+" : String(alerts.unread)}</AppText>
+              </View>
+            ) : null}
+          </View>,
         )}
         {cell(
           "me",

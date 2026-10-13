@@ -24,11 +24,33 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     );
   }
 
+  // Firebase(FCM)는 선택이다. 두 설정 파일 경로가 모두 있을 때만 플러그인을 붙인다 — 없으면 push.ts가 "unavailable"로
+  // 돌아 인박스·설정만 동작한다 (2026-10-12 스펙 롤아웃 2). 파일은 Firebase 콘솔에서 받는다 (.env.example 참고).
+  const googleServicesJson = process.env.GOOGLE_SERVICES_JSON;
+  const googleServicesPlist = process.env.GOOGLE_SERVICES_PLIST;
+  const firebaseEnabled = Boolean(googleServicesJson && googleServicesPlist);
+  if (!firebaseEnabled) {
+    console.warn("[app.config] GOOGLE_SERVICES_JSON/PLIST가 없어 이 빌드에는 푸시 알림이 빠진다.");
+  }
+
   const plugins: Plugins = [
     ...((config.plugins ?? []) as Plugins),
     ["expo-dev-client", { launchMode: "most-recent" }],
     ["@react-native-google-signin/google-signin", { iosUrlScheme: googleIosUrlScheme }],
+    ...(firebaseEnabled
+      ? ([
+          "@react-native-firebase/app",
+          "@react-native-firebase/messaging",
+          // react-native-firebase는 iOS에서 static frameworks가 필요하다
+          ["expo-build-properties", { ios: { useFrameworks: "static" } }],
+        ] as Plugins)
+      : []),
   ];
 
-  return { ...config, plugins } as ExpoConfig;
+  return {
+    ...config,
+    plugins,
+    ios: { ...config.ios, ...(firebaseEnabled ? { googleServicesFile: googleServicesPlist } : {}) },
+    android: { ...config.android, ...(firebaseEnabled ? { googleServicesFile: googleServicesJson } : {}) },
+  } as ExpoConfig;
 };

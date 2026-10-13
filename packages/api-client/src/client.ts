@@ -15,12 +15,16 @@ import type {
   InvitePreview,
   JoinInviteResult,
   LoginResponse,
+  NotificationPage,
+  NotificationSettings,
+  RegisterPushTokenInput,
   Session,
   SupportRequestCreated,
   Take,
   TakeComment,
   UpdateCommentInput,
   UpdateMeInput,
+  UpdateNotificationSettingsInput,
   UpdateTakeInput,
   UploadPartUrl,
   UploadStatus,
@@ -157,6 +161,20 @@ export interface RehearsalApiClient {
     update(id: string, input: UpdateCommentInput): Promise<TakeComment>;
     /** 작성자만. 최상위 코멘트를 지우면 답글도 함께 사라진다 */
     remove(id: string): Promise<void>;
+    /** 이 대상의 코멘트를 모두 읽음 처리 (204). unread·unreadCommentCount가 바뀌므로 구독자에게 알린다 */
+    markRead(target: CommentTarget): Promise<void>;
+  };
+  notifications: {
+    /** 밴드 인박스 최신순. cursor는 이전 페이지의 nextCursor — 불투명 값 */
+    list(bandId: string, cursor?: string): Promise<NotificationPage>;
+    unreadCount(bandId: string): Promise<number>;
+    markRead(id: string): Promise<void>;
+    markAllRead(bandId: string): Promise<void>;
+    /** 내가 속한 밴드마다 하나. 저장한 적 없으면 기본값(전부 켜짐) */
+    settings(): Promise<NotificationSettings[]>;
+    updateSettings(bandId: string, input: UpdateNotificationSettingsInput): Promise<NotificationSettings>;
+    registerPushToken(input: RegisterPushTokenInput): Promise<void>;
+    removePushToken(token: string): Promise<void>;
   };
   /** 데이터 변경 통지. 반환값은 구독 해제 함수. */
   subscribe(listener: () => void): () => void;

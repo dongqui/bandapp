@@ -78,3 +78,7 @@ flowchart LR
 | **take 편집** 핸들을 끌거나 시간을 입력해 경계를 고친다. 수동 take 추가. | **take 피드백** 시간 위치가 붙은 코멘트와 답글.                     |
 | <img src="docs/screenshots/band.webp" width="280">                       | <img src="docs/screenshots/plan.webp" width="280">                  |
 | **밴드** 멤버와 파트, 초대, 소유권 이전.                                 | **플랜·사용량** 월 분석 시간과 추가 시간. 여러 밴드가 한 풀을 쓴다. |
+
+서버: 알림 — 코멘트·세션 완료 인박스(밴드별 설정, 30일), FCM 푸시(`FIREBASE_SERVICE_ACCOUNT_JSON` 없으면 로그만)
+
+앱: 알림 — 하단 Alerts 탭(현재 밴드 인박스), Me › Notifications 설정(밴드별). FCM 푸시는 `GOOGLE_SERVICES_JSON/PLIST`가 있을 때만 빌드에 포함되므로 설정 후 dev client 재빌드가 필요하다. 두 파일이 없으면 iOS/Android 모두 Firebase를 아예 빼고 빌드한다(`apps/mobile/react-native.config.js`가 오토링크를 끈다) — 인박스·설정은 동작하고 푸시만 빠진다

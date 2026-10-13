@@ -11,7 +11,7 @@ import { TakesModule } from "./takes/takes.module.js";
 import { CommentsModule } from "./comments/comments.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { AnalysisModule } from "./analysis/analysis.module.js";
-import { NotificationsModule } from "./notifications/notifications.module.js";
+import { NotificationsHttpModule } from "./notifications/notifications-http.module.js";
 import { BillingModule } from "./billing/billing.module.js";
 import { SupportModule } from "./support/support.module.js";
 import { DbModule } from "./db/db.module.js";
@@ -30,7 +30,7 @@ import { DbModule } from "./db/db.module.js";
     CommentsModule,
     StorageModule,
     AnalysisModule,
-    NotificationsModule,
+    NotificationsHttpModule,
     BillingModule,
     SupportModule,
     DbModule,

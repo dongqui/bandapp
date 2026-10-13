@@ -1,5 +1,27 @@
-import { PEAK_BUCKETS, type Band, type BandMember, type CommentTarget, type Session, type Take, type TakeComment } from "@bandapp/types";
+import {
+  PEAK_BUCKETS,
+  type Band,
+  type BandMember,
+  type CommentTarget,
+  type NotificationType,
+  type Session,
+  type Take,
+  type TakeComment,
+  type UpdateNotificationSettingsInput,
+} from "@bandapp/types";
 import { seedOf, seededUnit } from "./rand";
+
+export interface MockNotification {
+  id: string;
+  bandId: string;
+  type: NotificationType;
+  actorId: string; // members[bandId] 안의 id
+  sessionId: string;
+  takeId: string | null;
+  comment: { id: string; atSec: number; text: string } | null;
+  readAt: string | null;
+  createdAt: string;
+}
 
 export interface MockState {
   bands: Band[];
@@ -7,6 +29,11 @@ export interface MockState {
   sessions: Session[];
   takes: Record<string, Take[]>; // sessionId -> takes
   comments: Record<string, TakeComment[]>; // commentKey(target) -> comments
+  /** 인박스 — 서버처럼 압축 저장하고 조회 때 세션·take·멤버로 펼친다 */
+  notifications: MockNotification[];
+  notificationSettings: Record<string, UpdateNotificationSettingsInput>; // bandId → 설정. 없으면 기본값
+  /** commentKey(target) → read_at ISO (2026-10-12 코멘트 읽음) */
+  readMarks: Record<string, string>;
   /** 결제 — 디자인 프로토타입의 bill()과 같은 역할. 풀은 MOCK_USER 것 하나 */
   billing: {
     pool: { plan: "band" | "plus" | null; status: "active" | "grace" | "expired"; usedSec: number; periodEnd: string; willRenew: boolean };
@@ -39,7 +66,7 @@ export function generateTakes(sessionId: string, count: number): Take[] {
     const durationSec = 180 + Math.floor(seededUnit(seed * 91 + i * 17) * 150);
     const startMs = cursorMs;
     cursorMs += durationSec * 1000 + 45_000;
-    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, peaks: fakePeaks(seed * 7 + i), version: 1, audioStatus: "ready" as const };
+    return { id: `${sessionId}-t${i}`, sessionId, index: i, name: `Take ${i + 1}`, durationSec, startMs, endMs: startMs + durationSec * 1000, type: "PERFORMANCE" as const, commentCount: 0, unreadCommentCount: 0, peaks: fakePeaks(seed * 7 + i), version: 1, audioStatus: "ready" as const };
   });
 }
 
@@ -60,6 +87,7 @@ const session = (
   durationSec,
   takeCount,
   commentCount: 0,
+  unreadCommentCount: 0,
   peaks: status === "ready" ? fakePeaks(seedOf(id)) : null,
 });
 
@@ -125,6 +153,29 @@ const SEED_COMMENTS: Record<string, SeedComment[]> = {
   ],
 };
 
+const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+
+/** 디자인 프로토타입의 inbox 샘플(2026-10-12). 앞 2개만 오늘·미읽음 */
+export function seedNotifications(): MockNotification[] {
+  const c = (id: string, actorId: string, sessionId: string, takeIdx: number | null, atSec: number, text: string, h: number, read: boolean, type: NotificationType = "comment"): MockNotification => ({
+    id, bandId: "b1", type, actorId, sessionId, takeId: takeIdx === null ? null : `${sessionId}-t${takeIdx}`, comment: { id: `${id}-c`, atSec, text }, readAt: read ? hoursAgo(h - 1) : null, createdAt: hoursAgo(h),
+  });
+  const s = (id: string, actorId: string, sessionId: string, h: number): MockNotification => ({ id, bandId: "b1", type: "session_ready", actorId, sessionId, takeId: null, comment: null, readAt: hoursAgo(h - 1), createdAt: hoursAgo(h) });
+  return [
+    c("n1", "m2", "s1", 0, 133, "Rushing going into the chorus", 2, false),
+    c("n2", "m4", "s1", 0, 28, "Drums a bit loud in the intro?", 3, false),
+    c("n3", "m3", "s1", 3, 221, "Love the new ending, keep it", 30, true),
+    s("n4", "m3", "s1", 50),
+    c("n5", "m4", "s2", 1, 112, "Bass and kick are finally locked in here", 200, true),
+    s("n6", "m2", "s2", 220),
+    c("n7", "m3", "s3", 4, 47, "Can we drop the second verse for the gig?", 380, true),
+    c("n8", "m2", "s3", 2, 150, "Yeah, let’s end on the chorus instead", 381, true, "reply"),
+    s("n9", "m4", "s3", 400),
+    c("n10", "m3", "s3", 1, 65, "A bit slow here, try 84?", 500, true),
+    s("n11", "m2", "s3", 520),
+  ];
+}
+
 export function createSeedState(): MockState {
   const sessions = [
     session("s9", "2026-10-02T19:00:00+09:00", 4 * 3600, 0, "waiting_for_time"),
@@ -170,6 +221,7 @@ export function createSeedState(): MockState {
         text: r.text,
         createdAt: new Date(base).toISOString(),
         updatedAt: r.edited ? new Date(base + 5 * 60_000).toISOString() : null,
+        unread: false,
       });
       (r.replies ?? []).forEach((rep, i) => {
         list.push({
@@ -183,6 +235,7 @@ export function createSeedState(): MockState {
           text: rep.text,
           createdAt: new Date(base + (i + 1) * 60_000).toISOString(),
           updatedAt: null,
+          unread: false,
         });
       });
     }
@@ -219,6 +272,9 @@ export function createSeedState(): MockState {
     sessions,
     takes,
     comments,
+    notifications: seedNotifications(),
+    notificationSettings: {},
+    readMarks: {},
     // 디자인 기본 시나리오: 무료, 30분 사용
     billing: {
       pool: { plan: null, status: "expired", usedSec: 0, periodEnd: "2026-11-03T00:00:00.000Z", willRenew: false },
